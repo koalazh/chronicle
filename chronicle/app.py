@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .config import AppConfig, load_config, write_runtime_env
 from .doctor import doctor
+from .hermes import HermesRuntimeError
 from .hermes import bootstrap as bootstrap_hermes
 from .host import BranchEngine, ChronicleHost
 from .models import BranchAction, WakeType
@@ -149,6 +150,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HermesRuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/lifetimes/{seat}/reflect")
     async def reflect(seat: str, request: WakeRequest) -> dict[str, Any]:
@@ -165,6 +168,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HermesRuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/branch/definition")
     async def branch_definition() -> dict[str, Any]:

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import AppConfig
-from .hermes import PROFILE_NAMES, HermesClient, cli_version, probe, profile_api_key
+from .hermes import PROFILE_NAMES, cli_version, probe
 from .scenario import ScenarioPack
 
 
@@ -38,28 +38,31 @@ def doctor(config: AppConfig) -> dict[str, Any]:
     add("multiplex_config", "multiplex_profiles: true" in config_text, "gateway.multiplex_profiles=true in actor distribution")
     banned = {"web", "browser", "terminal", "session_search", "delegate_task", "a2a"}
     present = sorted(item for item in banned if item in config_text.casefold())
-    add("toolset_restriction", not present, "memory only" if not present else f"forbidden terms present: {present}")
+    add("toolset_declaration", not present, "memory only" if not present else f"forbidden terms present: {present}")
     runtime_ready = config.llm_configured
     add("llm_config", runtime_ready, "base URL, key and model configured" if runtime_ready else "setup required")
     api_probe = probe(config, list(PROFILE_NAMES.values())) if hermes_ok and profiles_ok else None
     if api_probe:
         add("shared_api_listener", api_probe.health, "health reachable" if api_probe.health else "not reachable")
-        add("profile_routing", api_probe.multiplex, "profile routes reachable" if api_probe.multiplex else "profile routes not verified", required=False)
         profile_list = list(PROFILE_NAMES.values())
-        client = HermesClient(config)
-        valid_status, _ = client.get_json(
-            "/v1/models", profile=profile_list[1], key=profile_api_key(config, profile_list[1])
+        routing_ok = all(api_probe.profile_status.get(profile) == 200 for profile in profile_list) and all(
+            profile in api_probe.profiles for profile in profile_list
         )
-        cross_status, _ = client.get_json(
-            "/v1/models", profile=profile_list[1], key=profile_api_key(config, profile_list[0])
+        add("profile_routing", routing_ok, "profile routes reachable" if routing_ok else "profile routes not verified")
+        toolset_ok = all(api_probe.profile_toolsets.get(profile) == ("memory",) for profile in profile_list)
+        toolset_detail = "memory only" if toolset_ok else str(
+            {profile: list(api_probe.profile_toolsets.get(profile, ())) for profile in profile_list}
         )
+        add("toolset_restriction", toolset_ok, toolset_detail)
         add(
             "profile_key_isolation",
-            valid_status == 200 and cross_status in {401, 403},
-            f"valid={valid_status}, cross_profile={cross_status}",
+            api_probe.valid_profile_status == 200 and api_probe.cross_profile_status in {401, 403},
+            f"valid={api_probe.valid_profile_status}, cross_profile={api_probe.cross_profile_status}",
         )
     else:
         add("shared_api_listener", False, "probe skipped until Chronicle profiles are bootstrapped")
+        add("profile_routing", False, "probe skipped until Chronicle profiles are bootstrapped")
+        add("toolset_restriction", False, "actual Hermes toolset probe unavailable")
         add("profile_key_isolation", False, "probe skipped until Chronicle profiles are bootstrapped")
     add("memory_evolution", "curator" not in config_text.casefold(), "automatic curator path is not in actor distribution")
     ready = all(item["ok"] for item in checks if item["required"])

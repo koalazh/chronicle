@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "bootstrap":
             result = bootstrap(config, force_reset=args.force_reset)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("ready") else 1
         elif args.command == "serve":
             uvicorn.run(create_app(config), host=args.host or config.host, port=args.port or config.port, reload=config.dev)
         else:

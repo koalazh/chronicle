@@ -36,4 +36,10 @@ Bootstrap 使用 `CHRONICLE_HERMES_HOME`，默认是项目内 `.chronicle/hermes
 
 只有在本机 project-local Hermes Gateway 启动、provider key 有效、三个 profile 安装成功，并用 Python HTTP probe 得到健康响应后，才能声称 live Hermes 已接通。健康或 `/v1/models` 只证明 gateway/provider 边界，不等于已经完成一次真实业务 wake；业务 wake 还要保存对应的 session、response 和 Life Record。
 
+Chronicle 的 `doctor` 还会逐个检查三个 Profile 的路由、有效 key 与交叉 key 隔离，以及 `/v1/toolsets` 的实际启用项。只有实际启用项严格为 `memory` 时，toolset restriction 才会通过；Actor Distribution 配置文本本身不能替代现场探针。
+
+`bootstrap` 负责创建或同步 project-local Profiles，并返回独立的 `ready` 与 `readiness` 字段。Profile 文件生成不等于 Gateway 已就绪；若现场探针失败，CLI 以非零状态退出，API 保留可读的未就绪结果，前端不得显示“人物已准备好”。
+
+live Wake 的 Hermes Session、路由、toolset 或模型调用失败会在 live 边界抛出安全错误，不再静默回退到 fixture。fixture 只能在显式的非 live 请求中使用。
+
 当前实现不把这些现场结果硬编码为测试通过，也不打印 API Key。

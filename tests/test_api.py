@@ -50,3 +50,12 @@ def test_setup_writes_a_server_side_masked_runtime(app_config):
     config = client.get("/api/config").json()
     assert config["setup_required"] is False
     assert config["api_key"] == "••••••••••••"
+
+
+def test_live_wake_fails_closed_without_hermes(app_config):
+    client = TestClient(create_app(app_config))
+
+    response = client.post("/api/lifetimes/A/wake", json={"tick": 4, "live": True})
+
+    assert response.status_code == 503
+    assert "live Hermes" in response.json()["detail"]

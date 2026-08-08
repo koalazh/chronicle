@@ -8,7 +8,14 @@ from typing import Any
 
 from .config import AppConfig
 from .db import ChronicleDB, stable_hash
-from .hermes import PROFILE_NAMES, HermesClient, parse_actor_response, wake_messages
+from .hermes import (
+    PROFILE_NAMES,
+    HermesClient,
+    HermesRuntimeError,
+    parse_actor_response,
+    probe,
+    wake_messages,
+)
 from .models import ActionType, ActorWakeResponse, BeliefUpdate, BranchAction, Intention, WakeType
 from .scenario import ScenarioPack
 
@@ -268,32 +275,32 @@ class ChronicleHost:
         session_id: str | None = None
         response: ActorWakeResponse
         protocol_error = ""
-        if live and self.config.llm_configured:
+        if live:
+            if not self.config.llm_configured:
+                raise HermesRuntimeError("live Hermes is not configured")
             key = self._profile_key(profile)
-            if key:
-                client = HermesClient(self.config)
-                wake_id = f"{seat.lower()}-{tick}-{wake_type.value}"
-                session_id = client.create_fresh_session(profile, key, wake_id)
-                if session_id:
-                    try:
-                        raw, session_id = client.chat(
-                            profile,
-                            key,
-                            wake_messages(runtime_input, wake_type.value),
-                            session_id,
-                            f"chronicle:{seat}",
-                        )
-                        response = parse_actor_response(raw)
-                        source = "hermes"
-                    except Exception as exc:
-                        protocol_error = str(exc)
-                        response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)
-                else:
-                    protocol_error = "Hermes Fresh Session API unavailable"
-                    response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)
-            else:
-                protocol_error = "profile API_SERVER_KEY is not configured"
-                response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)
+            if not key:
+                raise HermesRuntimeError("live Hermes Profile key is not configured")
+            readiness = probe(self.config, [profile])
+            if not readiness.ready_for(profile):
+                raise HermesRuntimeError("live Hermes readiness check failed")
+            client = HermesClient(self.config)
+            wake_id = f"{seat.lower()}-{tick}-{wake_type.value}"
+            session_id = client.create_fresh_session(profile, key, wake_id)
+            if not session_id:
+                raise HermesRuntimeError("live Hermes Fresh Session is unavailable")
+            try:
+                raw, session_id = client.chat(
+                    profile,
+                    key,
+                    wake_messages(runtime_input, wake_type.value),
+                    session_id,
+                    f"chronicle:{seat}",
+                )
+                response = parse_actor_response(raw)
+                source = "hermes"
+            except Exception as exc:
+                raise HermesRuntimeError("live Hermes wake failed") from exc
         else:
             response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)
 

@@ -33,7 +33,28 @@ class HermesProbeResult:
     models: dict[str, Any]
     profiles: list[str]
     multiplex: bool
+    profile_status: dict[str, int]
+    profile_toolsets: dict[str, tuple[str, ...]]
+    valid_profile_status: int
+    cross_profile_status: int
     errors: tuple[str, ...] = ()
+
+    def ready_for(self, profile: str) -> bool:
+        return (
+            self.health
+            and profile in self.profiles
+            and self.profile_status.get(profile) == 200
+            and self.profile_toolsets.get(profile) == ("memory",)
+        )
+
+    def ready_for_all(self, profiles: list[str] | None = None) -> bool:
+        required = profiles or list(self.profile_status)
+        return (
+            bool(required)
+            and all(self.ready_for(profile) for profile in required)
+            and self.valid_profile_status == 200
+            and self.cross_profile_status in {401, 403}
+        )
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -42,10 +63,18 @@ class HermesProbeResult:
             "health": self.health,
             "profiles": self.profiles,
             "multiplex": self.multiplex,
+            "profile_status": self.profile_status,
+            "profile_toolsets": {profile: list(names) for profile, names in self.profile_toolsets.items()},
+            "valid_profile_status": self.valid_profile_status,
+            "cross_profile_status": self.cross_profile_status,
             "capabilities": sorted(self.capabilities.keys()),
             "model_count": len(self.models.get("data", [])) if isinstance(self.models, dict) else 0,
             "errors": list(self.errors),
         }
+
+
+class HermesRuntimeError(RuntimeError):
+    """A safe, user-facing failure at the live Hermes boundary."""
 
 
 class HermesClient:
@@ -139,6 +168,23 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
+def enabled_toolset_names(payload: dict[str, Any]) -> tuple[str, ...]:
+    entries: Any = payload.get("data", payload.get("toolsets", []))
+    if isinstance(entries, dict):
+        entries = entries.get("data", entries.get("toolsets", []))
+    if not isinstance(entries, list):
+        return ()
+    names: set[str] = set()
+    for entry in entries:
+        if isinstance(entry, str):
+            names.add(entry)
+        elif isinstance(entry, dict) and entry.get("enabled", True) is not False:
+            name = entry.get("name") or entry.get("id")
+            if name:
+                names.add(str(name))
+    return tuple(sorted(names))
+
+
 def parse_actor_response(text: str) -> ActorWakeResponse:
     cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
@@ -211,19 +257,6 @@ def cli_version(config: AppConfig) -> str:
     return (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr) else "unknown"
 
 
-def _profile_names(config: AppConfig) -> list[str]:
-    try:
-        result = _run_cli(config, ["profile", "list"])
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    names: list[str] = []
-    for line in result.stdout.splitlines():
-        for name in PROFILE_NAMES.values():
-            if name in line:
-                names.append(name)
-    return sorted(set(names))
-
-
 def profile_api_key(config: AppConfig, profile: str) -> str:
     key_name = f"CHRONICLE_{profile.upper().replace('-', '_')}_API_SERVER_KEY"
     runtime_values = _read_env_file(config.runtime_env_path)
@@ -239,23 +272,45 @@ def probe(config: AppConfig, profiles: list[str] | None = None) -> HermesProbeRe
     client = HermesClient(config)
     health_status, health = client.get_json("/health")
     gateway_key = _read_env_file(config.hermes_home / ".env").get("API_SERVER_KEY", "")
-    _, capabilities = client.get_json("/v1/capabilities", key=gateway_key)
-    _, models = client.get_json("/v1/models", key=gateway_key)
+    capabilities_status, capabilities = client.get_json("/v1/capabilities", key=gateway_key)
+    models_status, models = client.get_json("/v1/models", key=gateway_key)
     errors: list[str] = []
     if health_status != 200:
         errors.append(f"shared Hermes health unavailable ({health_status})")
+    if capabilities_status != 200:
+        errors.append(f"Hermes capabilities unavailable ({capabilities_status})")
+    if models_status != 200:
+        errors.append(f"Hermes gateway models unavailable ({models_status})")
     multiplex = bool(capabilities.get("multiplex_profiles") or capabilities.get("features", {}).get("multiplex_profiles"))
-    served = _profile_names(config)
-    if profiles:
-        for profile in profiles:
-            _, profile_models = client.get_json(
-                "/v1/models", profile=profile, key=profile_api_key(config, profile)
-            )
-            if profile_models:
-                served_model = profile_models.get("data", [])
-                if served_model:
-                    served.append(profile)
+    served: list[str] = []
+    profile_status: dict[str, int] = {}
+    profile_toolsets: dict[str, tuple[str, ...]] = {}
+    for profile in profiles:
+        profile_key = profile_api_key(config, profile)
+        profile_model_status, profile_models = client.get_json(
+            "/v1/models", profile=profile, key=profile_key
+        )
+        profile_status[profile] = profile_model_status
+        if profile_model_status == 200 and isinstance(profile_models.get("data"), list) and profile_models["data"]:
+            served.append(profile)
+        else:
+            errors.append(f"profile route unavailable for {profile} ({profile_model_status})")
+        toolset_status, toolset_payload = client.get_json("/v1/toolsets", profile=profile, key=profile_key)
+        profile_toolsets[profile] = enabled_toolset_names(toolset_payload) if toolset_status == 200 else ()
+        if toolset_status != 200:
+            errors.append(f"profile toolsets unavailable for {profile} ({toolset_status})")
     multiplex = multiplex or len(set(served)) > 1
+    valid_profile_status = 0
+    cross_profile_status = 0
+    if len(profiles) >= 2:
+        valid_profile = profiles[1]
+        cross_profile = profiles[0]
+        valid_profile_status, _ = client.get_json(
+            "/v1/models", profile=valid_profile, key=profile_api_key(config, valid_profile)
+        )
+        cross_profile_status, _ = client.get_json(
+            "/v1/models", profile=valid_profile, key=profile_api_key(config, cross_profile)
+        )
     return HermesProbeResult(
         available=available,
         version=version,
@@ -265,6 +320,10 @@ def probe(config: AppConfig, profiles: list[str] | None = None) -> HermesProbeRe
         models=models,
         profiles=sorted(set(served)),
         multiplex=multiplex,
+        profile_status=profile_status,
+        profile_toolsets=profile_toolsets,
+        valid_profile_status=valid_profile_status,
+        cross_profile_status=cross_profile_status,
         errors=tuple(dict.fromkeys(errors)),
     )
 
@@ -396,8 +455,11 @@ def bootstrap(config: AppConfig, *, force_reset: bool = False) -> dict[str, Any]
         )
     gateway_env = _write_gateway_env(home, keys[PROFILE_NAMES["A"]])
     runtime_env = _write_runtime_config(config, keys)
+    readiness = probe(config, list(PROFILE_NAMES.values()))
     return {
         "status": "GENESIS CONSISTENT",
+        "ready": readiness.ready_for_all(list(PROFILE_NAMES.values())),
+        "readiness": readiness.summary(),
         "profiles": list(PROFILE_NAMES.values()),
         "installed": installed,
         "runtime_env": str(runtime_env),

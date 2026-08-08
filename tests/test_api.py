@@ -26,6 +26,9 @@ def test_api_exposes_canon_sources_branch_and_masked_setup(app_config):
     assert "CHRONICLE" not in setup.get("api_key", "")
     assert client.post("/api/setup/test", json={"base_url":"https://example.test/v1", "api_key":"", "model":"demo"}).json()["ok"] is False
 
+    early_branch = client.post("/api/branch")
+    assert early_branch.status_code == 409
+    assert client.post("/api/canon/advance", json={"tick": 44}).status_code == 200
     branch = client.post("/api/branch")
     assert branch.status_code == 200
     branch_id = branch.json()["id"]

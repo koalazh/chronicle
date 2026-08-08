@@ -16,6 +16,20 @@ def test_host_has_one_way_canon_clock(host):
         host.set_tick(3)
 
 
+def test_world_state_reduces_all_declared_effect_types(host):
+    opening = host.world_state(0)
+    assert opening["season"]["chronicle"] == "spring"
+    assert opening["effects"]["season_open"]["chronicle"] == "spring"
+
+    fork = host.world_state(44)
+    assert fork["court_decision"]["southern_command_proposal"] == "raised"
+    assert fork["supply_state"]["relief_order"] == "constrained"
+
+    terminal = host.world_state(78)
+    assert terminal["capital_status"] == "fallen"
+    assert terminal["simulation_boundary"] is True
+
+
 def test_runtime_input_is_opaque_and_seat_scoped(host):
     runtime_input = host._runtime_input("A", 44, WakeType.OBSERVATION)
     encoded = json.dumps(runtime_input, ensure_ascii=False)

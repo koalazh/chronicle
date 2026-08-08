@@ -419,6 +419,17 @@ class ChronicleDB:
             )
         return branch_id
 
+    def branch_for_fork(self, fork_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM branches WHERE fork_id = ? ORDER BY created_at LIMIT 1", (fork_id,)
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["state_json"] = json.loads(item["state_json"])
+        return item
+
     def branch(self, branch_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()

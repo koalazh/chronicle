@@ -182,7 +182,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.post("/api/branch")
     async def create_branch() -> dict[str, Any]:
         active = host()
-        return BranchEngine(active).create()
+        try:
+            return BranchEngine(active).create()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/branch/{branch_id}")
     async def branch(branch_id: str) -> dict[str, Any]:

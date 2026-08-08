@@ -58,11 +58,20 @@ class ChronicleHost:
             "command_state": "active",
             "force_posture": {},
             "information_state": {},
+            "season": {},
+            "court_decision": {},
+            "relief_order": {},
+            "supply_state": {},
+            "command_conflict": {},
+            "belief_pressure": {},
+            "simulation_boundary": False,
+            "effects": {},
             "last_event_id": None,
         }
         for event in self.pack.event_at_or_before(tick):
             state["last_event_id"] = event.id
             for effect in event.world_effects:
+                state["effects"].setdefault(effect.type, {})[effect.target] = effect.value
                 if effect.type == "control_change":
                     state["location_control"][effect.target] = effect.value
                 elif effect.type == "route_pressure":
@@ -75,6 +84,25 @@ class ChronicleHost:
                     state["force_posture"][effect.target] = effect.value
                 elif effect.type in {"information_state", "capital_security"}:
                     state["information_state"][effect.target] = effect.value
+                elif effect.type in {
+                    "season_open",
+                    "court_decision",
+                    "relief_order",
+                    "supply_state",
+                    "command_conflict",
+                    "belief_pressure",
+                }:
+                    projection = {
+                        "season_open": "season",
+                        "court_decision": "court_decision",
+                        "relief_order": "relief_order",
+                        "supply_state": "supply_state",
+                        "command_conflict": "command_conflict",
+                        "belief_pressure": "belief_pressure",
+                    }[effect.type]
+                    state[projection][effect.target] = effect.value
+                elif effect.type == "simulation_boundary":
+                    state["simulation_boundary"] = bool(effect.value)
         return state
 
     def timeline(self, tick: int | None = None) -> list[dict[str, Any]]:
@@ -582,6 +610,10 @@ class BranchEngine:
     def create(self) -> dict[str, Any]:
         fork = self.host.pack.fork
         event = self.host.pack.event_by_id[fork.event_id]
+        if self.host.current_tick < event.tick:
+            raise ValueError("branch is unavailable before the fork tick")
+        if self.host.db.branch_for_fork(fork.id) is not None:
+            raise ValueError("branch already exists for this fork")
         state = {
             "premise": fork.runtime_premise,
             "fork_tick": event.tick,
@@ -616,12 +648,24 @@ class BranchEngine:
         state["tick"] = next_tick
         state["day_offset"] = next_tick - state["fork_tick"]
         if action.type == ActionType.SEND_MESSAGE:
-            state["messages"].append({"from": seat, "recipient": action.recipient, "payload": action.payload, "delivery_tick": next_tick + 1, "status": "in_transit"})
+            route = self._route_between(state["locations"][seat], state["locations"][action.recipient])
+            state["messages"].append(
+                {
+                    "from": seat,
+                    "recipient": action.recipient,
+                    "payload": action.payload,
+                    "delivery_tick": next_tick + route.travel_days,
+                    "status": "in_transit",
+                }
+            )
         elif action.type == ActionType.ISSUE_ORDER:
             state["orders"].append({"from": seat, "target": action.target, "payload": action.payload, "status": "accepted"})
         elif action.type in {ActionType.MOVE_PRINCIPAL, ActionType.PREPARE_MOVEMENT, ActionType.REDEPLOY_FORCE}:
             state["locations"][seat] = action.target
-        state["world"] = self.host.world_state(min(next_tick, self.host.pack.manifest.end_tick))
+        state["world"]["tick"] = next_tick
+        state["world"]["branch_locations"] = state["locations"]
+        state["world"]["branch_orders"] = state["orders"]
+        state["world"]["branch_messages"] = state["messages"]
         boundary_reason = ""
         status = "active"
         if state["day_offset"] >= self.host.pack.fork.max_days:
@@ -637,9 +681,28 @@ class BranchEngine:
             return {"status": "rejected", "reason": "Seat authority does not include this action"}
         if action.type == ActionType.SEND_MESSAGE and (not action.recipient or not action.payload):
             return {"status": "rejected", "reason": "recipient and payload are required"}
+        if action.type == ActionType.SEND_MESSAGE:
+            if action.recipient not in self.host.pack.actor_by_seat or action.recipient == actor.seat:
+                return {"status": "rejected", "reason": "recipient must be another known Seat"}
+            try:
+                self._route_between(state["locations"][actor.seat], state["locations"][action.recipient])
+            except ValueError as exc:
+                return {"status": "rejected", "reason": str(exc)}
         if action.type in {ActionType.MOVE_PRINCIPAL, ActionType.PREPARE_MOVEMENT, ActionType.REDEPLOY_FORCE}:
             if action.target not in self.host.pack.location_by_id:
                 return {"status": "rejected", "reason": "target is not a known location"}
+            if action.target == state["locations"][actor.seat]:
+                return {"status": "rejected", "reason": "target is already the current location"}
+            try:
+                self._route_between(state["locations"][actor.seat], action.target)
+            except ValueError as exc:
+                return {"status": "rejected", "reason": str(exc)}
         if action.type == ActionType.ISSUE_ORDER and not action.payload:
             return {"status": "rejected", "reason": "an order needs a payload"}
         return {"status": "accepted", "provenance": "branch_derived", "message": "Host accepted the intention and advanced one simulated day"}
+
+    def _route_between(self, origin: str, destination: str) -> Any:
+        for route in self.host.pack.routes:
+            if {route.from_location, route.to_location} == {origin, destination}:
+                return route
+        raise ValueError("no defined route connects the current locations")

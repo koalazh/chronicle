@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from chronicle.hermes import actor_protocol_prompt, parse_actor_response, wake_messages
 
@@ -36,3 +39,11 @@ def test_wake_prompt_contains_protocol_without_world_names():
     assert "omniscient" in prompt
     assert "崇祯" not in messages[-1]["content"]
     assert "capital" not in messages[-1]["content"]
+
+
+def test_actor_distribution_declines_recent_builtin_toolset():
+    root = Path(__file__).parents[1]
+    config = yaml.safe_load((root / "hermes" / "chronicle-actor" / "config.yaml").read_text(encoding="utf-8"))
+
+    assert config["platform_toolsets"]["api_server"] == ["memory"]
+    assert config["known_builtin_toolsets"]["api_server"] == ["bfl"]

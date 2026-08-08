@@ -210,7 +210,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/api/doctor")
     async def run_doctor() -> dict[str, Any]:
-        return doctor(current_config())
+        return await asyncio.to_thread(doctor, current_config())
 
     @app.post("/api/setup/test")
     async def setup_test(request: SetupRequest) -> dict[str, Any]:

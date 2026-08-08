@@ -105,7 +105,7 @@ class HermesClient:
             response = httpx.post(
                 self._url(profile, "/api/sessions"),
                 headers=self._headers(key),
-                json={"id": session_id, "title": f"Chronicle {wake_id}"},
+                json={"id": session_id, "title": f"Chronicle {session_id}"},
                 timeout=15,
             )
             if response.status_code in {200, 201, 409}:

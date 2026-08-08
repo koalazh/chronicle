@@ -42,5 +42,8 @@ def test_frontend_uses_chinese_product_language():
         "方法与边界",
         "hermes_ready",
         "bootstrapResult.ready",
+        "pendingAction",
+        "正在读取",
+        "drawer-loading",
     ):
         assert required in source

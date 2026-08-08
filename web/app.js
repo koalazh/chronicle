@@ -45,6 +45,12 @@ const state = {
   setupMessage: null,
   formDraft: null,
   notice: null,
+  pendingAction: null,
+  eventLoading: false,
+  sourceLoading: false,
+  eventRequest: 0,
+  sourceRequest: 0,
+  lifetimeRequest: 0,
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -167,6 +173,16 @@ function branchResultText(result) {
 function setNotice(text, error = false) {
   state.notice = { text, error };
 }
+
+const pendingActions = new Set([
+  "advance",
+  "create-branch",
+  "wake",
+  "reflect",
+  "branch-step",
+  "test-setup",
+  "save-settings",
+]);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -306,9 +322,9 @@ function renderChronicle() {
     '<section class="chronicle-layout">' +
       '<aside class="timeline" aria-label="历史时间线"><div class="timeline-heading"><span class="section-label">历史时间线</span><span class="timeline-range">' + state.timeline.length + ' 个节点</span></div>' + timeline + '</aside>' +
       '<section class="observatory">' +
-        '<div class="observatory-top"><div><div class="date-display">' + escapeHtml(currentDate) + '</div><div class="tick-display">' + dayLabel(state.tick) + ' · 既定历史</div></div><button class="advance-button" data-action="advance" ' + (state.tick >= finalTick() ? "disabled" : "") + '>推进一天&nbsp; →</button></div>' +
+        '<div class="observatory-top"><div><div class="date-display">' + escapeHtml(currentDate) + '</div><div class="tick-display">' + dayLabel(state.tick) + ' · 既定历史</div></div><button class="advance-button" data-action="advance" ' + (state.tick >= finalTick() ? "disabled" : "") + '>' + (state.pendingAction === "advance" ? "正在读取…" : "推进一天&nbsp; →") + '</button></div>' +
         '<div class="map-frame"><svg class="map-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="甲申路线与消息图">' + mapLines + mapNodes + '<path class="map-route" d="M13 64 C36 50 51 38 70 44 S82 53 91 30" vector-effect="non-scaling-stroke"></path><circle class="map-message" cx="58" cy="43" r="1.2"></circle></svg><div class="map-legend"><span>历史路线</span><span>传递中的消息</span></div></div>' +
-        '<div class="current-event"><div class="event-eyebrow"><span>当前节点</span><span>〔' + escapeHtml(evidenceLabel(assertion.evidence_status)) + '〕</span></div><h2 class="event-title">' + escapeHtml(displayEventTitle(event)) + '</h2><p class="event-copy">' + escapeHtml(eventText) + '</p><div class="event-actions">' + sourceButton + (forkVisible ? '<button class="text-button" data-action="create-branch">进入受限推演&nbsp; ↘</button>' : "") + '</div></div>' +
+        '<div class="current-event"><div class="event-eyebrow"><span>当前节点</span><span>〔' + escapeHtml(evidenceLabel(assertion.evidence_status)) + '〕</span></div><h2 class="event-title">' + escapeHtml(displayEventTitle(event)) + '</h2><p class="event-copy">' + (state.eventLoading ? "正在读取这个历史节点……" : escapeHtml(eventText)) + '</p><div class="event-actions">' + sourceButton + (forkVisible ? '<button class="text-button" data-action="create-branch">' + (state.pendingAction === "create-branch" ? "正在建立…" : "进入受限推演&nbsp; ↘") + '</button>' : "") + '</div></div>' +
       '</section>' +
       '<aside class="context-panel"><div class="section-label">信息送达</div><h2 class="context-title">谁已经知道</h2><p class="context-copy">世界已经发生，不等于每个人都已经获知。</p><div class="knowledge-list">' + knowledge + '</div><div class="context-note">信息抵达的时间差，就是这次观测的一部分。</div></aside>' +
     '</section>' +
@@ -327,7 +343,7 @@ function renderLifetimes() {
         '<h3>' + escapeHtml(actor.display_name) + '</h3>' +
         '<p>' + escapeHtml(actor.description) + '</p>' +
         '<div class="lifetime-stats"><div class="stat"><strong>' + value + '</strong><span>收到的信息</span></div><div class="stat"><strong>' + (state.lifetimeLoading && !summary ? "读取中" : formatCount(stats.intentions)) + '</strong><span>形成的判断</span></div><div class="stat"><strong>' + (state.lifetimeLoading && !summary ? "读取中" : formatCount(stats.memories)) + '</strong><span>长期记忆</span></div></div>' +
-        '<button class="open-lifetime" data-seat="' + escapeHtml(actor.seat) + '">查看经历&nbsp; →</button>' +
+        '<button class="open-lifetime" data-seat="' + escapeHtml(actor.seat) + '"' + (state.lifetimeLoading ? " disabled" : "") + '>查看经历&nbsp; →</button>' +
       '</article>';
     }).join("");
     renderShell(
@@ -354,15 +370,15 @@ function renderLifetimes() {
   const memoryText = String(life.memory?.text || "").trim() || "暂未形成长期记忆。需要经过重新理解，经验才可能被保留下来。";
   const runtimeLabel = state.config?.hermes_ready ? "已通过 Hermes 就绪检查" : "确定性观测";
   const seats = state.scenario.actors.map((item) =>
-    '<button class="' + (item.seat === state.lifetimeSeat ? "active" : "") + '" data-seat="' + escapeHtml(item.seat) + '">' + escapeHtml(item.display_name) + '</button>'
+    '<button class="' + (item.seat === state.lifetimeSeat ? "active" : "") + '" data-seat="' + escapeHtml(item.seat) + '"' + (state.lifetimeLoading ? " disabled" : "") + '>' + escapeHtml(item.display_name) + '</button>'
   ).join("");
   const reflectButton = records.length
-    ? '<button class="secondary-button" data-action="reflect">重新理解这段经历</button>'
+    ? '<button class="secondary-button" data-action="reflect">' + (state.pendingAction === "reflect" ? "正在重新理解…" : "重新理解这段经历") + '</button>'
     : "";
   const page = '<main class="page" data-testid="lifetime-page">' +
     '<section class="page-header"><div><div class="page-kicker">人物经历</div><h1 class="page-title">' + escapeHtml(actor.display_name) + '的经历</h1></div><p class="page-lede">这不是聊天记录，而是一条由观察、判断、现实反馈与长期记忆组成的经历线。</p></section>' +
     '<section class="lifetime-detail"><aside class="lifetime-rail"><div class="section-label">选择人物</div><div class="seat-switcher">' + seats + '</div><div class="context-note">只展示观测台能够追溯的经历；人物没有收到的信息不会进入这里。</div></aside>' +
-      '<section class="life-content"><div class="life-intro"><div><h2>' + dayLabel(state.tick) + '</h2><p>' + formatCount(life.stats?.observations) + ' 条信息 · ' + formatCount(life.stats?.intentions) + ' 个判断 · ' + formatCount(life.stats?.memories) + ' 条长期记忆</p><p class="life-mode-note">当前运行方式：' + runtimeLabel + '</p></div><div class="life-actions"><button class="primary-button" data-action="wake">记录一次观察</button>' + reflectButton + '</div></div>' +
+      '<section class="life-content"><div class="life-intro"><div><h2>' + dayLabel(state.tick) + '</h2><p>' + formatCount(life.stats?.observations) + ' 条信息 · ' + formatCount(life.stats?.intentions) + ' 个判断 · ' + formatCount(life.stats?.memories) + ' 条长期记忆</p><p class="life-mode-note">当前运行方式：' + runtimeLabel + '</p></div><div class="life-actions"><button class="primary-button" data-action="wake">' + (state.pendingAction === "wake" ? "正在记录…" : "记录一次观察") + '</button>' + reflectButton + '</div></div>' +
         '<div class="life-line"><div class="section-label">经历记录</div><div class="life-line-track"><span class="life-marker" style="left:8%" data-label="观察"></span><span class="life-marker contradiction" style="left:55%" data-label="现实反馈"></span><span class="life-marker memory" style="left:82%" data-label="长期记忆"></span></div>' + recordMarkup + '</div>' +
         '<div class="memory-lineage"><div class="section-label">长期记忆</div><h3>' + (memoryVersions.length ? "已经形成可携带的经验" : "暂未形成长期记忆") + '</h3><p>' + escapeHtml(memoryText) + '</p><div class="lineage-flow"><span>收到信息</span><span>形成判断</span><span>现实反馈</span><span>重新理解</span><span>长期记忆</span></div></div>' +
       '</section>' +
@@ -378,7 +394,7 @@ function renderBranch() {
   if (!branch) {
     const unavailable = !canOpenBranch()
       ? '<div class="branch-unavailable"><strong>尚未到达这个时间点</strong><span>分叉点位于 ' + escapeHtml(shortDate(forkEvent?.native_date || "")) + '。推进观测台到这里后，才可以进入受限推演。</span></div>'
-      : '<div class="branch-actions"><button class="primary-button" data-action="create-branch">进入受限推演&nbsp; ↘</button></div>';
+      : '<div class="branch-actions"><button class="primary-button" data-action="create-branch">' + (state.pendingAction === "create-branch" ? "正在建立…" : "进入受限推演&nbsp; ↘") + '</button></div>';
     renderShell(
       '<main class="page" data-testid="branch-page"><section class="page-header"><div><div class="page-kicker">受限推演</div><h1 class="page-title">如果这项提议被接受？</h1></div><p class="page-lede">这不是改变历史的按钮，而是从一个真实出现过的历史节点出发，沿着观测台能够支撑的规则前进。</p></section><section class="branch-hero"><div><div class="section-label">历史分叉点</div><h2>' + escapeHtml(fork.display_name || "一次历史提议") + '</h2><p>这项提议在既定历史中没有被采纳。到达对应时间点后，观测台允许只进行一次、最多十四天的受限推演。</p>' + unavailable + '</div><div class="branch-premise"><strong>这次推演的边界</strong><span>最多前进十四天。行动必须符合人物权限和已定义的历史规则。不会由模型续写未被约束的历史。</span></div></section></main>',
       "branch"
@@ -397,7 +413,7 @@ function renderBranch() {
     .join("");
   const controls = boundary
     ? '<div class="boundary"><h2>推演在这里停止。</h2><p>当前状态仍然可以追溯；继续前进将需要未经支持的历史假设。</p><ul><li>不由模型自动补写历史事件</li><li>保留当前人物与世界状态</li><li>到达十四天边界后结束</li></ul></div>'
-    : '<div class="branch-controls"><label for="branch-seat">人物</label><select id="branch-seat"><option value="A">崇祯</option><option value="B">李自成</option><option value="C">吴三桂</option></select><label for="branch-action">下一步</label><select id="branch-action">' + branchActionOptions + '</select><button class="primary-button" data-action="branch-step">提交这一步&nbsp; →</button></div>';
+    : '<div class="branch-controls"><label for="branch-seat">人物</label><select id="branch-seat"><option value="A">崇祯</option><option value="B">李自成</option><option value="C">吴三桂</option></select><label for="branch-action">下一步</label><select id="branch-action">' + branchActionOptions + '</select><button class="primary-button" data-action="branch-step">' + (state.pendingAction === "branch-step" ? "正在处理…" : "提交这一步&nbsp; →") + '</button></div>';
   renderShell(
     '<main class="page" data-testid="branch-page"><section class="page-header"><div><div class="page-kicker">受限推演</div><h1 class="page-title">既定历史与另一种可能</h1></div><p class="page-lede">推演只保留与历史节点有关的差异。每一步都由观测台验证，直到模型边界出现。</p></section><section class="branch-board"><div class="branch-columns"><div class="branch-column"><h3>既定历史 <span>已发生</span></h3><div class="branch-state-row"><strong>历史选择</strong><span>这项提议没有被采纳</span></div><div class="branch-state-row"><strong>世界状态</strong><span>观测台继续推进既定历史事件</span></div><div class="branch-state-row"><strong>停止时间</strong><span>崇祯十七年三月十九日</span></div></div><div class="branch-column"><h3>受限推演 <span>另一种可能</span></h3><div class="branch-state-row"><strong>起点</strong><span>' + escapeHtml(fork.display_name || "历史提议") + ' 已被接受</span></div><div class="branch-state-row"><strong>当前进度</strong><span>第 ' + formatCount(stateView.day_offset) + ' / 14 天</span></div><div class="branch-state-row"><strong>传递中的消息</strong><span>' + formatCount((stateView.messages || []).length) + ' 条</span></div>' + recordText + '</div></div>' + controls + '</section></main>',
     "branch"
@@ -412,6 +428,13 @@ function renderAbout() {
 }
 
 function renderDrawer() {
+  if (state.sourceLoading) {
+    app.insertAdjacentHTML(
+      "beforeend",
+      '<div class="drawer-scrim open" data-action="close-drawer"></div><aside class="source-drawer open" aria-label="史料依据"><button class="drawer-close" data-action="close-drawer" aria-label="关闭史料依据">×</button><div class="drawer-kicker">史料依据</div><h2 class="drawer-title">正在打开史料依据</h2><p class="drawer-loading" role="status">观测台正在读取这条断言的出处……</p></aside>'
+    );
+    return;
+  }
   const assertion = state.source?.assertion || {};
   const sources = state.source?.sources || [];
   const citations = sources.length
@@ -456,7 +479,7 @@ function renderSettingsModal() {
     '<div class="form-field"><label for="runtime-mode">接口类型</label><select id="runtime-mode"><option value="chat_completions" ' + (apiMode === "chat_completions" ? "selected" : "") + '>对话接口</option><option value="responses" ' + (apiMode === "responses" ? "selected" : "") + '>响应接口</option></select></div>' +
     '<div class="form-field"><label for="runtime-reasoning">推理强度 <span class="muted">可选</span></label><input id="runtime-reasoning" value="' + escapeHtml(reasoningEffort) + '" placeholder="留空使用模型默认设置" autocomplete="off" /></div>' +
     connectionStatus + message +
-    '<div class="modal-actions"><button class="secondary-button" data-action="test-setup">测试连接</button><button class="primary-button" data-action="save-settings">' + (firstRun ? "保存并准备人物" : "保存设置") + '</button></div></section></div>';
+    '<div class="modal-actions"><button class="secondary-button" data-action="test-setup">' + (state.pendingAction === "test-setup" ? "正在测试…" : "测试连接") + '</button><button class="primary-button" data-action="save-settings">' + (state.pendingAction === "save-settings" ? "正在保存…" : (firstRun ? "保存并准备人物" : "保存设置")) + '</button></div></section></div>';
   app.insertAdjacentHTML("beforeend", modal);
 }
 
@@ -479,34 +502,57 @@ function formPayload() {
 }
 
 async function refreshEvent(eventId = state.selectedEvent) {
+  const request = ++state.eventRequest;
   state.selectedEvent = eventId;
-  state.eventDetail = await api("/api/events/" + eventId + "?tick=" + state.tick);
-  state.timeline = (await api("/api/timeline?tick=" + state.tick)).items;
+  state.eventLoading = true;
   render();
+  try {
+    const [eventDetail, timeline] = await Promise.all([
+      api("/api/events/" + eventId + "?tick=" + state.tick),
+      api("/api/timeline?tick=" + state.tick),
+    ]);
+    if (request !== state.eventRequest) return;
+    state.eventDetail = eventDetail;
+    state.timeline = timeline.items;
+  } finally {
+    if (request === state.eventRequest) {
+      state.eventLoading = false;
+      render();
+    }
+  }
 }
 
 async function openPage(page) {
+  if (state.pendingAction) return;
+  const request = ++state.lifetimeRequest;
   state.page = page;
   state.lifetime = null;
   state.source = null;
   state.drawer = false;
+  state.lifetimeLoading = false;
   if (page === "lifetimes") {
     state.lifetimeLoading = true;
     render();
     try {
       await loadLifetimeSummaries();
+      if (request !== state.lifetimeRequest) return;
     } catch (error) {
+      if (request !== state.lifetimeRequest) return;
       setNotice(friendlyError(error, "人物经历暂时无法读取。"), true);
     } finally {
-      state.lifetimeLoading = false;
-      render();
+      if (request === state.lifetimeRequest) {
+        state.lifetimeLoading = false;
+        render();
+      }
     }
     return;
   }
   if (page === "branch" && state.branch) {
     try {
       await loadBranch();
+      if (request !== state.lifetimeRequest) return;
     } catch (error) {
+      if (request !== state.lifetimeRequest) return;
       setNotice(friendlyError(error, "受限推演暂时无法读取。"), true);
     }
   }
@@ -530,29 +576,58 @@ function bindActions() {
   document.querySelectorAll("[data-source]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
-        state.source = await api("/api/sources/" + button.dataset.source);
+        if (state.pendingAction || state.sourceLoading) return;
+        const request = ++state.sourceRequest;
+        state.source = null;
+        state.sourceLoading = true;
         state.drawer = true;
         render();
+        state.source = await api("/api/sources/" + button.dataset.source);
+        if (request !== state.sourceRequest) return;
       } catch (error) {
+        state.drawer = false;
         setNotice(friendlyError(error, "史料依据暂时无法读取。"), true);
+      } finally {
+        state.sourceLoading = false;
         render();
       }
     });
   });
   document.querySelectorAll("[data-seat]").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (state.pendingAction) return;
       state.lifetimeSeat = button.dataset.seat;
+      const request = ++state.lifetimeRequest;
+      state.lifetime = null;
+      state.lifetimeLoading = true;
+      render();
       try {
-        state.lifetime = await api("/api/lifetimes/" + state.lifetimeSeat);
+        const lifetime = await api("/api/lifetimes/" + state.lifetimeSeat);
+        if (request === state.lifetimeRequest) state.lifetime = lifetime;
       } catch (error) {
         setNotice(friendlyError(error, "这位人物的经历暂时无法读取。"), true);
+      } finally {
+        if (request === state.lifetimeRequest) {
+          state.lifetimeLoading = false;
+          render();
+        }
       }
-      render();
     });
   });
   document.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => handleAction(button.dataset.action));
+    const action = button.dataset.action;
+    if (state.pendingAction && !["close-settings", "close-drawer", "clear-notice"].includes(action)) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+    }
+    button.addEventListener("click", () => handleAction(action));
   });
+  if (state.pendingAction) {
+    document.querySelectorAll("[data-page], [data-event], [data-source], [data-seat]").forEach((button) => {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+    });
+  }
   document.querySelectorAll(".modal-scrim").forEach((scrim) => {
     scrim.addEventListener("click", (event) => {
       if (event.target === scrim) handleAction("close-settings");
@@ -594,6 +669,8 @@ async function handleAction(action) {
     return;
   }
   if (action === "close-drawer") {
+    state.sourceRequest += 1;
+    state.sourceLoading = false;
     state.drawer = false;
     state.source = null;
     render();
@@ -603,6 +680,14 @@ async function handleAction(action) {
     state.notice = null;
     render();
     return;
+  }
+
+  if (state.pendingAction) return;
+  const formDraft = ["test-setup", "save-settings"].includes(action) ? formPayload() : null;
+  if (pendingActions.has(action)) {
+    state.pendingAction = action;
+    if (formDraft) state.formDraft = formDraft;
+    render();
   }
 
   try {
@@ -733,6 +818,11 @@ async function handleAction(action) {
   } catch (error) {
     setNotice(friendlyError(error), true);
     render();
+  } finally {
+    if (state.pendingAction === action) {
+      state.pendingAction = null;
+      render();
+    }
   }
 }
 
@@ -745,7 +835,7 @@ async function loadBranch() {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (state.page !== "chronicle" || state.drawer || state.setup || state.settings) return;
+  if (state.page !== "chronicle" || state.drawer || state.setup || state.settings || state.pendingAction) return;
   if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
   event.preventDefault();
   const index = state.timeline.findIndex((item) => item.id === state.selectedEvent);

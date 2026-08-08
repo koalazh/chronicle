@@ -23,6 +23,9 @@ uv run chronicle serve
 配置成功后运行：
 
 ```bash
+# 在另一个终端启动项目私有 Hermes Gateway
+HERMES_HOME="$PWD/.chronicle/hermes-home" hermes gateway run --external-supervisor
+
 uv run chronicle bootstrap
 uv run chronicle doctor
 ```

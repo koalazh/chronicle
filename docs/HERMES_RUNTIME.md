@@ -8,6 +8,8 @@ Chronicle 使用本机 Hermes Agent CLI 创建三个同源 profile：
 
 它们来自同一个 `hermes/chronicle-actor` Actor Distribution，差异由 Host 传入的 Seat authority、opaque input 和独立 session 体现。
 
+Actor Distribution 对 API server 明确只开放 `memory`。当前 Hermes 会把近期新增的 builtin toolset 默认补回平台列表，因此项目配置同时记录 `bfl` 为已拒绝项；最终是否成立仍以现场 `/v1/toolsets` 探针为准。
+
 ## Project-local Home
 
 Bootstrap 使用 `CHRONICLE_HERMES_HOME`，默认是项目内 `.chronicle/hermes-home`，不会修改用户的全局 Hermes Home。runtime secret 写入 `.chronicle/runtime.env`，权限为 `0600`，并被 `.gitignore` 忽略。
@@ -20,6 +22,8 @@ Bootstrap 使用 `CHRONICLE_HERMES_HOME`，默认是项目内 `.chronicle/hermes
 4. Host 解析 `ActorWakeResponse`，校验 memory action 和 authority。
 5. Actor 只在 Reflection 中调用 Hermes 内置 `memory` tool；Host 比较 profile `memories/MEMORY.md` 的前后 hash。
 6. Host 写入 Life Record；SQLite 的 `memory_versions` 是审计镜像和 lineage 索引，不是 live Hermes memory 的替代品。
+
+每次 session 的 ID 与标题都包含唯一 ID，避免重复 wake 在 Hermes 的标题去重规则下被错误拒绝。
 
 普通 Wake 如果改变了 native Memory，Host 会保存前后快照和 unified diff，恢复原文件，并在 append-only `protocol_violations` 中记录原因、hash、diff 和 rollback 结果。Reflection 才能创建 `memory_versions`；其 previous hash、内容 hash 和 source Life Record 会在写入时校验。
 

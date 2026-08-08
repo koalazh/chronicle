@@ -198,6 +198,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .drawer-section { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 18px; }
 .drawer-section h3 { color: var(--ink-faint); font-size: 10px; letter-spacing: .15em; font-weight: 500; margin: 0 0 12px; }
 .drawer-section p { color: var(--ink-soft); font-family: var(--serif); font-size: 14px; line-height: 1.9; margin: 0; }
+.drawer-loading { color: var(--ink-soft); font-family: var(--serif); font-size: 14px; line-height: 1.9; margin: 0; }
 .citation { padding: 15px 0; border-bottom: 1px solid var(--line-light); }
 .citation strong { font-family: var(--serif); font-size: 14px; font-weight: 500; display: block; }
 .citation span { display: block; color: var(--ink-faint); font-size: 10px; line-height: 1.7; margin-top: 4px; }
@@ -235,6 +236,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .timeline-tag { text-transform: none; }
 .timeline-item:hover { color: var(--ink); }
 .advance-button[disabled], .primary-button[disabled] { cursor: not-allowed; opacity: .42; }
+.text-button[disabled], .open-lifetime[disabled], .seat-switcher button[disabled] { cursor: wait; opacity: .5; }
 .advance-button[disabled]:hover { color: var(--blue-ink); border-color: var(--line); }
 .life-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .life-mode-note { color: var(--ink-faint); font-size: 11px; margin-top: 8px; }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,23 @@ def test_enabled_toolset_names_uses_actual_enabled_entries():
     }
 
     assert enabled_toolset_names(payload) == ("bfl", "memory")
+
+
+def test_fresh_session_title_is_unique(monkeypatch, app_config):
+    request: dict[str, object] = {}
+
+    def fake_post(_url, **kwargs):
+        request.update(kwargs)
+        return SimpleNamespace(status_code=201)
+
+    monkeypatch.setattr("chronicle.hermes.httpx.post", fake_post)
+
+    session_id = HermesClient(app_config).create_fresh_session(
+        PROFILE_NAMES["A"], "profile-key", "a-4-observation"
+    )
+
+    assert session_id
+    assert request["json"] == {"id": session_id, "title": f"Chronicle {session_id}"}
 
 
 def test_probe_collects_profile_routes_toolsets_and_key_isolation(monkeypatch, app_config):

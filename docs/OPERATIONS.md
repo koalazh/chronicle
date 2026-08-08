@@ -19,7 +19,8 @@ uv run chronicle doctor
 2. 在 Setup 填写 OpenAI-compatible base URL、API Key、model 和 mode。
 3. Test connection 只调用 provider 的 `/models` 端点。
 4. Configure 将配置写入 server-side runtime env。
-5. 使用 CLI 或后续 UI Bootstrap 创建 project-local profiles。
+5. 在另一个终端启动项目私有 Gateway：`HERMES_HOME="$PWD/.chronicle/hermes-home" hermes gateway run --external-supervisor`。
+6. 使用 CLI 或后续 UI Bootstrap 创建 project-local profiles；只有 Gateway 已监听且现场能力检查通过时，Bootstrap 才会返回 `ready=true`。
 
 Bootstrap 不会覆盖带有 Chronicle genesis marker 的 Home。若需要重建，必须显式使用 `--force-reset`，并确认目标是项目内 Home。
 

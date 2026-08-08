@@ -10,6 +10,11 @@ providers:
 platform_toolsets:
   api_server:
     - memory
+# Hermes treats newly shipped builtin toolsets as enabled unless the profile
+# records that the platform declined them. Keep the API boundary memory-only.
+known_builtin_toolsets:
+  api_server:
+    - bfl
 memory:
   memory_enabled: true
   user_profile_enabled: false

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import uuid
@@ -195,6 +196,71 @@ class ChronicleHost:
         text = path.read_text(encoding="utf-8")
         return text, hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def _restore_native_memory(self, seat: str, existed: bool, text: str) -> None:
+        path = self._native_memory_path(seat)
+        if existed:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        elif path.exists():
+            path.unlink()
+
+    def _record_native_memory_violation(
+        self,
+        *,
+        seat: str,
+        tick: int,
+        wake_type: WakeType,
+        epoch: str,
+        before_text: str,
+        before_hash: str,
+        before_exists: bool,
+        after_text: str,
+        after_hash: str,
+        reason: str,
+    ) -> str:
+        diff = "".join(
+            difflib.unified_diff(
+                before_text.splitlines(keepends=True),
+                after_text.splitlines(keepends=True),
+                fromfile="memory.before",
+                tofile="memory.after",
+            )
+        )
+        try:
+            self._restore_native_memory(seat, before_exists, before_text)
+            _restored_text, restored_hash = self._native_memory(seat)
+            if restored_hash != before_hash:
+                raise OSError("restored Memory hash does not match the snapshot")
+        except OSError as exc:
+            self.db.add_protocol_violation(
+                {
+                    "seat": seat,
+                    "tick": tick,
+                    "wake_type": wake_type.value,
+                    "reason": f"{reason}; rollback failed",
+                    "memory_hash_before": before_hash,
+                    "memory_hash_after": after_hash,
+                    "memory_diff": diff,
+                    "action": "rollback_failed",
+                    "runtime_epoch": epoch,
+                }
+            )
+            raise HermesRuntimeError("Hermes Memory rollback failed") from exc
+        self.db.add_protocol_violation(
+            {
+                "seat": seat,
+                "tick": tick,
+                "wake_type": wake_type.value,
+                "reason": reason,
+                "memory_hash_before": before_hash,
+                "memory_hash_after": restored_hash,
+                "memory_diff": diff,
+                "action": "rollback",
+                "runtime_epoch": epoch,
+            }
+        )
+        return restored_hash
+
     def _epoch(self) -> str:
         soul = self.config.root / "hermes" / "chronicle-actor" / "SOUL.md"
         skill = self.config.root / "hermes" / "chronicle-actor" / "skills" / "chronicle-actor-protocol" / "SKILL.md"
@@ -269,8 +335,10 @@ class ChronicleHost:
         before_beliefs = self.db.current_beliefs(seat)
         if use_native_memory:
             memory_before, memory_hash_before = self._native_memory(seat)
+            memory_existed_before = self._native_memory_path(seat).exists()
         else:
             memory_before, memory_hash_before = self.db.current_memory(seat)
+            memory_existed_before = False
         source = "fixture"
         session_id: str | None = None
         response: ActorWakeResponse
@@ -304,36 +372,95 @@ class ChronicleHost:
         else:
             response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)
 
-        if wake_type != WakeType.REFLECTION and response.memory_action not in {"NO_CHANGE", ""}:
-            protocol_error = protocol_error or "normal wake proposed a memory mutation"
-            response = response.model_copy(update={"memory_action": "NO_CHANGE", "memory_text": ""})
-
-        updates = [item.model_dump(mode="json") for item in response.belief_updates]
-        self.db.update_beliefs(seat, tick, updates)
-        after_beliefs = self.db.current_beliefs(seat)
         life_id = f"life-{uuid.uuid4().hex[:12]}"
         memory_hash_after = memory_hash_before
         memory_record: dict[str, Any] | None = None
+        if wake_type != WakeType.REFLECTION and response.memory_action not in {"NO_CHANGE", ""}:
+            protocol_error = protocol_error or "normal wake proposed a memory mutation"
+            response = response.model_copy(update={"memory_action": "NO_CHANGE", "memory_text": ""})
+            self.db.add_protocol_violation(
+                {
+                    "seat": seat,
+                    "tick": tick,
+                    "wake_type": wake_type.value,
+                    "reason": protocol_error,
+                    "memory_hash_before": memory_hash_before,
+                    "memory_hash_after": memory_hash_before,
+                    "action": "blocked",
+                    "runtime_epoch": epoch,
+                }
+            )
         if use_native_memory:
             native_after_text, native_after_hash = self._native_memory(seat)
             native_changed = native_after_hash != memory_hash_before
             memory_hash_after = native_after_hash
             if wake_type != WakeType.REFLECTION and native_changed:
                 protocol_error = protocol_error or "ordinary wake mutated Hermes Memory"
+                memory_hash_after = self._record_native_memory_violation(
+                    seat=seat,
+                    tick=tick,
+                    wake_type=wake_type,
+                    epoch=epoch,
+                    before_text=memory_before,
+                    before_hash=memory_hash_before,
+                    before_exists=memory_existed_before,
+                    after_text=native_after_text,
+                    after_hash=native_after_hash,
+                    reason=protocol_error,
+                )
             elif wake_type == WakeType.REFLECTION and response.memory_action == "UPDATE_MEMORY":
                 if not native_changed:
                     protocol_error = protocol_error or "reflection requested memory update but Hermes Memory did not change"
-                else:
-                    memory_record = self.db.add_memory_version(
-                        seat,
-                        native_after_text.strip() or response.memory_text.strip(),
-                        memory_hash_before,
-                        [life_id],
-                        "reflection",
-                        memory_hash=native_after_hash,
+                    self.db.add_protocol_violation(
+                        {
+                            "seat": seat,
+                            "tick": tick,
+                            "wake_type": wake_type.value,
+                            "reason": protocol_error,
+                            "memory_hash_before": memory_hash_before,
+                            "memory_hash_after": memory_hash_after,
+                            "action": "blocked",
+                            "runtime_epoch": epoch,
+                        }
                     )
+                else:
+                    try:
+                        memory_record = self.db.add_memory_version(
+                            seat,
+                            native_after_text,
+                            memory_hash_before,
+                            [life_id],
+                            "reflection",
+                            memory_hash=native_after_hash,
+                        )
+                    except ValueError as exc:
+                        protocol_error = str(exc)
+                        memory_hash_after = self._record_native_memory_violation(
+                            seat=seat,
+                            tick=tick,
+                            wake_type=wake_type,
+                            epoch=epoch,
+                            before_text=memory_before,
+                            before_hash=memory_hash_before,
+                            before_exists=memory_existed_before,
+                            after_text=native_after_text,
+                            after_hash=native_after_hash,
+                            reason=protocol_error,
+                        )
             elif wake_type == WakeType.REFLECTION and native_changed:
                 protocol_error = protocol_error or "Hermes Memory changed without UPDATE_MEMORY"
+                memory_hash_after = self._record_native_memory_violation(
+                    seat=seat,
+                    tick=tick,
+                    wake_type=wake_type,
+                    epoch=epoch,
+                    before_text=memory_before,
+                    before_hash=memory_hash_before,
+                    before_exists=memory_existed_before,
+                    after_text=native_after_text,
+                    after_hash=native_after_hash,
+                    reason=protocol_error,
+                )
         elif wake_type == WakeType.REFLECTION and response.memory_action == "UPDATE_MEMORY" and response.memory_text.strip():
             memory_record = self.db.add_memory_version(
                 seat,
@@ -345,6 +472,10 @@ class ChronicleHost:
             memory_hash_after = memory_record["memory_hash"]
         elif wake_type == WakeType.REFLECTION and response.memory_action not in {"NO_CHANGE", "UPDATE_MEMORY", ""}:
             protocol_error = protocol_error or "reflection returned an unsupported memory action"
+
+        updates = [item.model_dump(mode="json") for item in response.belief_updates]
+        self.db.update_beliefs(seat, tick, updates)
+        after_beliefs = self.db.current_beliefs(seat)
 
         observation_ids = [item[1].id for item in self.pack.observations_for(seat, tick)]
         self.db.append_life_record(

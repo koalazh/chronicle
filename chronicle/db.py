@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS memory_versions (
     created_at TEXT NOT NULL
 );
 
+CREATE TRIGGER IF NOT EXISTS memory_versions_append_only_update
+BEFORE UPDATE ON memory_versions
+BEGIN
+    SELECT RAISE(ABORT, 'memory_versions are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_versions_append_only_delete
+BEFORE DELETE ON memory_versions
+BEGIN
+    SELECT RAISE(ABORT, 'memory_versions are append-only');
+END;
+
 CREATE TABLE IF NOT EXISTS wake_sessions (
     id TEXT PRIMARY KEY,
     seat TEXT NOT NULL,
@@ -89,6 +101,32 @@ CREATE TABLE IF NOT EXISTS wake_sessions (
     status TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS protocol_violations (
+    id TEXT PRIMARY KEY,
+    seat TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    wake_type TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    memory_hash_before TEXT NOT NULL,
+    memory_hash_after TEXT NOT NULL,
+    memory_diff TEXT NOT NULL,
+    action TEXT NOT NULL,
+    runtime_epoch TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS protocol_violations_append_only_update
+BEFORE UPDATE ON protocol_violations
+BEGIN
+    SELECT RAISE(ABORT, 'protocol_violations are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS protocol_violations_append_only_delete
+BEFORE DELETE ON protocol_violations
+BEGIN
+    SELECT RAISE(ABORT, 'protocol_violations are append-only');
+END;
 
 CREATE TABLE IF NOT EXISTS branches (
     id TEXT PRIMARY KEY,
@@ -120,6 +158,10 @@ def now_iso() -> str:
 def stable_hash(value: Any) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def content_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class ChronicleDB:
@@ -248,7 +290,14 @@ class ChronicleDB:
     ) -> dict[str, Any]:
         if mutation_kind != "reflection":
             raise ValueError("Memory can only be mutated by a reflection")
+        versions = self.memory_versions(seat)
+        if versions and previous_hash != versions[-1]["memory_hash"]:
+            raise ValueError("previous memory hash does not match the latest version")
         memory_hash = memory_hash or stable_hash(memory_text)
+        if memory_hash not in {stable_hash(memory_text), content_hash(memory_text)}:
+            raise ValueError("memory hash does not match the memory content")
+        if not source_record_ids:
+            raise ValueError("a memory version needs a source life record")
         record = {
             "id": f"memory-{uuid.uuid4().hex[:12]}",
             "seat": seat,
@@ -265,6 +314,36 @@ class ChronicleDB:
                 record,
             )
         return record
+
+    def add_protocol_violation(self, record: dict[str, Any]) -> None:
+        values = {
+            "id": record.get("id", f"violation-{uuid.uuid4().hex[:12]}"),
+            "seat": record["seat"],
+            "tick": record["tick"],
+            "wake_type": record["wake_type"],
+            "reason": record["reason"],
+            "memory_hash_before": record.get("memory_hash_before", ""),
+            "memory_hash_after": record.get("memory_hash_after", ""),
+            "memory_diff": record.get("memory_diff", ""),
+            "action": record.get("action", "blocked"),
+            "runtime_epoch": record.get("runtime_epoch", "unknown"),
+            "created_at": record.get("created_at", now_iso()),
+        }
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO protocol_violations(id, seat, tick, wake_type, reason, memory_hash_before, memory_hash_after, memory_diff, action, runtime_epoch, created_at) VALUES (:id, :seat, :tick, :wake_type, :reason, :memory_hash_before, :memory_hash_after, :memory_diff, :action, :runtime_epoch, :created_at)",
+                values,
+            )
+
+    def protocol_violations(self, seat: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM protocol_violations"
+        args: tuple[Any, ...] = ()
+        if seat:
+            query += " WHERE seat = ?"
+            args = (seat,)
+        query += " ORDER BY tick, created_at"
+        with self._connect() as connection:
+            return [dict(row) for row in connection.execute(query, args).fetchall()]
 
     def append_life_record(self, record: dict[str, Any]) -> None:
         values = {

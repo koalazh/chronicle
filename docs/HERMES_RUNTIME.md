@@ -21,6 +21,8 @@ Bootstrap 使用 `CHRONICLE_HERMES_HOME`，默认是项目内 `.chronicle/hermes
 5. Actor 只在 Reflection 中调用 Hermes 内置 `memory` tool；Host 比较 profile `memories/MEMORY.md` 的前后 hash。
 6. Host 写入 Life Record；SQLite 的 `memory_versions` 是审计镜像和 lineage 索引，不是 live Hermes memory 的替代品。
 
+普通 Wake 如果改变了 native Memory，Host 会保存前后快照和 unified diff，恢复原文件，并在 append-only `protocol_violations` 中记录原因、hash、diff 和 rollback 结果。Reflection 才能创建 `memory_versions`；其 previous hash、内容 hash 和 source Life Record 会在写入时校验。
+
 普通 wake 和 Reflection 使用不同的 wake type，但均不共享聊天 transcript。Hermes session ID、runtime epoch、source、native memory hash 和协议状态会进入审计记录。Fixture mode 为没有 Hermes gateway 的自动化测试提供确定性替身，不会被当作 live Hermes 证据。
 
 ## 能力分级

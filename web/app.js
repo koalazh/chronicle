@@ -136,6 +136,8 @@ function friendlyError(error, fallback = "操作没有完成，请稍后再试�
     ["cannot move backwards", "历史时间只能向前推进。"],
     ["branch is no longer active", "这次受限推演已经到达边界。"],
     ["branch not found", "没有找到这次受限推演。"],
+    ["branch is unavailable before", "推进观测台到历史分叉点后，才可以进入受限推演。"],
+    ["branch already exists", "这次受限推演已经建立，不能重复创建。"],
     ["unknown Seat", "暂时无法找到这位人物。"],
     ["Seat not found", "暂时无法找到这位人物。"],
     ["Base URL and model", "请填写模型连接地址和模型名称。"],
@@ -350,6 +352,7 @@ function renderLifetimes() {
     }).join("")
     : '<div class="empty-state">还没有经历记录。推进历史后，可以从这里记录一次人物观察。</div>';
   const memoryText = String(life.memory?.text || "").trim() || "暂未形成长期记忆。需要经过重新理解，经验才可能被保留下来。";
+  const runtimeLabel = state.config?.hermes_ready ? "已通过 Hermes 就绪检查" : "确定性观测";
   const seats = state.scenario.actors.map((item) =>
     '<button class="' + (item.seat === state.lifetimeSeat ? "active" : "") + '" data-seat="' + escapeHtml(item.seat) + '">' + escapeHtml(item.display_name) + '</button>'
   ).join("");
@@ -359,7 +362,7 @@ function renderLifetimes() {
   const page = '<main class="page" data-testid="lifetime-page">' +
     '<section class="page-header"><div><div class="page-kicker">人物经历</div><h1 class="page-title">' + escapeHtml(actor.display_name) + '的经历</h1></div><p class="page-lede">这不是聊天记录，而是一条由观察、判断、现实反馈与长期记忆组成的经历线。</p></section>' +
     '<section class="lifetime-detail"><aside class="lifetime-rail"><div class="section-label">选择人物</div><div class="seat-switcher">' + seats + '</div><div class="context-note">只展示观测台能够追溯的经历；人物没有收到的信息不会进入这里。</div></aside>' +
-      '<section class="life-content"><div class="life-intro"><div><h2>' + dayLabel(state.tick) + '</h2><p>' + formatCount(life.stats?.observations) + ' 条信息 · ' + formatCount(life.stats?.intentions) + ' 个判断 · ' + formatCount(life.stats?.memories) + ' 条长期记忆</p></div><div class="life-actions"><button class="primary-button" data-action="wake">记录一次观察</button>' + reflectButton + '</div></div>' +
+      '<section class="life-content"><div class="life-intro"><div><h2>' + dayLabel(state.tick) + '</h2><p>' + formatCount(life.stats?.observations) + ' 条信息 · ' + formatCount(life.stats?.intentions) + ' 个判断 · ' + formatCount(life.stats?.memories) + ' 条长期记忆</p><p class="life-mode-note">当前运行方式：' + runtimeLabel + '</p></div><div class="life-actions"><button class="primary-button" data-action="wake">记录一次观察</button>' + reflectButton + '</div></div>' +
         '<div class="life-line"><div class="section-label">经历记录</div><div class="life-line-track"><span class="life-marker" style="left:8%" data-label="观察"></span><span class="life-marker contradiction" style="left:55%" data-label="现实反馈"></span><span class="life-marker memory" style="left:82%" data-label="长期记忆"></span></div>' + recordMarkup + '</div>' +
         '<div class="memory-lineage"><div class="section-label">长期记忆</div><h3>' + (memoryVersions.length ? "已经形成可携带的经验" : "暂未形成长期记忆") + '</h3><p>' + escapeHtml(memoryText) + '</p><div class="lineage-flow"><span>收到信息</span><span>形成判断</span><span>现实反馈</span><span>重新理解</span><span>长期记忆</span></div></div>' +
       '</section>' +
@@ -439,6 +442,9 @@ function renderSettingsModal() {
   const message = state.setupMessage
     ? '<div class="setup-result ' + (state.setupMessage.error ? "error" : "") + '" role="status">' + escapeHtml(state.setupMessage.text) + '</div>'
     : "";
+  const connectionStatus = !firstRun
+    ? '<div class="setup-connection">当前状态：' + (config.hermes_ready ? "已通过 Hermes 就绪检查" : "确定性观测；Hermes 尚未通过就绪检查") + '</div>'
+    : "";
   const steps = firstRun
     ? '<ol class="setup-steps"><li class="active"><strong>连接模型</strong><span>填写一次模型连接信息</span></li><li><strong>准备人物</strong><span>由观测台创建人物经历</span></li><li><strong>开始观测</strong><span>进入甲申的历史时间线</span></li></ol>'
     : "";
@@ -449,7 +455,7 @@ function renderSettingsModal() {
     '<div class="form-field"><label for="runtime-model">模型名称</label><input id="runtime-model" value="' + escapeHtml(model) + '" placeholder="请输入模型名称" autocomplete="off" /></div>' +
     '<div class="form-field"><label for="runtime-mode">接口类型</label><select id="runtime-mode"><option value="chat_completions" ' + (apiMode === "chat_completions" ? "selected" : "") + '>对话接口</option><option value="responses" ' + (apiMode === "responses" ? "selected" : "") + '>响应接口</option></select></div>' +
     '<div class="form-field"><label for="runtime-reasoning">推理强度 <span class="muted">可选</span></label><input id="runtime-reasoning" value="' + escapeHtml(reasoningEffort) + '" placeholder="留空使用模型默认设置" autocomplete="off" /></div>' +
-    message +
+    connectionStatus + message +
     '<div class="modal-actions"><button class="secondary-button" data-action="test-setup">测试连接</button><button class="primary-button" data-action="save-settings">' + (firstRun ? "保存并准备人物" : "保存设置") + '</button></div></section></div>';
   app.insertAdjacentHTML("beforeend", modal);
 }
@@ -556,6 +562,13 @@ function bindActions() {
 
 async function handleAction(action) {
   if (action === "enter") {
+    if (state.setup) {
+      state.settings = true;
+      state.setupMessage = null;
+      state.formDraft = null;
+      render();
+      return;
+    }
     state.page = "chronicle";
     render();
     return;
@@ -574,7 +587,6 @@ async function handleAction(action) {
     return;
   }
   if (action === "close-settings") {
-    state.setup = false;
     state.settings = false;
     state.setupMessage = null;
     state.formDraft = null;
@@ -626,7 +638,7 @@ async function handleAction(action) {
     if (action === "wake") {
       const result = await api("/api/lifetimes/" + state.lifetimeSeat + "/wake", {
         method: "POST",
-        body: JSON.stringify({ tick: state.tick, wake_type: "observation", live: false }),
+        body: JSON.stringify({ tick: state.tick, wake_type: "observation", live: Boolean(state.config?.hermes_ready) }),
       });
       state.lifetime = await api("/api/lifetimes/" + state.lifetimeSeat);
       setNotice(result.source === "hermes"
@@ -638,7 +650,7 @@ async function handleAction(action) {
     if (action === "reflect") {
       const result = await api("/api/lifetimes/" + state.lifetimeSeat + "/reflect", {
         method: "POST",
-        body: JSON.stringify({ tick: state.tick, live: false }),
+        body: JSON.stringify({ tick: state.tick, live: Boolean(state.config?.hermes_ready) }),
       });
       state.lifetime = await api("/api/lifetimes/" + state.lifetimeSeat);
       setNotice(result.source === "hermes"
@@ -694,7 +706,13 @@ async function handleAction(action) {
         if (firstRun) {
           state.setupMessage = { text: "模型连接已保存，正在准备人物……", error: false };
           render();
-          await api("/api/bootstrap", { method: "POST" });
+          const bootstrapResult = await api("/api/bootstrap", { method: "POST" });
+          if (!bootstrapResult.ready) {
+            state.setupMessage = { text: "人物配置已保存，但本机 Hermes 还没有就绪。请启动本机服务后再试。", error: true };
+            state.config = await api("/api/config");
+            render();
+            return;
+          }
           state.setup = false;
           state.settings = false;
           state.formDraft = null;

@@ -73,6 +73,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/api/config")
     async def runtime_config() -> dict[str, Any]:
         active = current_config()
+        readiness = await asyncio.to_thread(doctor, active)
+        hermes_ready = readiness["status"] == "READY"
         return {
             "setup_required": not active.llm_configured,
             "base_url": active.llm_base_url,
@@ -81,6 +83,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "reasoning_effort": active.llm_reasoning_effort,
             "api_key": active.masked_api_key(),
             "hermes_base_url": active.hermes_base_url,
+            "runtime_mode": "live" if hermes_ready else "fixture",
+            "hermes_ready": hermes_ready,
+            "hermes_status": readiness["status"],
         }
 
     @app.get("/api/scenario")

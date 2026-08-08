@@ -217,6 +217,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .modal-actions { display: flex; gap: 15px; align-items: center; justify-content: flex-end; margin-top: 32px; }
 .setup-result { margin-top: 18px; padding: 12px 15px; border-left: 2px solid var(--blue-ink); color: var(--blue-ink); font-size: 12px; line-height: 1.7; }
 .setup-result.error { border-color: var(--vermillion); color: var(--vermillion); }
+.setup-connection { margin-top: 18px; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
 .hidden { display: none !important; }
 .muted { color: var(--ink-faint); }
 .error-text { color: var(--vermillion); }
@@ -236,6 +237,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .advance-button[disabled], .primary-button[disabled] { cursor: not-allowed; opacity: .42; }
 .advance-button[disabled]:hover { color: var(--blue-ink); border-color: var(--line); }
 .life-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.life-mode-note { color: var(--ink-faint); font-size: 11px; margin-top: 8px; }
 .empty-state { padding: 20px 0; color: var(--ink-faint); font-size: 12px; line-height: 1.8; }
 .branch-unavailable { display: grid; gap: 6px; margin-top: 24px; padding: 15px 17px; border-left: 2px solid var(--blue-ink); background: rgba(72, 115, 122, .045); color: var(--ink-soft); font-size: 12px; line-height: 1.75; max-width: 520px; }
 .branch-unavailable strong { color: var(--ink); font-family: var(--serif); font-size: 15px; font-weight: 500; }

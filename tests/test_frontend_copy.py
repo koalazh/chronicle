@@ -27,6 +27,7 @@ def test_frontend_uses_chinese_product_language():
         "Seat A /",
         "chronicle-seat-a",
         "runtime_alias",
+        "live: false",
     ):
         assert forbidden not in source
         assert forbidden not in index
@@ -39,5 +40,7 @@ def test_frontend_uses_chinese_product_language():
         "受限推演",
         "记录一次观察",
         "方法与边界",
+        "hermes_ready",
+        "bootstrapResult.ready",
     ):
         assert required in source

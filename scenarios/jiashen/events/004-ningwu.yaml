@@ -1,0 +1,43 @@
+events:
+  - id: e010
+    tick: 23
+    native_date: 崇祯十七年正月廿四
+    title: 宁武成为阻滞线
+    assertion_ids: [a008]
+    world_effects:
+      - {type: control_change, target: ningwu, value: contested}
+    observations:
+      B:
+        - {id: o010-b, origin_assertion_id: a008, delivery_tick: 23, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: Pass-N02 is resisting longer than expected. The western command must choose between pressure and time.}
+      A:
+        - {id: o010-a, origin_assertion_id: a008, delivery_tick: 27, channel: frontier-memorial, source_alias: Channel-N, reliability_hint: urgent, runtime_payload: Pass-N02 has become the immediate northern delay. Its defense is fierce but not assured.}
+    branch_policy: exogenous
+    tags: [world, pass]
+  - id: e011
+    tick: 25
+    native_date: 崇祯十七年正月廿六
+    title: 关口失守
+    assertion_ids: [a008]
+    world_effects:
+      - {type: control_change, target: ningwu, value: fallen}
+    observations:
+      A:
+        - {id: o011-a, origin_assertion_id: a008, delivery_tick: 28, channel: emergency-courier, source_alias: Channel-N, reliability_hint: direct after delay, runtime_payload: Pass-N02 has fallen. The report contains no reliable estimate of the remaining defenders.}
+      B:
+        - {id: o011-b, origin_assertion_id: a008, delivery_tick: 25, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: "The delay at Pass-N02 is over. The army can move again, but exhaustion is accumulating."}
+      C:
+        - {id: o011-c, origin_assertion_id: a008, delivery_tick: 32, channel: border-report, source_alias: Channel-E, reliability_hint: relayed, runtime_payload: A mountain pass has been taken after concentrated fighting. The eastern garrison does not know the next objective.}
+    branch_policy: exogenous
+    tags: [world, memory-trigger]
+  - id: e012
+    tick: 27
+    native_date: 崇祯十七年正月廿八
+    title: 防守可信度下降
+    assertion_ids: [a009]
+    world_effects:
+      - {type: belief_pressure, target: northern_defense, value: severe}
+    observations:
+      A:
+        - {id: o012-a, origin_assertion_id: a009, delivery_tick: 31, channel: court-record, source_alias: Channel-C, reliability_hint: compiled, runtime_payload: The next northern node is no longer assumed to be a dependable shield. Earlier confidence is being revised.}
+    branch_policy: exogenous
+    tags: [belief, memory]

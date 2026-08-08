@@ -1,0 +1,27 @@
+model:
+  default: "${OPENAI_MODEL}"
+  provider: chronicle-openai
+providers:
+  chronicle-openai:
+    base_url: "${OPENAI_BASE_URL}"
+    key_env: OPENAI_API_KEY
+    api_mode: chat_completions
+    model: "${OPENAI_MODEL}"
+platform_toolsets:
+  api_server:
+    - memory
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  write_approval: false
+  nudge_interval: 0
+skills:
+  creation_nudge_interval: 0
+gateway:
+  multiplex_profiles: true
+  platforms:
+    api_server:
+      enabled: false
+      extra:
+        host: 127.0.0.1
+        port: 8642

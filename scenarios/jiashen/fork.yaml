@@ -1,0 +1,9 @@
+id: jiangnan-prince-command
+event_id: e019
+title: 太子抚军江南
+premise: 南迁相关讨论中的“太子抚军江南”路线被接受。
+display_name: 太子抚军江南
+runtime_premise: The proposal to move the principal heir southward and establish a southern command is accepted.
+source_assertion_ids:
+  - a019
+max_days: 14

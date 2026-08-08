@@ -1,0 +1,29 @@
+routes:
+  - id: western-to-taiyuan
+    from_location: western_front
+    to_location: taiyuan
+    travel_days: 11
+  - id: taiyuan-to-datong
+    from_location: taiyuan
+    to_location: datong
+    travel_days: 8
+  - id: datong-to-xuanfu
+    from_location: datong
+    to_location: xuanfu
+    travel_days: 6
+  - id: xuanfu-to-juyong
+    from_location: xuanfu
+    to_location: juyong
+    travel_days: 5
+  - id: juyong-to-capital
+    from_location: juyong
+    to_location: capital
+    travel_days: 3
+  - id: eastern-to-capital
+    from_location: shanhaiguan
+    to_location: capital
+    travel_days: 5
+  - id: ningyuan-to-shanhaiguan
+    from_location: ningyuan
+    to_location: shanhaiguan
+    travel_days: 4

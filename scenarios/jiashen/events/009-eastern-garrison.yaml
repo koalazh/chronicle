@@ -1,0 +1,43 @@
+events:
+  - id: e025
+    tick: 58
+    native_date: 崇祯十七年二月廿九
+    title: 东部边镇仍在远处
+    assertion_ids: [a014]
+    world_effects:
+      - {type: force_posture, target: eastern_garrison, value: holding}
+    observations:
+      C:
+        - {id: o025-c, origin_assertion_id: a014, delivery_tick: 58, channel: border-command, source_alias: Channel-E, reliability_hint: direct, runtime_payload: Eastern Garrison remains in its own defensive position. Capital's emergency is known but not physically near.}
+      A:
+        - {id: o025-a, origin_assertion_id: a014, delivery_tick: 63, channel: court-report, source_alias: Channel-E, reliability_hint: official but delayed, runtime_payload: The eastern commander remains beyond the inner road. An answer has been requested.}
+    branch_policy: exogenous
+    tags: [world, distance]
+  - id: e026
+    tick: 60
+    native_date: 崇祯十七年三月初二
+    title: 入援还是守关
+    assertion_ids: [a026, a015]
+    world_effects:
+      - {type: command_conflict, target: eastern_garrison, value: unresolved}
+    observations:
+      C:
+        - {id: o026-c, origin_assertion_id: a015, delivery_tick: 60, channel: border-command, source_alias: Channel-E, reliability_hint: direct, runtime_payload: Eastern command must weigh a movement toward Capital against the risk of opening its own pass. No option is costless.}
+      A:
+        - {id: o026-a, origin_assertion_id: a015, delivery_tick: 66, channel: court-order, source_alias: Channel-C, reliability_hint: official, runtime_payload: The court is debating whether the eastern garrison should enter the inner road. The order is not yet settled.}
+    branch_policy: exogenous
+    tags: [decision, eastern-front]
+  - id: e027
+    tick: 62
+    native_date: 崇祯十七年三月初四
+    title: 北门只剩关口
+    assertion_ids: [a027, a016]
+    world_effects:
+      - {type: route_pressure, target: juyong, value: severe}
+    observations:
+      A:
+        - {id: o027-a, origin_assertion_id: a016, delivery_tick: 64, channel: emergency-courier, source_alias: Channel-N, reliability_hint: urgent, runtime_payload: Pass-N01 is now the decisive northern threshold. The courier cannot say how much organized defense remains.}
+      B:
+        - {id: o027-b, origin_assertion_id: a016, delivery_tick: 62, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: "Pass-N01 is the next obstacle before Capital. Its terrain favors delay, not certainty."}
+    branch_policy: exogenous
+    tags: [world, pass]

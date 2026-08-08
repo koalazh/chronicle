@@ -1,0 +1,55 @@
+locations:
+  - id: western_front
+    display_name: 西安
+    runtime_alias: Western Seat
+    x: 13
+    y: 64
+    kind: origin
+  - id: taiyuan
+    display_name: 太原
+    runtime_alias: City-N01
+    x: 36
+    y: 42
+  - id: datong
+    display_name: 大同
+    runtime_alias: City-N02
+    x: 54
+    y: 29
+  - id: ningwu
+    display_name: 宁武
+    runtime_alias: Pass-N02
+    x: 47
+    y: 36
+    kind: pass
+  - id: xuanfu
+    display_name: 宣府
+    runtime_alias: City-N03
+    x: 63
+    y: 38
+  - id: juyong
+    display_name: 居庸
+    runtime_alias: Pass-N01
+    x: 70
+    y: 44
+  - id: changping
+    display_name: 昌平
+    runtime_alias: City-N04
+    x: 76
+    y: 48
+  - id: capital
+    display_name: 北京
+    runtime_alias: Capital
+    x: 82
+    y: 53
+    kind: capital
+  - id: ningyuan
+    display_name: 宁远
+    runtime_alias: Eastern Garrison
+    x: 85
+    y: 22
+  - id: shanhaiguan
+    display_name: 山海关
+    runtime_alias: Eastern Pass
+    x: 91
+    y: 30
+    kind: pass

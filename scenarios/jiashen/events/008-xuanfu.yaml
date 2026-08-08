@@ -1,0 +1,41 @@
+events:
+  - id: e022
+    tick: 51
+    native_date: 崇祯十七年二月廿二
+    title: 宣府告急
+    assertion_ids: [a022, a013]
+    world_effects:
+      - {type: control_change, target: xuanfu, value: unstable}
+    observations:
+      A:
+        - {id: o022-a, origin_assertion_id: a013, delivery_tick: 52, channel: emergency-courier, source_alias: Channel-N, reliability_hint: urgent, runtime_payload: City-N03 is now an immediate concern. The report gives no safe estimate for how long its gate can hold.}
+      B:
+        - {id: o022-b, origin_assertion_id: a013, delivery_tick: 51, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: City-N03 has become the next practical gate on the road toward Capital.}
+    branch_policy: exogenous
+    tags: [world, northern-front]
+  - id: e023
+    tick: 53
+    native_date: 崇祯十七年二月廿四
+    title: 守臣的选择
+    assertion_ids: [a023, a013]
+    world_effects:
+      - {type: control_change, target: xuanfu, value: broken}
+    observations:
+      A:
+        - {id: o023-a, origin_assertion_id: a013, delivery_tick: 56, channel: frontier-memorial, source_alias: Channel-N, reliability_hint: delayed, runtime_payload: City-N03's command has ceased to provide a stable barrier. The account contains conflicting reports about surrender and resistance.}
+      C:
+        - {id: o023-c, origin_assertion_id: a013, delivery_tick: 61, channel: border-report, source_alias: Channel-E, reliability_hint: late, runtime_payload: A northern barrier has broken. The eastern garrison now expects the threat to turn toward the inner passes.}
+    branch_policy: exogenous
+    tags: [world, provenance]
+  - id: e024
+    tick: 55
+    native_date: 崇祯十七年二月廿六
+    title: 京师北门暴露
+    assertion_ids: [a024, a013]
+    world_effects:
+      - {type: route_pressure, target: xuanfu_to_capital, value: severe}
+    observations:
+      A:
+        - {id: o024-a, origin_assertion_id: a013, delivery_tick: 55, channel: emergency-courier, source_alias: Channel-N, reliability_hint: urgent but incomplete, runtime_payload: The road from City-N03 toward the inner passes is no longer buffered by a dependable garrison.}
+    branch_policy: exogenous
+    tags: [message, capital]

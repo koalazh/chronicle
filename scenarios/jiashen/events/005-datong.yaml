@@ -1,0 +1,43 @@
+events:
+  - id: e013
+    tick: 30
+    native_date: 崇祯十七年二月初一
+    title: 檄文穿过关口
+    assertion_ids: [a010]
+    world_effects:
+      - {type: information_state, target: capital, value: enemy_argument_visible}
+    observations:
+      A:
+        - {id: o013-a, origin_assertion_id: a010, delivery_tick: 30, channel: intercepted_letter, source_alias: Channel-W, reliability_hint: hostile text, runtime_payload: "An intercepted proclamation accuses the court of isolation, private privilege, and exhausted households. It is an argument, not a neutral report."}
+      B:
+        - {id: o013-b, origin_assertion_id: a010, delivery_tick: 30, channel: command-camp, source_alias: Channel-W, reliability_hint: authored locally, runtime_payload: The proclamation is meant to turn local grievances into a reason to open gates. Its claims are useful but partisan.}
+    branch_policy: exogenous
+    tags: [message, politics]
+  - id: e014
+    tick: 32
+    native_date: 崇祯十七年二月初三
+    title: 大同方向告急
+    assertion_ids: [a009]
+    world_effects:
+      - {type: control_change, target: datong, value: unstable}
+    observations:
+      A:
+        - {id: o014-a, origin_assertion_id: a009, delivery_tick: 35, channel: frontier-memorial, source_alias: Channel-N, reliability_hint: urgent, runtime_payload: City-N02 is under pressure. The garrison's willingness to hold cannot be separated from local conditions.}
+      B:
+        - {id: o014-b, origin_assertion_id: a009, delivery_tick: 32, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: City-N02 is preparing to receive the advancing force. Resistance may not be uniform.}
+    branch_policy: exogenous
+    tags: [world, northern-front]
+  - id: e015
+    tick: 34
+    native_date: 崇祯十七年二月初五
+    title: 北线再开一道缺口
+    assertion_ids: [a009]
+    world_effects:
+      - {type: control_change, target: datong, value: fallen}
+    observations:
+      A:
+        - {id: o015-a, origin_assertion_id: a009, delivery_tick: 38, channel: emergency-courier, source_alias: Channel-N, reliability_hint: delayed, runtime_payload: City-N02 has ceased to function as a stable defensive node. The report is late and omits the full sequence.}
+      C:
+        - {id: o015-c, origin_assertion_id: a009, delivery_tick: 42, channel: border-report, source_alias: Channel-E, reliability_hint: late relay, runtime_payload: Another northern garrison has failed. Eastern command now expects decisions without a complete map.}
+    branch_policy: exogenous
+    tags: [world, knowledge]

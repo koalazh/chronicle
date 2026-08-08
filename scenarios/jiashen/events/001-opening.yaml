@@ -1,0 +1,45 @@
+events:
+  - id: e001
+    tick: 0
+    native_date: 崇祯十七年正月初一
+    title: 春始于阴霾
+    assertion_ids: [a001]
+    world_effects:
+      - {type: season_open, target: chronicle, value: spring}
+    observations:
+      A:
+        - {id: o001-a, origin_assertion_id: a001, delivery_tick: 0, channel: court-record, source_alias: Channel-C, reliability_hint: direct court calendar, runtime_payload: The new season opens under an unusual sky. The capital records an unsettled beginning.}
+      B:
+        - {id: o001-b, origin_assertion_id: a001, delivery_tick: 2, channel: road-report, source_alias: Channel-W, reliability_hint: fragmentary, runtime_payload: Reports from the east mention disorder and an unsettled season. No complete account has arrived.}
+      C:
+        - {id: o001-c, origin_assertion_id: a001, delivery_tick: 5, channel: border-report, source_alias: Channel-E, reliability_hint: delayed, runtime_payload: The season begins with distant warnings. The report does not identify a single cause.}
+    branch_policy: exogenous
+    tags: [world, opening]
+  - id: e002
+    tick: 1
+    native_date: 崇祯十七年正月初二
+    title: 西部旗号改变
+    assertion_ids: [a002]
+    world_effects:
+      - {type: force_posture, target: western_front, value: organized_advance}
+    observations:
+      B:
+        - {id: o002-b, origin_assertion_id: a002, delivery_tick: 1, channel: command-camp, source_alias: Channel-W, reliability_hint: internal order, runtime_payload: A new public title and calendar now organize the western command. The movement will be treated as a campaign.}
+      A:
+        - {id: o002-a, origin_assertion_id: a002, delivery_tick: 8, channel: frontier-memorial, source_alias: Channel-W, reliability_hint: hostile-side report, runtime_payload: The western force has adopted a more coherent public order. Its scale remains uncertain.}
+    branch_policy: exogenous
+    tags: [military, political]
+  - id: e003
+    tick: 4
+    native_date: 崇祯十七年正月初五
+    title: 河东消息向东
+    assertion_ids: [a003]
+    world_effects:
+      - {type: route_pressure, target: western_to_capital, value: rising}
+    observations:
+      A:
+        - {id: o003-a, origin_assertion_id: a003, delivery_tick: 7, channel: courier, source_alias: Channel-N, reliability_hint: incomplete, runtime_payload: Several points along the western route are no longer answering in the expected rhythm. The reports are not synchronized.}
+      B:
+        - {id: o003-b, origin_assertion_id: a003, delivery_tick: 4, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: The eastern road is open enough for continued advance. Local resistance varies from place to place.}
+    branch_policy: exogenous
+    tags: [message, northern-front]

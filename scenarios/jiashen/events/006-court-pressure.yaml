@@ -1,0 +1,41 @@
+events:
+  - id: e016
+    tick: 37
+    native_date: 崇祯十七年二月初八
+    title: 京师收紧出入
+    assertion_ids: [a011]
+    world_effects:
+      - {type: capital_security, target: capital, value: restricted}
+    observations:
+      A:
+        - {id: o016-a, origin_assertion_id: a011, delivery_tick: 37, channel: court-order, source_alias: Channel-C, reliability_hint: official, runtime_payload: Capital gates and night movement are now under tighter control. Information will be slower to leave and enter.}
+      B:
+        - {id: o016-b, origin_assertion_id: a011, delivery_tick: 45, channel: road-rumor, source_alias: Channel-N, reliability_hint: weak, runtime_payload: The capital is closing its roads. The command does not know whether this means preparation or panic.}
+    branch_policy: exogenous
+    tags: [world, information]
+  - id: e017
+    tick: 39
+    native_date: 崇祯十七年二月初十
+    title: 勤王令发出
+    assertion_ids: [a012]
+    world_effects:
+      - {type: relief_order, target: capital, value: summoned}
+    observations:
+      A:
+        - {id: o017-a, origin_assertion_id: a012, delivery_tick: 39, channel: court-order, source_alias: Channel-C, reliability_hint: official, runtime_payload: "A general call for relief has been issued. It names a need but does not create a road, grain, or time."}
+      C:
+        - {id: o017-c, origin_assertion_id: a012, delivery_tick: 47, channel: border-report, source_alias: Channel-E, reliability_hint: delayed official, runtime_payload: Eastern command is asked to move toward Capital. The order competes with local defense requirements.}
+    branch_policy: exogenous
+    tags: [decision, order]
+  - id: e018
+    tick: 41
+    native_date: 崇祯十七年二月十二
+    title: 军需没有跟上命令
+    assertion_ids: [a012]
+    world_effects:
+      - {type: supply_state, target: relief_order, value: constrained}
+    observations:
+      A:
+        - {id: o018-a, origin_assertion_id: a012, delivery_tick: 44, channel: treasury-report, source_alias: Channel-C, reliability_hint: administrative, runtime_payload: The relief order has no uniform supply estimate. The capital cannot see every unit's actual readiness.}
+    branch_policy: exogenous
+    tags: [world, logistics]

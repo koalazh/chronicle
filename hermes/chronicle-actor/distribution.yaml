@@ -1,0 +1,14 @@
+name: chronicle-actor
+version: 0.1.0
+description: "Opaque, persistent historical actor protocol for Chronicle: 甲申."
+hermes_requires: ">=0.20.0"
+env_requires:
+  - name: OPENAI_API_KEY
+    description: OpenAI-compatible model key used by the profile
+  - name: OPENAI_BASE_URL
+    description: OpenAI-compatible model base URL
+  - name: OPENAI_MODEL
+    description: Model name shared by all Chronicle Seats
+  - name: API_SERVER_KEY
+    description: Profile-scoped local HTTP bearer
+distribution_owned: [SOUL.md, config.yaml, skills]

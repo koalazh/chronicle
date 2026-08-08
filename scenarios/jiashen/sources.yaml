@@ -1,0 +1,247 @@
+sources:
+  - id: ming-shi-24
+    work: 《明史》
+    locator: 卷二十四·本纪第二十四·庄烈帝
+    url: https://zh.wikisource.org/wiki/明史/卷24
+    description: 记崇祯十七年正月至三月的帝纪主线，包括南迁/太子抚军、各关城告急与京师陷落。
+  - id: ming-shi-ji-shi-79
+    work: 《明史纪事本末》
+    locator: 卷七十九·甲申之变
+    url: https://zh.wikisource.org/wiki/明史紀事本末/卷79
+    description: 以事件本末叙述正月至三月的战守、朝议与北方关城变化。
+  - id: ming-shi-ji-shi-80
+    work: 《明史纪事本末》
+    locator: 卷八十·甲申之变
+    url: https://zh.wikisource.org/wiki/明史紀事本末/卷80
+    description: 记三月十九日李自成陷京师、帝崩煤山等终局节点。
+  - id: guo-que-100
+    work: 《国榷》
+    locator: 卷一百·思宗崇祯十七年甲申正月至三月
+    url: https://zh.wikisource.org/wiki/國榷/卷一百
+    description: 作为同时代编年材料的交叉参照入口；本 V1 只保留可与主线相互校核的简短事实。
+
+assertions:
+  - id: a001
+    claim: 正月初一，京师开始这一段春季危机，记载同时出现风霾与地震等异常征象。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪以“十七年春正月庚寅朔”起笔，并记大风霾、凤阳地震。
+  - id: a002
+    claim: 西部军势在正月间公开建立新的名号与秩序，北上不再只是地方骚动。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 甲申本末记西安称王、改国号年号等正月行动。
+  - id: a003
+    claim: 河东通道的消息持续向东传递，朝廷开始把西部变化当作京师安全问题。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 卷七十九连续叙述河东诸州失守与京师朝议，本事件的日级位置采用归一化 tick。
+  - id: a004
+    claim: 一支朝廷军队被派往西向战线，出师本身成为京师政治与军事的公开信号。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-ji-shi-79, ming-shi-24]
+    normalized_evidence: 本末与帝纪均记李建泰出师及相关授节、饯行。
+  - id: a005
+    claim: 西向军队在行进中遭遇道路、军心与地方守御的多重摩擦。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 甲申本末记出都后迟行、营兵逃归及地方拒守等连续情节。
+  - id: a006
+    claim: 河东若干战略节点相继被攻陷或失守，京师获得的不是一条稳定战线，而是破碎的报告。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪记汾州、怀庆等处失守；本末进一步记太原等地变化。
+  - id: a007
+    claim: 太原方向的防守失败使北方军情突然变得更近。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 两部材料均把太原失守与山西战局转折相连。
+  - id: a008
+    claim: 宁武关成为一段短暂而激烈的阻滞线。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 卷七十九详述周遇吉守宁武、战败及关城陷落。
+  - id: a009
+    claim: 大同方向的守御随后瓦解，北方边镇的可靠性被重新估量。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪与本末均记大同告急、守臣死节或城局变化。
+  - id: a010
+    claim: 朝廷收到的敌方檄文把君臣、民力与征敛问题同时推到公开视野。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 本末保存并转述檄文的核心指控；运行时只给不含专名的语义摘要。
+  - id: a011
+    claim: 京城开始更严格地收束城门、夜禁与出入，信息与人的流动都受到限制。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 卷七十九记分守九门、稽出入与禁夜行等守城措施。
+  - id: a012
+    claim: 勤王与调兵成为朝廷公开议程，但可用兵力和粮饷并不充裕。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪及本末均记征调天下兵、守城议论与军需困局。
+  - id: a013
+    claim: 宣府方向的告急把北方防线与京师之间的距离进一步压缩。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 两部材料记宣府告急及其后守臣死节；tick 为事件顺序的研究归一化。
+  - id: a014
+    claim: 东部边镇的主将吴三桂仍在关宁方向，尚未成为京师眼前的即时援军。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 甲申材料多次将吴三桂与宁远、山海关及入援议论相连。
+  - id: a015
+    claim: 朝廷开始在东部边镇与京师之间讨论进退、入援和弃守的代价。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 本末记吴三桂入关、弃地与守京议论的冲突。
+  - id: a016
+    claim: 居庸方向的守备被视为京师北面的关键门槛。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪与本末的京畿战局叙述将居庸、昌平与京师防御相连，具体日序采用 approximate。
+  - id: a017
+    claim: 朝议从“是否出兵”转为“能否守住京师周边通道”。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 这是依据连续守城议论做的研究性状态抽象，不宣称为史料原句。
+    notes: modeled editorial synthesis
+  - id: a018
+    claim: 南迁相关意见在朝廷内被正式提出，但未形成一致的执行命令。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪记南迁及太子抚军江南之请皆不许；本末记相关争论。
+  - id: a019
+    claim: “太子抚军江南”是当时真实出现、但未获采纳的路线提议。
+    provenance: historical
+    evidence_status: disputed
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 史料都出现相关议论，但参与人、时点及其政治意图在叙述中并不完全一致。
+    notes: curated fork premise; exact chronology intentionally not over-resolved
+  - id: a020
+    claim: 皇帝拒绝南迁建议，并把“死社稷”作为公开的政治立场。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 两部材料均记相关答复及其后朝议沉默。
+  - id: a021
+    claim: 京师外围的消息开始以更短的传播间隔抵达，但每份报告仍有来源和可信度差异。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: Chronicle Host 将材料中的连续军情归一化为带延迟、带来源提示的消息流。
+    notes: modeled delivery abstraction
+  - id: a022
+    claim: 李自成兵锋进入宣府方向，京师北线由预警转为直接威胁。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪明确记李自成至宣府；本末记守臣与监视太监的不同结局。
+  - id: a023
+    claim: 宣府守御崩解后，北方守臣的报告不再能提供稳定的缓冲时间。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 记载宣府守臣死节、监视太监降等，Chronicle 仅抽象为守御崩解。
+  - id: a024
+    claim: 居庸关方向的战况与京师城防同时进入最后阶段。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 帝纪与本末对居庸、昌平、京师先后关系的记述存在压缩，故使用 approximate。
+  - id: a025
+    claim: 昌平方向失守的消息抵达京师，京师外缘的安全感进一步消失。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-24]
+    normalized_evidence: 帝纪记昌平告急及相关守臣处置，本事件只保留消息与后果。
+  - id: a026
+    claim: 东部援军是否能够按时抵达，成为京师最后仍可讨论的外部变量之一。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 基于吴三桂入援议论与山海关方向的路线关系，抽象为 Host 的有界变量。
+    notes: modeled route state, not a moral or numerical score
+  - id: a027
+    claim: 吴三桂收到与入援相关的军令和京师危局消息，但其可用时间极短。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 甲申材料记调吴三桂入援及东部边镇处置，本事件保留消息先后而不伪造分钟级时间。
+  - id: a028
+    claim: 李自成方面向京师推进时，仍需处理分路、守城、投降与军令的差异。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: Chronicle 将连续叙事中的军队移动与城池状态抽象为可追踪的 Host effects。
+    notes: modeled world-state abstraction
+  - id: a029
+    claim: 京师内部开始出现守城命令与退避议论并存的政治裂缝。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 本末记朝臣对南迁、太子与守战的不同表态。
+  - id: a030
+    claim: 城门与外围通道的控制变得不稳定，军报的抵达时间无法再被视为固定。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: Host 对史料中的多线告急采用显式 message delay；这是运行模型而非史料数字。
+    notes: modeled message delay
+  - id: a031
+    claim: 京师最终进入被围或将陷的状态，来自不同方向的报告开始互相印证。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [ming-shi-24, ming-shi-ji-shi-79]
+    normalized_evidence: 两部材料的三月叙述形成从关口到京师的连续压迫，但具体汇合时间按 approximate 处理。
+  - id: a032
+    claim: 崇祯十七年三月中旬，京师守备已经不足以恢复外部缓冲。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 这是将守城叙事转为“缓冲耗尽”状态的研究性表达。
+    notes: modeled state transition
+  - id: a033
+    claim: 京城内部的最后命令仍然由朝廷发出，但其可执行性已被现实战况反复削弱。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [ming-shi-ji-shi-79]
+    normalized_evidence: 本末记末期守城、调兵与朝议之间的落差；运行时只展示 authority 与 intention 的差别。
+  - id: a034
+    claim: 三月十九日，李自成攻陷京师，明廷在该日进入终局。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-24, ming-shi-ji-shi-80, guo-que-100]
+    normalized_evidence: 帝纪、甲申之变卷八十及《国榷》均记三月十九日京师陷落。
+  - id: a035
+    claim: 崇祯帝于京师陷落当日自缢于煤山，相关人物与具体细节不在 Runtime 输入中直接出现。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [ming-shi-ji-shi-80, guo-que-100]
+    normalized_evidence: 卷八十记帝崩于煤山；Chronicle 在三月十九日停止 Canon wake，避免把终局变成 Agent 先验。
+  - id: a036
+    claim: Canon 在三月十九日停止，不能用 LLM 自动补写北京陷落之后的历史。
+    provenance: modeled
+    evidence_status: corroborated
+    source_ids: [ming-shi-ji-shi-80]
+    normalized_evidence: 这是 Chronicle 的明确 simulation boundary，不是对史料缺失的补叙。
+    notes: product boundary

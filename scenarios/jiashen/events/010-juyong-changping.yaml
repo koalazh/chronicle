@@ -1,0 +1,41 @@
+events:
+  - id: e028
+    tick: 65
+    native_date: 崇祯十七年三月初七
+    title: 居庸方向告急
+    assertion_ids: [a028, a016]
+    world_effects:
+      - {type: control_change, target: juyong, value: contested}
+    observations:
+      A:
+        - {id: o028-a, origin_assertion_id: a016, delivery_tick: 65, channel: emergency-courier, source_alias: Channel-N, reliability_hint: urgent, runtime_payload: "Pass-N01 is under direct pressure. Capital has time to issue orders, not time to assume they will arrive."}
+      B:
+        - {id: o028-b, origin_assertion_id: a016, delivery_tick: 65, channel: command-camp, source_alias: Channel-W, reliability_hint: direct, runtime_payload: The pass is being tested. The western command has not yet seen the inner city.}
+    branch_policy: exogenous
+    tags: [world, message]
+  - id: e029
+    tick: 67
+    native_date: 崇祯十七年三月初九
+    title: 昌平失守的回声
+    assertion_ids: [a029, a025]
+    world_effects:
+      - {type: control_change, target: changping, value: fallen}
+    observations:
+      A:
+        - {id: o029-a, origin_assertion_id: a025, delivery_tick: 68, channel: emergency-courier, source_alias: Channel-N, reliability_hint: direct after delay, runtime_payload: City-N04 has fallen. The remaining road to Capital is now exposed.}
+      C:
+        - {id: o029-c, origin_assertion_id: a025, delivery_tick: 71, channel: border-report, source_alias: Channel-E, reliability_hint: late relay, runtime_payload: The northern inner city has fallen. Any movement toward Capital is now a race against a closing road.}
+    branch_policy: exogenous
+    tags: [world, northern-front]
+  - id: e030
+    tick: 69
+    native_date: 崇祯十七年三月十一
+    title: 最后一层缓冲
+    assertion_ids: [a030, a016]
+    world_effects:
+      - {type: route_pressure, target: juyong_to_capital, value: open}
+    observations:
+      A:
+        - {id: o030-a, origin_assertion_id: a016, delivery_tick: 69, channel: court-record, source_alias: Channel-C, reliability_hint: compiled, runtime_payload: The northern pass no longer supplies a dependable delay. Capital defense is now local rather than regional.}
+    branch_policy: exogenous
+    tags: [world, capital]

@@ -1,0 +1,43 @@
+actors:
+  - seat: A
+    profile: chronicle-seat-a
+    display_name: 崇祯
+    runtime_alias: Seat A
+    initial_location: capital
+    authority:
+      - ISSUE_ORDER
+      - REQUEST_INFORMATION
+      - APPOINT_AUTHORITY
+      - SEND_MESSAGE
+      - PREPARE_MOVEMENT
+      - REDEPLOY_FORCE
+      - WAIT
+    description: 站在京师中心，拥有朝廷名义上的最后裁断权。
+  - seat: B
+    profile: chronicle-seat-b
+    display_name: 李自成
+    runtime_alias: Seat B
+    initial_location: western_front
+    authority:
+      - ISSUE_ORDER
+      - REQUEST_INFORMATION
+      - SEND_MESSAGE
+      - PREPARE_MOVEMENT
+      - REDEPLOY_FORCE
+      - HOLD_POSITION
+      - WAIT
+    description: 从西部战线推进，掌握自己的军令和所见情报。
+  - seat: C
+    profile: chronicle-seat-c
+    display_name: 吴三桂
+    runtime_alias: Seat C
+    initial_location: shanhaiguan
+    authority:
+      - REQUEST_INFORMATION
+      - SEND_MESSAGE
+      - PREPARE_MOVEMENT
+      - MOVE_PRINCIPAL
+      - REDEPLOY_FORCE
+      - HOLD_POSITION
+      - WAIT
+    description: 位于东部关宁方向，处在援京命令与边地现实之间。

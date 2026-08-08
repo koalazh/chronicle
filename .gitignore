@@ -1,0 +1,17 @@
+.env
+.chronicle/
+data/
+*.db
+*.db-wal
+*.db-shm
+artifacts/runtime/
+artifacts/ui/*.png
+artifacts/ui/*.jpg
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+node_modules/
+dist/
+.DS_Store

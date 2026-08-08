@@ -22,7 +22,7 @@ uv run chronicle doctor
 5. 在另一个终端启动项目私有 Gateway：`HERMES_HOME="$PWD/.chronicle/hermes-home" hermes gateway run --external-supervisor`。
 6. 使用 CLI 或后续 UI Bootstrap 创建 project-local profiles；只有 Gateway 已监听且现场能力检查通过时，Bootstrap 才会返回 `ready=true`。
 
-Bootstrap 不会覆盖带有 Chronicle genesis marker 的 Home。若需要重建，必须显式使用 `--force-reset`，并确认目标是项目内 Home。
+Bootstrap 不会覆盖带有 Chronicle genesis marker 的 Home；V1 不实现原地 reset，`--force-reset` 会明确返回未实现错误。需要全新实验时，应显式指定一个新的项目私有 `CHRONICLE_HERMES_HOME`，不要删除现有 Home 或数据库。
 
 ## 证据记录
 

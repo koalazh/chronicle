@@ -52,18 +52,18 @@ Chronicle 当前已经具备可运行的后端、Source Pack、确定性 Host、
 - 现有纸张、墨色、朱砂色、青蓝色和自绘路线图是可保留的视觉资产。
 - 现有 API 数据结构和历史边界应优先复用，不为了改文案把后端改成另一套模型。
 
-### 当前必须诚实处理的未完成能力
+### 前一轮审计基线（已进入主 Task Loop 修复）
 
-这些问题已经在前一轮审计中确认，不能由前端用更漂亮的文字掩盖：
+以下是前端产品化开始时确认的基线；它们保留在这里用于解释为什么后续修复不能只做视觉包装：
 
-1. Hermes 真实运行时的 toolset 实际曾暴露 bfl + memory，而不是严格只有 memory；doctor 的检查过于浅。
-2. Memory Integrity Guard 尚未实现完整的 snapshot、diff、rollback 和 ProtocolViolation 记录。
-3. Branch 可以在未到达 fork tick 时创建，且路线、收件人、行动前提和 Canon event branch policy 验证不足。
-4. 部分 Source Pack world effects 尚未被 Host 还原到 world state。
-5. 当前 Lifetimes 的 UI Wake 固定发送 live=false，不能把它展示成已经完成的真实 Hermes 业务闭环。
-6. 当前项目没有真正的 Playwright/E2E 测试套件。
+1. Hermes 真实运行时曾暴露 bfl + memory；现已由项目配置记录 bfl opt-out，并由现场 probe 验证 memory-only。
+2. Memory Integrity Guard 曾缺少 snapshot、diff、rollback 和 ProtocolViolation；现已由 Host/SQLite 约束覆盖。
+3. Branch 曾缺少 fork tick、路线、收件人和行动前提校验；现已由服务端边界覆盖。
+4. 部分 Source Pack world effects 曾未还原；现已保留原始 effects 并投影到 world state。
+5. Lifetimes 的 UI Wake 曾固定发送 live=false；现已根据 readiness 在 live/fixture 间切换，并对 live 失败 fail-closed。
+6. 项目仍没有独立的 Playwright/E2E 测试套件；本轮用真实浏览器路径、截图和 API/Host 自动化检查覆盖相应证据，未把它们混称为 E2E。
 
-本次前端任务可以改善信息架构、语言、首次使用流程和诚实表达，但不允许假装以上能力已经完成。
+前端任务本身只负责信息架构、语言、首次使用流程和诚实表达；跨边界能力由主 Task Loop 的独立修复 checkpoint 负责，前端不代替后端证据。
 
 ## 3. 产品目标
 
@@ -478,7 +478,7 @@ Source Drawer 改成真正的“史料依据”面板：
   - 保留纸张、serif、朱砂、青蓝和路线图方向，收敛导航与按钮的产品层级。
 - tests/test_frontend_copy.py：阻止已知英文系统文案和内部术语回归到用户可见模板。
 
-### 已复核证据
+### 前端产品化起始证据
 
 - uv run pytest：17 passed；保留 1 条既有 FastAPI/httpx 弃用警告。
 - uv run ruff check .：通过。
@@ -487,12 +487,17 @@ Source Drawer 改成真正的“史料依据”面板：
 - 本地浏览器已检查 Cover、观测台、史料依据、人物经历列表与详情、方法与边界、模型设置，以及隔离数据库中的受限推演建立、推进 14 天和边界状态。
 - 浏览器文字扫描确认观测台主界面和史料依据面板没有连续英文用户文案；终止节点和研究说明中的英文内部词已被映射。
 
-### 尚未证明的内容
+### 起始快照的后续修复状态
 
-- 390×844、768×1024、1440×1000 已在真实浏览器设备指标下检查，三个视口均无横向溢出；截图是在本轮浏览器会话中即时检查，尚未导出为项目内可长期寻址的图片工件，因此后续视觉回归仍应保留带视口和状态的截图。
+- 390×844、768×1024、1440×1000 已在真实浏览器设备指标下检查，三个视口均无横向溢出；修复后截图工件保存在被忽略的 `artifacts/ui/08-live-lifetime.png`、`09-live-mobile-chronicle.png`、`10-live-cover.png`。DOM viewport 与图片实际尺寸分别记录在 Task Loop HANDOFF 中。
 - 本轮没有独立 Reviewer；Completion Challenge 需要记录为非独立对抗自检，除非后续提供独立只读审查。
-- Hermes toolset、Memory Integrity Guard、Branch 深层规则、world effects 完整还原和真实 E2E 的后端边界仍然存在，前端没有把它们宣称为已完成。
+- Hermes toolset、Memory Guard、Branch 深层规则和 world effects 已在主 Task Loop 修复并通过 deterministic/live evidence；真实 E2E 套件仍未引入，浏览器检查与真实 Hermes 业务调用分别记录。
 
 ### 后续 agent 接手入口
 
-优先顺序仍是：补齐 390/768/1440 的真实截图证据 → 检查加载/错误/空状态 → 复核中文语气和技术详情层级 → 再决定是否需要最小接口适配。任何新能力都必须先更新本 Handoff 的事实与验收边界。
+后续维护应继续区分 fixture/UI、自动化测试、浏览器检查和真实 Hermes 业务证据；任何新能力都必须先更新本 Handoff 的事实与验收边界。
+
+### 主 Task Loop 修复摘要（2026-08-08）
+
+- `785fe17`、`c0bd20d`、`20be42b`、`14abfbe`、`c94d522` 分别覆盖 Hermes fail-closed、Memory Guard、Canon/Branch、运行模式 UI 与 live session/异步交互边界。
+- 当前 deterministic checks 为 30 tests；现场 project-local Hermes probe 曾返回 `READY`，包括三 Profile 路由、memory-only toolset 和交叉 key 拒绝；Gateway 已在验证完成后主动停止。

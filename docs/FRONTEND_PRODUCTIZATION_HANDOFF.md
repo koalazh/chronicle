@@ -1,6 +1,15 @@
 # Chronicle 前端产品化改进长程 Handoff
 
+> 状态：SUPERSEDED（2026-08-08）
+>
+> 这是上一轮前端产品化的历史 handoff。当前产品主路径已经收敛为
+> Observe → Enter → Live → Debrief；Worldline、SeatContextView、API 锁、
+> 迁移和 Debrief 契约以 [V2_MIGRATION.md](V2_MIGRATION.md) 为准。
+
 状态：READY_FOR_FOLLOW_UP（第一轮前端产品化已实现）
+
+> 说明：本文档保留上一轮前端工作的历史范围和证据，不能替代当前 Task Loop 的验收记录。
+> 当前 V2 主 UI 的人物经历详情只读取 `/api/worldlines/{id}/lifetimes/{seat}`；旧 `/api/lifetimes/{seat}`、旧 Branch 页面和本文中的旧浏览器截图均不作为本轮完成证据。
 
 目标执行者：后续 coding agent
 
@@ -501,3 +510,21 @@ Source Drawer 改成真正的“史料依据”面板：
 
 - `785fe17`、`c0bd20d`、`20be42b`、`14abfbe`、`c94d522` 分别覆盖 Hermes fail-closed、Memory Guard、Canon/Branch、运行模式 UI 与 live session/异步交互边界。
 - 当前 deterministic checks 为 30 tests；现场 project-local Hermes probe 曾返回 `READY`，包括三 Profile 路由、memory-only toolset 和交叉 key 拒绝；Gateway 已在验证完成后主动停止。
+
+## 本轮产品级整改补充（2026-08-09）
+
+上面的“本轮执行快照”属于 2026-08-08 的历史 handoff；其中的测试数量和提交引用
+不代表当前工作树的最终验收数字。本次整改继续保留 fixture/UI、自动化和真实 Hermes
+证据的分界，并补齐了以下产品闭环：
+
+- Live lazy Profile 在 Fresh Session、模型响应、Memory 检查或 SQLite moment 失败时
+  按精确 genesis marker 做补偿清理；普通 Live Wake 的失败期 Memory 也会回滚。
+- 真实动态交互结果、Canon 节点、消息送达和 Agent Wake 统计进入前端；请求具有
+  timeout/stale response 保护，设置和交互结果具备 dialog、focus、Escape、label 和
+  live region 语义。
+- 当前服务只允许 loopback 绑定，Setup 阻断 SSRF/私网/metadata Provider，并验证
+  `/models` 返回了用户选择的模型。
+
+本轮最终测试、浏览器和真实 Hermes 证据以同一批 Task Loop 的 `HANDOFF.md` 和
+`REVIEW.md` 为准；这里不把历史快照中的 30 tests 更新成新的静态数字，避免再次
+产生漂移。

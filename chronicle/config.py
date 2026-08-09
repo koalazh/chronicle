@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import secrets
 import shutil
@@ -28,6 +29,16 @@ def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_loopback_host(value: str) -> bool:
+    host = value.strip().lower().strip("[]")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -105,8 +116,16 @@ def generate_secret(length: int = 32) -> str:
 
 
 def write_runtime_env(config: AppConfig, values: Mapping[str, str]) -> Path:
+    if any("\n" in value or "\r" in value for value in values.values()):
+        raise ValueError("runtime configuration values cannot contain newlines")
     config.runtime_dir.mkdir(parents=True, exist_ok=True)
     path = config.runtime_env_path
-    path.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        temporary.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
     return path

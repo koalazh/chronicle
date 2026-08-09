@@ -2,6 +2,18 @@
 
 Chronicle 的关键约束不是“让模型扮演一个历史人物”，而是让模型无法从运行时输入直接读出展示层才知道的答案。
 
+## V2 的 SeatContextView
+
+V2 不允许 Seat 从页面状态、分支快照或全局 API 拼出自己的输入。Human Seat
+和 Agent Seat 都必须由同一个 SeatContextView 构造 prompt/interaction context：
+当前 tick、已知世界、已抵达消息、所携带经历、authority、已知不确定性、可见
+实体和 assertion ID。
+
+因此 Live 页面展示的是“我此刻能知道什么”，不是“这条 Worldline 的真相”。
+Debrief 只在封存后读取 Branch projection；它不能反向污染此前保存的 Seat
+context。输入边界由 worldline runtime 的 context builder 和 V2 回归测试共同
+维护。
+
 ## 三层数据分离
 
 | 层 | 允许内容 | 不允许内容 |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+import chronicle.app as app_module
 from chronicle.app import create_app
 
 
@@ -39,7 +40,12 @@ def test_api_exposes_canon_sources_branch_and_masked_setup(app_config):
     assert step.json()["result"]["provenance"] == "branch_derived"
 
 
-def test_setup_writes_a_server_side_masked_runtime(app_config):
+def test_setup_writes_a_server_side_masked_runtime(app_config, monkeypatch):
+    monkeypatch.setattr(
+        app_module.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
     client = TestClient(create_app(app_config))
     response = client.post(
         "/api/setup/configure",

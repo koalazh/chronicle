@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -93,7 +95,7 @@ class HermesClient:
     def get_json(self, path: str, *, profile: str | None = None, key: str = "") -> tuple[int, dict[str, Any]]:
         headers = self._headers(key) if key else {}
         try:
-            response = httpx.get(self._url(profile, path), headers=headers, timeout=8)
+            response = httpx.get(self._url(profile, path), headers=headers, timeout=8, trust_env=False)
             data = response.json() if response.content else {}
             return response.status_code, data if isinstance(data, dict) else {"data": data}
         except (httpx.HTTPError, ValueError) as exc:
@@ -107,6 +109,7 @@ class HermesClient:
                 headers=self._headers(key),
                 json={"id": session_id, "title": f"Chronicle {session_id}"},
                 timeout=15,
+                trust_env=False,
             )
             if response.status_code in {200, 201, 409}:
                 return session_id
@@ -140,11 +143,14 @@ class HermesClient:
                 "input": [{"role": item["role"], "content": item["content"]} for item in messages],
                 "store": False,
             }
+            if self.config.llm_reasoning_effort:
+                payload["reasoning_effort"] = self.config.llm_reasoning_effort
         response = httpx.post(
             self._url(profile, endpoint),
             headers=headers,
             json=payload,
             timeout=self.config.llm_timeout,
+            trust_env=False,
         )
         response.raise_for_status()
         body = response.json()
@@ -375,6 +381,26 @@ def _sync_profile_config(profile_home: Path, config: AppConfig, template: Path) 
     path.write_text(yaml.safe_dump(values, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def profile_memory_path(config: AppConfig, profile: str) -> Path:
+    return config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
+
+
+def read_profile_memory(config: AppConfig, profile: str) -> tuple[str, str]:
+    path = profile_memory_path(config, profile)
+    if not path.exists():
+        return "", hashlib.sha256(b"").hexdigest()
+    return path.read_text(encoding="utf-8"), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def restore_profile_memory(config: AppConfig, profile: str, existed: bool, text: str) -> None:
+    path = profile_memory_path(config, profile)
+    if existed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    elif path.exists():
+        path.unlink()
+
+
 def _write_gateway_env(home: Path, api_server_key: str) -> Path:
     path = home / ".env"
     values = _read_env_file(path)
@@ -427,32 +453,43 @@ def bootstrap(config: AppConfig, *, force_reset: bool = False) -> dict[str, Any]
             continue
         if profile_home.exists():
             raise RuntimeError(f"{profile} exists without Chronicle genesis; inspect it before continuing")
-        result = _run_cli(
-            config,
-            ["profile", "install", str(distribution), "--name", profile, "-y"],
-            timeout=90,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Hermes profile install failed for {profile}: {result.stderr.strip()}")
-        installed.append(profile)
-        keys[profile] = generate_secret(32)
-        _sync_profile_env(profile_home, keys[profile], config)
-        _sync_profile_config(profile_home, config, distribution / "config.yaml")
-        marker.write_text(
-            json.dumps(
-                {
-                    "profile": profile,
-                    "seat": seat,
-                    "distribution": "chronicle-actor",
-                    "genesis": "opaque-actor-v1",
-                    "toolsets": ["memory"],
-                },
-                ensure_ascii=False,
-                indent=2,
+        marker_tmp: Path | None = None
+        try:
+            result = _run_cli(
+                config,
+                ["profile", "install", str(distribution), "--name", profile, "-y"],
+                timeout=90,
             )
-            + "\n",
-            encoding="utf-8",
-        )
+            if result.returncode != 0:
+                raise RuntimeError(f"Hermes profile install failed for {profile}: {result.stderr.strip()}")
+            keys[profile] = generate_secret(32)
+            _sync_profile_env(profile_home, keys[profile], config)
+            _sync_profile_config(profile_home, config, distribution / "config.yaml")
+            marker_values = {
+                "profile": profile,
+                "seat": seat,
+                "distribution": "chronicle-actor",
+                "genesis": "opaque-actor-v1",
+                "toolsets": ["memory"],
+            }
+            marker_tmp = profile_home / f".chronicle-genesis.{uuid.uuid4().hex}.tmp"
+            marker_tmp.write_text(
+                json.dumps(marker_values, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(marker_tmp, marker)
+        except Exception as exc:
+            if marker_tmp is not None:
+                marker_tmp.unlink(missing_ok=True)
+            if profile_home.exists():
+                try:
+                    shutil.rmtree(profile_home)
+                except OSError as cleanup_exc:
+                    raise RuntimeError(
+                        f"Hermes Profile setup failed for {profile}; cleanup failed: {cleanup_exc}"
+                    ) from exc
+            raise
+        installed.append(profile)
     gateway_env = _write_gateway_env(home, keys[PROFILE_NAMES["A"]])
     runtime_env = _write_runtime_config(config, keys)
     readiness = probe(config, list(PROFILE_NAMES.values()))
@@ -467,3 +504,131 @@ def bootstrap(config: AppConfig, *, force_reset: bool = False) -> dict[str, Any]
         "hermes_home": str(home),
         "keys_generated": len(keys),
     }
+
+
+def create_lazy_profile(
+    config: AppConfig,
+    seat: str,
+    worldline_id: str,
+    *,
+    memory_text: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Create one branch-scoped actor Profile at the first branch observation."""
+
+    profile = f"chronicle-{worldline_id[-8:]}-seat-{seat.lower()}"
+    profile_home = config.hermes_home / "profiles" / profile
+    marker = profile_home / "chronicle-genesis.json"
+    distribution = config.root / ACTOR_DISTRIBUTION
+    profile_existed = profile_home.exists()
+    if marker.exists():
+        try:
+            marker_values = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"{profile} has an invalid Chronicle genesis marker") from exc
+        if marker_values.get("profile") != profile or marker_values.get("seat") != seat or marker_values.get("worldline_id") != worldline_id:
+            raise RuntimeError(f"{profile} Chronicle genesis does not match this Worldline")
+        if memory_text is not None:
+            try:
+                seed_profile_memory(config, profile, memory_text)
+            except Exception as exc:
+                try:
+                    remove_lazy_profile(config, seat, worldline_id)
+                except Exception as cleanup_exc:
+                    raise RuntimeError(
+                        f"Hermes lazy Profile memory seed failed for {profile}; cleanup failed: {cleanup_exc}"
+                    ) from exc
+                raise
+        return profile, {
+            "mode": "live",
+            "created_on_observation": True,
+            "worldline_id": worldline_id,
+            "seat": seat,
+            "genesis": "opaque-actor-v2-lazy",
+            "toolsets": ["memory"],
+        }
+    if profile_home.exists():
+        raise RuntimeError(f"{profile} exists without Chronicle genesis; inspect it before continuing")
+    marker_tmp: Path | None = None
+    try:
+        result = _run_cli(
+            config,
+            ["profile", "install", str(distribution), "--name", profile, "-y"],
+            timeout=90,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Hermes lazy Profile install failed for {profile}: {result.stderr.strip()}")
+        key = generate_secret(32)
+        _sync_profile_env(profile_home, key, config)
+        _sync_profile_config(profile_home, config, distribution / "config.yaml")
+        marker_values = {
+            "profile": profile,
+            "seat": seat,
+            "worldline_id": worldline_id,
+            "distribution": "chronicle-actor",
+            "genesis": "opaque-actor-v2-lazy",
+            "toolsets": ["memory"],
+        }
+        marker_tmp = profile_home / f".chronicle-genesis.{uuid.uuid4().hex}.tmp"
+        marker_tmp.write_text(
+            json.dumps(marker_values, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(marker_tmp, marker)
+        if memory_text is not None:
+            seed_profile_memory(config, profile, memory_text)
+    except Exception as exc:
+        if marker_tmp is not None:
+            marker_tmp.unlink(missing_ok=True)
+        if not profile_existed and profile_home.exists():
+            try:
+                shutil.rmtree(profile_home)
+            except OSError as cleanup_exc:
+                raise RuntimeError(
+                    f"Hermes lazy Profile setup failed for {profile}; cleanup failed: {cleanup_exc}"
+                ) from exc
+        raise
+    return profile, {
+        "mode": "live",
+        "created_on_observation": True,
+        "worldline_id": worldline_id,
+        "seat": seat,
+        "genesis": "opaque-actor-v2-lazy",
+        "toolsets": ["memory"],
+    }
+
+
+def remove_lazy_profile(config: AppConfig, seat: str, worldline_id: str) -> None:
+    """Remove an uncommitted branch Profile after its owning moment failed."""
+
+    profile = f"chronicle-{worldline_id[-8:]}-seat-{seat.lower()}"
+    profile_home = config.hermes_home / "profiles" / profile
+    marker = profile_home / "chronicle-genesis.json"
+    if not profile_home.exists():
+        return
+    try:
+        marker_values = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"cannot verify uncommitted Hermes Profile {profile}") from exc
+    if (
+        marker_values.get("profile") != profile
+        or marker_values.get("seat") != seat
+        or marker_values.get("worldline_id") != worldline_id
+    ):
+        raise RuntimeError(f"refusing to remove an unrelated Hermes Profile {profile}")
+    shutil.rmtree(profile_home)
+
+
+def seed_profile_memory(config: AppConfig, profile: str, memory_text: str) -> str:
+    """Seed a branch Profile from its explicit Entry-time memory snapshot."""
+
+    memory_path = profile_memory_path(config, profile)
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = memory_path.with_name(f".{memory_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(memory_text, encoding="utf-8")
+        temporary.chmod(0o600)
+        os.replace(temporary, memory_path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return str(memory_path)

@@ -7,7 +7,7 @@ import sys
 import uvicorn
 
 from .app import create_app
-from .config import load_config
+from .config import is_loopback_host, load_config
 from .doctor import doctor
 from .hermes import bootstrap
 from .scenario import validate_scenario, validate_source_pack
@@ -49,7 +49,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("ready") else 1
         elif args.command == "serve":
-            uvicorn.run(create_app(config), host=args.host or config.host, port=args.port or config.port, reload=config.dev)
+            requested_host = args.host or config.host
+            if not is_loopback_host(requested_host):
+                raise ValueError("Chronicle only supports loopback host binding")
+            uvicorn.run(create_app(config), host=requested_host, port=args.port or config.port, reload=config.dev)
         else:
             _parser().print_help()
     except Exception as exc:

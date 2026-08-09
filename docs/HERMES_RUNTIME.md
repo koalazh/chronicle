@@ -1,5 +1,27 @@
 # Hermes Runtime：原生边界与现场证据
 
+## V2 lazy branch lifetime
+
+V2 不在用户进入 Entry 时预先创建所有 Agent Profile。只有分支专属观察真正
+抵达某个 Agent Seat 时，runtime 才按 worldline_id 和 seat 创建动态、稳定命名
+的 branch Profile，并以 Entry 进入时保存的 memory snapshot 初始化其记忆。
+
+每次 branch wake 都使用 fresh session，不复用 Canon 或旧 Worldline 的 transcript。
+live Hermes 创建 Profile、写入 snapshot 或执行 wake 任一步失败都会停在 live
+边界并返回可读错误；fixture 只在显式 fixture 模式中生效，不作为 live fallback。
+
+若 branch Profile 已创建但后续 readiness、Fresh Session、模型响应或 SQLite moment
+提交失败，Host 会按 worldline_id 和 seat 校验 genesis marker，并清理这次尚未写入
+Worldline Lifetime 的精确 Profile；清理失败会以 live 错误显式暴露。普通 Live Wake
+在模型调用失败后也会检查并回滚 native Memory，避免 Hermes 外部状态先于 Ledger 成功。
+
+V2 仍把 Hermes 现场证据拆成三层：gateway/provider probe、Profile/lifetime
+创建、真实业务 wake。前一层成功不能替代后一层。
+
+Chronicle 到 project-local Hermes Gateway 的 HTTP 请求会显式禁用进程级代理环境，
+避免 `HTTP_PROXY`/`ALL_PROXY` 把 `127.0.0.1:8642` 的 readiness 请求转发到外部代理；
+Provider 的用户连接测试仍按其自身 URL 策略执行。
+
 Chronicle 使用本机 Hermes Agent CLI 创建三个同源 profile：
 
 - `chronicle-seat-a`

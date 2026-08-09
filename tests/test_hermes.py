@@ -43,6 +43,20 @@ def test_fresh_session_title_is_unique(monkeypatch, app_config):
     assert request["json"] == {"id": session_id, "title": f"Chronicle {session_id}"}
 
 
+def test_gateway_probe_does_not_inherit_process_proxy(monkeypatch, app_config):
+    request: dict[str, object] = {}
+
+    def fake_get(_url, **kwargs):
+        request.update(kwargs)
+        return SimpleNamespace(status_code=200, content=b"{}", json=lambda: {})
+
+    monkeypatch.setattr("chronicle.hermes.httpx.get", fake_get)
+
+    HermesClient(app_config).get_json("/health")
+
+    assert request["trust_env"] is False
+
+
 def test_probe_collects_profile_routes_toolsets_and_key_isolation(monkeypatch, app_config):
     keys = {
         PROFILE_NAMES["A"]: "key-a",

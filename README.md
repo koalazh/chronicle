@@ -2,7 +2,7 @@
 
 > **在不知道结局的情况下，重新活过历史。**
 
-Chronicle 是一个数字历史观测台：在崇祯十七年最后一个春天的有限时间窗里，三个长期主体只能接收 Host 送达的有限信息，形成自己的判断，留下有限的主观记忆。历史事实由史料策展与确定性 Host 约束；Agent 不能直接改写世界。
+Chronicle 是一个数字历史观测台：在崇祯十七年最后一个春天的有限时间窗里，历史先被观察，再由一个 Seat 从唯一 Entry 进入可恢复的 Worldline。主体只能接收 Host 送达的有限信息，形成自己的判断，留下有限的主观记忆。历史事实由史料策展与确定性 Host 约束；Agent 不能直接改写世界。
 
 ```text
 Truth ≠ Knowledge ≠ Belief
@@ -20,6 +20,8 @@ uv run chronicle serve
 
 第一次打开 `http://127.0.0.1:8711` 时，在 Chronicle Setup 输入 OpenAI-compatible Base URL、API Key 和 Model。Secret 只写入被 `.gitignore` 保护的 `.chronicle/runtime.env`，不进入浏览器存储或 API response。
 
+Chronicle 服务只允许绑定 loopback（`127.0.0.1`、`::1` 或 `localhost`）；`--host 0.0.0.0` 和其它远程绑定会被拒绝。Provider URL 也会在 Setup 阶段阻断凭据嵌入、私网/metadata 地址和无法解析的主机；远程 Provider 必须使用 HTTPS。
+
 配置成功后运行：
 
 ```bash
@@ -34,11 +36,12 @@ uv run chronicle doctor
 
 ## What this is
 
-Chronicle 不是历史聊天机器人、明末策略游戏、预测器或通用多 Agent 框架。V1 只有一个策展场景：正月初一至三月十九，以及唯一的真实反事实节点“太子抚军江南”。Canon 中 Agent 只能理解、相信、意图和记忆；Branch 中每个意图也必须经过确定性 Host 的权限与状态验证。
+Chronicle 不是历史聊天机器人、明末策略游戏、预测器或通用多 Agent 框架。V2 的主路径是 Observe → Enter → Live → Debrief：用户先浏览 Canon 和史料，在“太子抚军江南” Entry 进入一个最多十四天的 Worldline，只从自己的 SeatContextView 行动，最后显式退出并复盘。Branch 旧 API 仍保留用于回归和迁移取证，但不再是前端主心智。
 
 详细说明见：
 
 - [`PRODUCT.md`](PRODUCT.md)
+- [`V2_MIGRATION.md`](docs/V2_MIGRATION.md)
 - [`HISTORICAL_METHOD.md`](docs/HISTORICAL_METHOD.md)
 - [`HISTORICAL_BLINDNESS.md`](docs/HISTORICAL_BLINDNESS.md)
 - [`WORLD_MODEL.md`](docs/WORLD_MODEL.md)

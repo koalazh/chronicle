@@ -9,7 +9,7 @@ import pytest
 
 from chronicle.config import write_runtime_env
 from chronicle.db import stable_hash
-from chronicle.hermes import HermesClient
+from chronicle.hermes import HermesClient, HermesRuntimeError
 from chronicle.host import ChronicleHost
 
 
@@ -65,6 +65,41 @@ def test_ordinary_live_wake_rolls_back_native_memory_mutation(host, app_config, 
     assert len(violations) == 1
     assert violations[0]["action"] == "rollback"
     assert "unauthorized mutation" in violations[0]["memory_diff"]
+
+
+def test_ordinary_live_wake_rolls_back_native_memory_when_chat_fails(host, app_config, monkeypatch):
+    configured = replace(
+        app_config,
+        llm_base_url="https://provider.example/v1",
+        llm_api_key="provider-key",
+        llm_model="demo-model",
+    )
+    write_runtime_env(
+        configured,
+        {"CHRONICLE_CHRONICLE_SEAT_A_API_SERVER_KEY": "profile-key"},
+    )
+    live_host = ChronicleHost(configured, db=host.db, pack=host.pack)
+    memory_path = live_host._native_memory_path("A")
+    ready = SimpleNamespace(ready_for=lambda _profile: True)
+    monkeypatch.setattr("chronicle.host.probe", lambda *_args, **_kwargs: ready)
+    monkeypatch.setattr(HermesClient, "create_fresh_session", lambda *_args, **_kwargs: "session-a")
+
+    def failed_chat(*_args, **_kwargs):
+        memory_path.parent.mkdir(parents=True, exist_ok=True)
+        memory_path.write_text("mutation before provider failure\n", encoding="utf-8")
+        raise RuntimeError("provider disconnected")
+
+    monkeypatch.setattr(HermesClient, "chat", failed_chat)
+
+    with pytest.raises(HermesRuntimeError, match="live Hermes wake failed"):
+        live_host.wake("A", tick=4, live=True)
+
+    assert memory_path.exists() is False
+    violations = live_host.db.protocol_violations("A")
+    assert len(violations) == 1
+    assert violations[0]["action"] == "rollback"
+    assert "mutation before provider failure" in violations[0]["memory_diff"]
+    assert live_host.db.life_records("A") == []
 
 
 def test_memory_audit_tables_are_append_only(host):

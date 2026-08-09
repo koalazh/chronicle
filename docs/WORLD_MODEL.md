@@ -1,6 +1,22 @@
-# World Model：Host 拥有事实与变化
+# World Model：Ledger、Projection 与 Seat 边界
 
 Chronicle Host 是一个小型、确定性的世界内核，而不是 World Master LLM。
+
+## V2 Worldline
+
+V2 把一次经历拆成四个持久对象：Scenario/Entry 定义范围，Worldline 定义一次
+进入，worldline_events 是 append-only ledger，worldline_snapshot_history 是按
+tick 与 ledger cursor 追加保存的可读 projection。Projection 可以重建；ledger 的 sequence、causal parent
+和 provenance 才是审计事实。
+
+Worldline 有 CANON 与 BRANCH 两种 kind，以及 ACTIVE/SEALED 生命周期。Human
+Branch 是单用户锁：存在 active human worldline 时，Archivist 的 Canon、来源、
+Who Knows、Lifetime 和旧 Branch 写路径都暂停，避免一边修改 Canon 一边观察
+自己的分支。
+
+SeatContextView 是 Seat 与 Agent 共用的唯一输入边界。它只包含该 Seat 已收到的
+消息和观察、自己的 belief/memory snapshot、authority、已知不确定性与允许动作；
+Branch projection 的未送达事实不在这个对象中。
 
 ## Canon 状态
 

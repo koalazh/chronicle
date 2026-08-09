@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from .models import (
+    ACTION_CAUSAL_ENVELOPE,
     ActorDefinition,
     Assertion,
     CanonEvent,
@@ -131,6 +132,12 @@ class ScenarioPack:
         for assertion in self.assertions:
             if assertion.provenance.value == "historical" and not assertion.source_ids:
                 errors.append(f"assertion {assertion.id}: historical assertion needs a source")
+            if assertion.provenance.value == "scenario_assumption" and (
+                not assertion.source_ids or not assertion.notes.strip()
+            ):
+                errors.append(
+                    f"assertion {assertion.id}: scenario assumption needs sources and a note"
+                )
             for source_id in assertion.source_ids:
                 if source_id not in source_ids:
                     errors.append(f"assertion {assertion.id}: unknown source {source_id}")
@@ -172,6 +179,46 @@ class ScenarioPack:
                 errors.append(f"fork: unknown source assertion {assertion_id}")
         if self.fork.max_days != 14:
             errors.append("fork: V1 max_days must be 14")
+        if not set(self.fork.playable_seats).issubset(actor_seats):
+            errors.append("fork: playable Seats must be known actors")
+        if "A" not in self.fork.playable_seats:
+            errors.append("fork: Seat A must remain playable for Jiashen V2")
+        if self.fork.maximum_horizon != self.fork.max_days:
+            errors.append("fork: maximum_horizon must match max_days for the curated Entry")
+        if not self.fork.actions:
+            errors.append("fork: Entry action grammar cannot be empty")
+        if not set(self.fork.confirmation_required).issubset(set(self.fork.actions)):
+            errors.append("fork: confirmation actions must be in the Entry action grammar")
+        configured_channels = self.fork.wake_policy.observation_channels
+        if len(configured_channels) != len(set(configured_channels)):
+            errors.append("fork: wake policy observation channels must be unique")
+        known_channels = {
+            observation.channel
+            for event in self.events
+            for observations in event.observations.values()
+            for observation in observations
+        }
+        unknown_channels = set(configured_channels) - known_channels
+        if unknown_channels:
+            errors.append(
+                "fork: wake policy references unknown observation channels: "
+                + ", ".join(sorted(unknown_channels))
+            )
+        if not self.fork.wake_policy.messages:
+            errors.append("fork: message deliveries must remain Agent wake triggers")
+        causal_envelope = set(self.fork.causal_envelope)
+        unknown_envelope = causal_envelope - set(ACTION_CAUSAL_ENVELOPE.values())
+        if unknown_envelope:
+            errors.append(
+                "fork: causal envelope references unknown categories: "
+                + ", ".join(sorted(unknown_envelope))
+            )
+        for action in self.fork.actions:
+            category = ACTION_CAUSAL_ENVELOPE.get(action)
+            if category and category not in causal_envelope:
+                errors.append(
+                    f"fork: action {action.value} is outside the declared causal envelope"
+                )
         if errors:
             raise ScenarioValidationError(errors)
         return errors
@@ -192,6 +239,7 @@ class ScenarioPack:
             "source_count": len(self.sources),
             "seats": [actor.seat for actor in self.actors],
             "fork": self.fork.model_dump(mode="json"),
+            "entry": self.fork.model_dump(mode="json"),
         }
 
 

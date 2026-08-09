@@ -32,6 +32,10 @@ class ChronicleHost:
         self.config = config
         self.db = db or ChronicleDB(config.database_path)
         self.pack = pack or ScenarioPack.load(config.scenario_path)
+        from .runtime import WorldlineRuntime
+
+        self.worldline_runtime = WorldlineRuntime(self)
+        self.worldline_runtime.ensure_canon_worldline()
 
     @property
     def current_tick(self) -> int:
@@ -42,11 +46,15 @@ class ChronicleHost:
             raise ValueError("tick outside the Canon window")
         if tick < self.current_tick:
             raise ValueError("Chronicle time cannot move backwards")
+        if tick != self.current_tick and self.db.active_human_worldline() is not None:
+            raise ValueError("Canon advancement is locked while a human Worldline is active")
         self.db.set_meta("canon_tick", str(tick))
+        self.worldline_runtime.ensure_canon_worldline()
         return tick
 
     def reset_for_test(self) -> None:
         self.db.set_meta("canon_tick", str(self.pack.manifest.start_tick))
+        self.worldline_runtime.ensure_canon_worldline()
 
     def world_state(self, tick: int | None = None) -> dict[str, Any]:
         tick = self.current_tick if tick is None else tick
@@ -289,6 +297,37 @@ class ChronicleHost:
         )
         return restored_hash
 
+    def _compensate_native_memory_failure(
+        self,
+        *,
+        seat: str,
+        tick: int,
+        wake_type: WakeType,
+        epoch: str,
+        before_text: str,
+        before_hash: str,
+        before_exists: bool,
+        reason: str,
+    ) -> None:
+        try:
+            after_text, after_hash = self._native_memory(seat)
+        except OSError as exc:
+            raise HermesRuntimeError("Hermes Memory could not be inspected after wake failure") from exc
+        if after_hash == before_hash:
+            return
+        self._record_native_memory_violation(
+            seat=seat,
+            tick=tick,
+            wake_type=wake_type,
+            epoch=epoch,
+            before_text=before_text,
+            before_hash=before_hash,
+            before_exists=before_exists,
+            after_text=after_text,
+            after_hash=after_hash,
+            reason=reason,
+        )
+
     def _epoch(self) -> str:
         soul = self.config.root / "hermes" / "chronicle-actor" / "SOUL.md"
         skill = self.config.root / "hermes" / "chronicle-actor" / "skills" / "chronicle-actor-protocol" / "SKILL.md"
@@ -396,6 +435,17 @@ class ChronicleHost:
                 response = parse_actor_response(raw)
                 source = "hermes"
             except Exception as exc:
+                if use_native_memory:
+                    self._compensate_native_memory_failure(
+                        seat=seat,
+                        tick=tick,
+                        wake_type=wake_type,
+                        epoch=epoch,
+                        before_text=memory_before,
+                        before_hash=memory_hash_before,
+                        before_exists=memory_existed_before,
+                        reason="live Hermes wake failed after a native Memory mutation",
+                    )
                 raise HermesRuntimeError("live Hermes wake failed") from exc
         else:
             response = self._fixture_response(seat, tick, wake_type, runtime_input, outcome)

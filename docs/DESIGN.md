@@ -1,4 +1,4 @@
-# Design System：纸、墨与朱
+# Design System：Observe、Live 与 Debrief
 
 Chronicle 的界面是一个编辑型观测台，不是游戏 HUD。
 
@@ -12,12 +12,14 @@ Chronicle 的界面是一个编辑型观测台，不是游戏 HUD。
 
 ## 页面层级
 
-- Cover 先给出时间窗与一句方法承诺。
-- Chronicle 采用左时间线、中地图/事件、右 Who Knows 三栏。
-- Source Inspector 从右侧抽屉进入，不离开当前事件上下文。
-- Lifetimes 先选主体，再看 Life Record 和 Memory lineage。
-- Branch 固定为 Canon / Branch 双栏，并始终显示边界。
-- About 把 Truth、Knowledge、Belief 的差异写成可读方法，而不是装饰。
+- Observe 先给出时间窗、当前 Canon 节点、地图、Who Knows 和 Entry invitation。
+- Enter 是明确的单一 CTA；用户不会在多个 Branch、Seat 或 model 选项之间做隐含选择。
+- Live 只显示 Seat 的 Known World、已抵达信息、携带经历和自然语言 action zone。
+- Debrief 只在 SEALED Worldline 中出现，分开 What You Saw、What Was True、
+  What You Changed 和 Where It Stopped。
+- 史料依据从当前事件上下文打开；Archivist API 在 Human Worldline ACTIVE 时
+  显示锁定状态。人物经历详情只读取当前/已封存 Worldline 的 Branch Lifetime，
+  不从旧的全局 Lifetime API 拼接。
 
 ## 交互约束
 

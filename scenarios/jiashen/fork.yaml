@@ -7,3 +7,39 @@ runtime_premise: The proposal to move the principal heir southward and establish
 source_assertion_ids:
   - a019
 max_days: 14
+playable_seats:
+  - A
+actions:
+  - SEND_MESSAGE
+  - ISSUE_ORDER
+  - REQUEST_INFORMATION
+  - APPOINT_AUTHORITY
+  - PREPARE_MOVEMENT
+  - MOVE_PRINCIPAL
+  - REDEPLOY_FORCE
+  - SET_DISCLOSURE
+  - WAIT
+confirmation_required:
+  - APPOINT_AUTHORITY
+  - MOVE_PRINCIPAL
+maximum_horizon: 14
+causal_envelope:
+  - authority
+  - information_request
+  - orders
+  - message_propagation
+  - disclosure
+  - preparation
+  - known_movement
+  - existing_force_redeployment
+  - modeled_seat_reaction
+wake_policy:
+  messages: true
+  observation_channels:
+    - emergency-courier
+    - frontier-memorial
+    - command-camp
+    - court-order
+    - border-command
+    - wall-report
+seat_brief: 你接管的不是一个新角色，而是一个已经拥有过去、命令与未决消息的历史位置。

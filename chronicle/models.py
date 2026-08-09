@@ -12,6 +12,7 @@ class StrictModel(BaseModel):
 
 class Provenance(StrEnum):
     HISTORICAL = "historical"
+    SCENARIO_ASSUMPTION = "scenario_assumption"
     MODELED = "modeled"
     BRANCH_DERIVED = "branch_derived"
 
@@ -54,7 +55,45 @@ class ActionType(StrEnum):
     REDEPLOY_FORCE = "REDEPLOY_FORCE"
     HOLD_POSITION = "HOLD_POSITION"
     NEGOTIATE = "NEGOTIATE"
+    SET_DISCLOSURE = "SET_DISCLOSURE"
     WAIT = "WAIT"
+
+
+ACTION_CAUSAL_ENVELOPE: dict[ActionType, str] = {
+    ActionType.SEND_MESSAGE: "message_propagation",
+    ActionType.ISSUE_ORDER: "orders",
+    ActionType.REQUEST_INFORMATION: "information_request",
+    ActionType.APPOINT_AUTHORITY: "authority",
+    ActionType.PREPARE_MOVEMENT: "preparation",
+    ActionType.MOVE_PRINCIPAL: "known_movement",
+    ActionType.REDEPLOY_FORCE: "existing_force_redeployment",
+    ActionType.SET_DISCLOSURE: "disclosure",
+    ActionType.HOLD_POSITION: "modeled_seat_reaction",
+    ActionType.NEGOTIATE: "modeled_seat_reaction",
+    ActionType.WAIT: "modeled_seat_reaction",
+}
+
+
+class WorldlineKind(StrEnum):
+    CANON = "CANON"
+    BRANCH = "BRANCH"
+
+
+class WorldlineStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    SEALED = "SEALED"
+
+
+class Controller(StrEnum):
+    AGENT = "AGENT"
+    HUMAN = "HUMAN"
+
+
+class ActionValidation(StrEnum):
+    ACCEPTED = "ACCEPTED"
+    IMPOSSIBLE = "IMPOSSIBLE"
+    UNSUPPORTED = "UNSUPPORTED"
+    AMBIGUOUS = "AMBIGUOUS"
 
 
 class SourceCitation(StrictModel):
@@ -150,6 +189,13 @@ class ScenarioManifest(StrictModel):
     tick_unit: str = "day"
 
 
+class WakePolicy(StrictModel):
+    """Entry-local rule for which durable deliveries justify an Agent wake."""
+
+    messages: bool = True
+    observation_channels: list[str] = Field(default_factory=list)
+
+
 class ForkDefinition(StrictModel):
     id: str
     event_id: str
@@ -159,6 +205,20 @@ class ForkDefinition(StrictModel):
     runtime_premise: str
     source_assertion_ids: list[str]
     max_days: int = 14
+    playable_seats: list[str] = Field(default_factory=lambda: ["A"])
+    actions: list[ActionType] = Field(default_factory=lambda: [ActionType.WAIT])
+    confirmation_required: list[ActionType] = Field(default_factory=list)
+    maximum_horizon: int = 14
+    causal_envelope: list[str] = Field(default_factory=list)
+    wake_policy: WakePolicy = Field(default_factory=WakePolicy)
+    seat_brief: str = ""
+
+    @property
+    def horizon(self) -> int:
+        return self.maximum_horizon or self.max_days
+
+
+EntryDefinition = ForkDefinition
 
 
 class BeliefUpdate(StrictModel):
@@ -190,3 +250,29 @@ class BranchAction(StrictModel):
     recipient: str = ""
     payload: str = ""
     priority: str = "normal"
+
+
+class SeatContextView(StrictModel):
+    """The only state contract allowed to cross into a Seat-side consumer."""
+
+    worldline_id: str
+    entry_id: str
+    seat: str
+    tick: int
+    known_world: dict[str, Any] = Field(default_factory=dict)
+    what_reached_you: list[dict[str, Any]] = Field(default_factory=list)
+    what_you_carry: dict[str, Any] = Field(default_factory=dict)
+    authority: list[ActionType] = Field(default_factory=list)
+    known_uncertainty: list[str] = Field(default_factory=list)
+    visible_entities: list[str] = Field(default_factory=list)
+    visible_assertion_ids: list[str] = Field(default_factory=list)
+
+
+class InteractionResult(StrictModel):
+    kind: str
+    answer: str = ""
+    interpreted_actions: list[BranchAction] = Field(default_factory=list)
+    status: ActionValidation | None = None
+    requires_confirmation: bool = False
+    confirmation_id: str = ""
+    result: dict[str, Any] | None = None

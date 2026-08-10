@@ -1,48 +1,75 @@
-# Chronicle: 甲申
+# Chronicle V3 产品说明
 
-Chronicle 是一个围绕“有限信息如何进入长期存在的主体”的历史观测台。V2 将一次反事实收敛为一条可恢复、可封存的 Worldline，主路径是 Observe → Enter → Live → Debrief。场景仍是甲申年间，从崇祯十七年正月初一到三月十九日的 Canon 时间窗。
+## 一句话
 
-## 产品承诺
+Chronicle 让你观察三位历史主体如何在同一场危局中各自生活：他们收到的消息不同，理解不同，计划也不同；世界不会因为你看不见它就暂停。
 
-- Canon 由 Chronicle Host 持有：时间、事件、地点状态、消息送达和 Worldline 边界不由 Agent 决定。
-- Knowledge 经过传播：一个事件发生，不代表三个 Seat 同时知道。
-- Lifetime 不是聊天记录：Life Record 记录实际经历，Hermes Memory 只记录 Reflection 后被主体携带的有限经验。
-- Agent 只能产生判断和受权限约束的意图；Host 校验并应用世界效果。
-- 历史未知处停止：V2 的 Worldline 只从一个有来源的 Entry 开始，最多推进十四天；到达边界后封存，不继续补写未知历史。
+用户不是在给人物下棋，也不是在阅读模型临场写出的小说。产品的价值是让用户能够追问四件具体的事：一封信何时抵达、谁因此改变了计划、谁当时还不知道，以及封存后才看见的全景与当时视野有何不同。
 
-## 四个产品阶段
+## 第一场危局
 
-1. Observe：按事件浏览 Canon、来源和 Who Knows。
-2. Enter：在唯一 Entry “太子抚军江南”进入经历。
-3. Live：以 Seat A 的已知信息和自然语言意图推进，不显示分支全局真相。
-4. Debrief：封存后分别查看所见、Host 投影、因果变化和停止原因。
+“山海关之前”从一个有来源的相对时间窗开始：李自成已经在北京建立新秩序，吴三桂守山海关，多尔衮率军从辽西向西行进；两封关键来信正在路上，三方都还没有被产品替他们作出不可逆选择。
 
-## 运行方式
+本场只支持通信、等待、有限准备、有限移动、更新计划和安排未来复查。它在需要裁定山海关大规模直接交战时停止，第 9 日只是安全上限，不是战役模拟器的入口。历史上后来发生的主体行动保留为 `REFERENCE_ONLY`，用于对照，不会变成 scheduler 的脚本。
 
-```bash
-uv sync
-cp .env.example .env
-uv run chronicle source validate
-uv run chronicle scenario validate
-uv run chronicle doctor
-uv run chronicle serve
-```
+## 两条用户旅程
 
-首次打开页面会进入 Setup。Provider 只需满足 OpenAI-compatible Chat Completions 或 Responses 接口；API Key 由服务端写入 `.chronicle/runtime.env`，不会回显到浏览器。
+### Watch：旁观
 
-服务部署边界是本机 loopback：Chronicle 不接受通过 `--host` 或 `CHRONICLE_HOST` 直接暴露到局域网/公网。Setup 会先校验 Provider URL，再只向其 `/models` 端点发送连接测试；私网、metadata、嵌入凭据和不支持的模型会被拒绝。
+进入 Watch 后，李自成、吴三桂和多尔衮都由 Hermes 运行。默认先看世界视野，再切换到任一主体的视野：世界视野回答“客观上发生了什么”，主体视野回答“这个人当时合法地知道什么、相信什么、准备什么”。切换视野只改变展示，不改变 Run。
 
-## 证据等级
+用户只需点击“继续”。系统寻找下一个消息抵达、移动完成、承诺到期、观察触发或主体新行动出现的时刻；没有触发条件就不唤醒主体。没有用户输入时，三个主体仍然可以形成计划、等待、沟通和改变计划。
 
-UI 会将内容分成 `historical`、`modeled`、`branch_derived`。Source Pack 的断言和来源链接可从 Source Inspector 打开。Hermes/LLM 的现场调用、模型版本和网络状态不会被确定性测试冒充。
+### Takeover：成为吴三桂
 
-V1 到 V2 的迁移、API、数据库和证据边界见 [V2 migration](docs/V2_MIGRATION.md)。
+进入 Takeover 后，李自成和多尔衮仍由 Hermes 运行，吴三桂由用户控制。活动期间后端只提供吴三桂的合法视野；世界全局、其他主体的私有计划、未送达消息和私有工具调用都不是“被前端藏起来”，而是不可读取。
 
-更完整的约束见：
+用户可以写一段自然语言表达回信、准备、等待、计划或未来复查。解释器只负责把文字翻译成最多八个 World Affordance 请求，Host 再按同一套身份、权限、路线、资源、边界、幂等和原子提交规则处理。解释失败不会回退成正则规则或 fixture 成功；空文本加“继续”表示暂不追加决定。
 
-- [历史方法](docs/HISTORICAL_METHOD.md)
-- [历史盲区](docs/HISTORICAL_BLINDNESS.md)
-- [世界模型](docs/WORLD_MODEL.md)
-- [反事实方法](docs/COUNTERFACTUAL_METHOD.md)
-- [Hermes 运行时](docs/HERMES_RUNTIME.md)
-- [运维与验证](docs/OPERATIONS.md)
+Takeover Desk 不把用户变成“管理自己的 Plan”的任务管理员。它展示新到、已知、未决和已发出的客观状态，决定区只问“你准备怎么处置”。
+
+## 产品心智模型
+
+| 概念 | 用户应该理解成 | 不能混成 |
+| --- | --- | --- |
+| Truth | Host 当前裁定的时间、地点、路线、消息和世界效果 | 人物的猜测 |
+| Knowledge | 某个主体已经收到并能使用的事实、信件和观察 | 世界全局 |
+| Belief | 主体对不确定事情的私有判断 | 史实定论 |
+| Plan / Commitment | 主体准备怎么做、何时重新判断 | 聊天记录或任务清单 |
+
+事件发生不等于三方同时知道；消息发出不等于消息抵达。每个主体都拥有自己的 Life State，私有状态由主体提出更新，世界效果由 Host 验证和提交。
+
+## 谁拥有哪类决定
+
+Host 决定模拟时间、地点、路线、抵达时间、资源是否存在、权限是否足够、行动是否具备现实前提，以及事件如何原子写入 Ledger。主体决定是否等待、沟通、拒绝、改变计划、安排复查，如何解释新消息，以及是否提出一个有限行动。
+
+新增规则时先问：两个聪明主体在同一客观条件下，是否可能合理地做出不同选择？如果可能，规则应交给主体；如果不可能，例如路线不存在或信件尚未抵达，规则应交给 Host。这是 Chronicle 的“厚主体、薄 Host”检查。
+
+## 页面范围
+
+| 页面 | 它要回答的问题 |
+| --- | --- |
+| 首页 | 这是什么危局，我可以旁观还是亲自进入？ |
+| Watch | 世界与三个人物分别知道什么？下一件有意义的事是什么？ |
+| 吴三桂书案 | 我刚收到什么，哪些事情仍未解决，我准备怎么处置？ |
+| 回看 | 当时看不见的行动如何通过消息和计划相遇？ |
+| 封存卷册 | 我以前封存过哪些局？ |
+| 史实背景 | 哪些来自来源，哪些有争议，哪些是建模假设？ |
+| 设置 | 如何安全连接本机模型服务？ |
+
+页面不应变成技术状态墙、Agent Dashboard、策略游戏 HUD、聊天窗口或带内部 ID 的日志平铺。
+
+## 明确不做什么
+
+第一版不做大规模战役结算、经济与士气、关系分数、情绪引擎、数百个 NPC、群聊/现场 Scene、通用 Scenario Builder、远程认证、多租户或通用多 Agent 平台。也不把后来的历史行动强行播放，不用一个中央模型替三位主体决定。
+
+## 当前实现边界
+
+正式页面只运行 live；fixture 只在显式开发模式和自动化中替代模型输出，不替代 scheduler、WorldService、Ledger、Life State 或权限检查。测试、浏览器截图和 Doctor 各自只证明自己的层级；真实业务结论必须来自同一 live Run 的可关联链，见 [验收记录](docs/ACCEPTANCE.md)。
+
+## 相关文档
+
+- [架构](docs/ARCHITECTURE.md)：Run、Perspective、Life State、调度、Hermes 和迁移。
+- [前端合同](docs/FRONTEND.md)：页面状态、文案、视觉和前后端接缝。
+- [历史与视野](docs/HISTORY.md)：来源、争议、Provenance 和主体可见性。
+- [运维与验收](docs/OPERATIONS.md)：启动、迁移、fixture、Doctor 和真实业务验收。

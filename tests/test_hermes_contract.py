@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from chronicle.hermes import actor_protocol_prompt, parse_actor_response, wake_messages
+from chronicle.db import content_hash
+from chronicle.hermes import (
+    actor_protocol_prompt,
+    materialize_crisis_profiles,
+    parse_actor_response,
+    remove_crisis_profiles,
+    wake_messages,
+)
+from chronicle.world_mcp import mcp
 
 
 def test_actor_response_accepts_fenced_json():
@@ -47,3 +58,84 @@ def test_actor_distribution_declines_recent_builtin_toolset():
 
     assert config["platform_toolsets"]["api_server"] == ["memory"]
     assert config["known_builtin_toolsets"]["api_server"] == ["bfl"]
+
+
+@pytest.mark.asyncio
+async def test_world_mcp_exposes_only_identity_free_crisis_tools():
+    tools = {tool.name: tool.inputSchema for tool in await mcp.list_tools()}
+
+    assert set(tools) == {"communicate", "act", "update_plan", "schedule_followup"}
+    for schema in tools.values():
+        assert not {"actor_id", "profile", "run_id", "wake_id"}.intersection(
+            schema.get("properties", {})
+        )
+
+
+def test_eager_crisis_profiles_are_owned_and_world_tool_only(
+    app_config, monkeypatch
+):
+    def fake_install(config, args, timeout=30):
+        profile = args[args.index("--name") + 1]
+        shutil.copytree(
+            config.root / "hermes" / "chronicle-actor",
+            config.hermes_home / "profiles" / profile,
+        )
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("chronicle.hermes._run_cli", fake_install)
+    records = materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [
+            {
+                "id": "li-zicheng",
+                "role_charter": {
+                    "who": "危局中的李自成",
+                    "responsibility": ["维持秩序"],
+                    "authority": ["作出有限行动"],
+                    "tensions": ["等待与行动"],
+                },
+                "genesis_hash": "genesis-hash-test",
+                "initial_memory_snapshot": {
+                    "memory_text": "",
+                    "memory_hash": content_hash(""),
+                },
+            }
+        ],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="hermes-epoch-test",
+    )
+    record = records["li-zicheng"]
+    profile_home = app_config.hermes_home / "profiles" / record["profile"]
+    config = yaml.safe_load((profile_home / "config.yaml").read_text(encoding="utf-8"))
+    marker = json.loads((profile_home / "chronicle-genesis.json").read_text(encoding="utf-8"))
+    profile_env = (profile_home / ".env").read_text(encoding="utf-8")
+
+    world_server = record["world_server_name"]
+    assert config["platform_toolsets"]["api_server"] == ["memory", world_server]
+    assert config["agent"]["max_turns"] == 8
+    assert set(config["mcp_servers"]) == {world_server}
+    assert config["mcp_servers"][world_server]["env"]["CHRONICLE_WORLD_TOKEN"] == "${CHRONICLE_WORLD_TOKEN}"
+    assert marker["worldline_id"] == "run-12345678abcdefgh"
+    assert marker["crisis_id"] == "before-shanhaiguan"
+    assert marker["genesis_hash"] == "genesis-hash-test"
+    assert marker["initial_memory_snapshot"]["memory_hash"] == content_hash("")
+    assert marker["runtime_epoch"] == "hermes-epoch-test"
+    assert record["world_token"] not in json.dumps(marker)
+    assert f"CHRONICLE_WORLD_TOKEN={record['world_token']}" in profile_env
+    assert "危局中的李自成" in (profile_home / "SOUL.md").read_text(encoding="utf-8")
+    gateway_config = yaml.safe_load(
+        (app_config.hermes_home / "config.yaml").read_text(encoding="utf-8")
+    )
+    assert set(gateway_config["mcp_servers"]) == {world_server}
+    assert record["world_token"] not in json.dumps(gateway_config)
+    assert record["world_token"] in (app_config.hermes_home / ".env").read_text(
+        encoding="utf-8"
+    )
+
+    remove_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [record["profile"]],
+    )
+    assert not profile_home.exists()

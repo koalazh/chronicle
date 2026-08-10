@@ -1,0 +1,120 @@
+sources:
+  - id: qing-shilu-shizu-4
+    work: 《清实录·世祖章皇帝实录》
+    locator: 卷四·顺治元年四月
+    url: https://zh.wikisource.org/wiki/清實錄/世祖章皇帝實錄/卷四
+    description: 记多尔衮受印出师、行军、吴三桂来信与回书，以及山海关交战；属于清廷编纂的官方实录，需注意其政治叙事立场。
+  - id: mingji-beilue-20
+    work: 《明季北略》
+    locator: 卷二十·吴三桂请兵始末
+    url: https://zh.wikisource.org/wiki/明季北略/卷20
+    description: 保存吴三桂、李自成与山海关前后多种叙述，也混有后出传闻；用于交叉校读而非单独定论。
+  - id: qingshi-gao-474
+    work: 《清史稿》
+    locator: 卷四百七十四·吴三桂传
+    url: https://zh.wikisource.org/wiki/清史稿/卷474
+    description: 后出官修传记对吴三桂入关、往返山海关、向多尔衮求援与交战的综合叙述。
+  - id: mingshi-309
+    work: 《明史》
+    locator: 卷三百九·流贼列传·李自成
+    url: https://zh.wikisource.org/wiki/明史/卷309
+    description: 后出官修史对李自成在北京、吴三桂与山海关战事的综合叙述；陈沅段落不能直接转成行为规则。
+  - id: wakeman-great-enterprise
+    work: The Great Enterprise
+    locator: Volume I, 1644 transition and Shanhai Pass chronology
+    url: https://books.google.com.au/books/about/The_Great_Enterprise.html?id=8nXLwSG2O8AC
+    description: Frederic Wakeman, University of California Press, 1985；用于校准多方材料与政治背景，不替代一手文本。
+
+assertions:
+  - id: c001
+    claim: 清廷在顺治元年四月初八授多尔衮奉命大将军印，随后大军由关外向西出发。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [qing-shilu-shizu-4]
+    normalized_evidence: 实录按四月初八受印、初九起行记录，多尔衮在收到吴三桂首封来信前已经西进。
+  - id: c002
+    claim: 北京陷落后，吴三桂由宁远方向回到并控制山海关，关口仍是关内外交通的关键边界。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474]
+    normalized_evidence: 三种叙述均将吴三桂、宁远撤守与山海关联系起来，但兵数与往返细节不同。
+  - id: c003
+    claim: 李自成已控制北京，并通过吴襄、使者与条件尝试处理吴三桂；吴襄及家属构成现实压力。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-beilue-20, qingshi-gao-474, mingshi-309]
+    normalized_evidence: 多种后出材料均记招抚、吴襄书信或家属压力；来使时点、条件与吴的态度不完全一致。
+  - id: c004
+    claim: 清实录记顺治元年四月十五日，多尔衮军至翁后时收到吴三桂遣杨珅、郭云龙所致求助信。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [qing-shilu-shizu-4]
+    normalized_evidence: 实录卷四壬申条保存来信，信中请求共同对付流寇并许事后酬谢，尚未写作臣属投降。
+  - id: c005
+    claim: 清实录记多尔衮次日回书，将协助改写为要求吴三桂归附并许以封爵。
+    provenance: historical
+    evidence_status: single_attested
+    source_ids: [qing-shilu-shizu-4]
+    normalized_evidence: 实录卷四癸酉条保存回书；这是 checkpoint 后的真实历史，只作对照而不自动注入 Run。
+  - id: c006
+    claim: 历史记载中，李自成后来亲率大军东进，多尔衮与吴三桂在山海关会合并进入大规模交战。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474, mingshi-309]
+    normalized_evidence: 各材料对兵数、日期和先后细节有差异，但均记东进、会合与大规模交战；全部属于 reference only。
+  - id: c007
+    claim: 将吴三桂的选择完全归结为陈沅被掠，是后出叙述中的一种解释，不能作为唯一因果事实。
+    provenance: historical
+    evidence_status: disputed
+    source_ids: [mingji-beilue-20, qingshi-gao-474, mingshi-309, wakeman-great-enterprise]
+    normalized_evidence: 不同材料对吴三桂往返、家属、政治和军事压力的排序并不一致；本局不把私人轶事编成触发规则。
+    notes: disputed causal narrative
+  - id: c008
+    claim: 危局起点设在四月中旬前、吴三桂首封求助信仍在辽西途中，是为保留三方重大选择而作的研究性切片。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [qing-shilu-shizu-4, wakeman-great-enterprise]
+    normalized_evidence: 以清实录初八出师、十五日翁后收信的顺序建立相对时间窗，不声称唯一现代公历换算。
+    notes: checkpoint placement derived from source chronology
+  - id: c009
+    claim: 北京、永平、山海关、辽西之间按两模拟日一段建模，只表达消息与人不会瞬时移动。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [qing-shilu-shizu-4, wakeman-great-enterprise]
+    normalized_evidence: 史料提供行军节点而非稳定统一的旅行时长；两日是用于有界调度的显式模型值。
+    notes: route duration model, not a historical travel-time claim
+  - id: c010
+    claim: 危局开始时，从北京方面发往吴三桂的一封招抚信在途中，并将在本局第一天抵达。
+    provenance: scenario_assumption
+    evidence_status: disputed
+    source_ids: [mingji-beilue-20, qingshi-gao-474, mingshi-309]
+    normalized_evidence: 多种材料均有招抚叙述但日期和往返顺序不同；到达日是显式场景假设。
+    notes: disputed message chronology normalized for the crisis
+  - id: c011
+    claim: 危局开始时，吴三桂的首封求助信已经发出、尚未到达多尔衮，将在本局第三天抵达。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [qing-shilu-shizu-4, wakeman-great-enterprise]
+    normalized_evidence: 清实录确认四月十五日收信；发出与危局起点的相对位置是为短危局建立的建模选择。
+    notes: in-transit message assumption
+  - id: c012
+    claim: 三方在危局开始时不知道彼此尚未表达的私有计划，也不能从后来史实反推对方已经作出决定。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [qing-shilu-shizu-4, mingji-beilue-20]
+    normalized_evidence: 材料只记录后来留存的信件与行动，不能证明危局开始时已存在的完整内心计划。
+    notes: perspective boundary
+  - id: c013
+    claim: 本局以资源等级和约束表达，不把史料中互相冲突的兵数当作精确初始值。
+    provenance: scenario_assumption
+    evidence_status: disputed
+    source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474, mingshi-309]
+    normalized_evidence: 相关记载对各方兵数差异显著，因此 V3 第一场只保留可用、有限、分散等序数状态。
+    notes: resource abstraction
+  - id: c014
+    claim: 当本局需要裁定山海关大规模直接交战胜负时必须停止，模拟日上限只是一道安全边界。
+    provenance: scenario_assumption
+    evidence_status: corroborated
+    source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474, mingshi-309]
+    normalized_evidence: 历史材料明确后续进入大型交战，而本场危局的产品范围不含战役结算。
+    notes: product simulation boundary

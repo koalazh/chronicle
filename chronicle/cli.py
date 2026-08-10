@@ -8,6 +8,7 @@ import uvicorn
 
 from .app import create_app
 from .config import is_loopback_host, load_config
+from .crisis import validate_crisis_pack
 from .doctor import doctor
 from .hermes import bootstrap
 from .scenario import validate_scenario, validate_source_pack
@@ -21,6 +22,8 @@ def _parser() -> argparse.ArgumentParser:
     source.add_subparsers(dest="source_command").add_parser("validate")
     scenario = sub.add_parser("scenario")
     scenario.add_subparsers(dest="scenario_command").add_parser("validate")
+    crisis = sub.add_parser("crisis")
+    crisis.add_subparsers(dest="crisis_command").add_parser("validate")
     sub.add_parser("doctor")
     bootstrap_parser = sub.add_parser("bootstrap")
     bootstrap_parser.add_argument("--force-reset", action="store_true")
@@ -40,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(validate_source_pack(config.scenario_path)))
         elif args.command == "scenario" and args.scenario_command == "validate":
             print("\n".join(validate_scenario(config.scenario_path)))
+        elif args.command == "crisis" and args.crisis_command == "validate":
+            print("\n".join(validate_crisis_pack(config.crisis_path)))
         elif args.command == "doctor":
             result = doctor(config)
             print(json.dumps(result, ensure_ascii=False, indent=2))

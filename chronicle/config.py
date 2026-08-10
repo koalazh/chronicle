@@ -68,6 +68,10 @@ class AppConfig:
     def runtime_env_path(self) -> Path:
         return self.runtime_dir / "runtime.env"
 
+    @property
+    def crisis_path(self) -> Path:
+        return self.scenario_path / "crises" / "before-shanhaiguan"
+
     def provider_hash(self) -> str:
         return hashlib.sha256(self.llm_base_url.encode()).hexdigest()[:16]
 

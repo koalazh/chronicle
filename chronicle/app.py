@@ -14,6 +14,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppConfig, is_loopback_host, load_config, write_runtime_env
+from .crisis import CrisisPack
+from .crisis_runtime import (
+    CrisisRunConflict,
+    CrisisRunEngine,
+    CrisisRunError,
+    RunMode,
+)
+from .db import ChronicleDB
 from .doctor import doctor
 from .hermes import HermesRuntimeError
 from .hermes import bootstrap as bootstrap_hermes
@@ -60,6 +68,19 @@ class WorldlineAdvanceRequest(BaseModel):
 
 
 class WorldlineSealRequest(BaseModel):
+    reason: str = Field(default="user_exit", max_length=256)
+
+
+class CreateRunRequest(BaseModel):
+    mode: Literal["WATCH", "TAKEOVER"]
+    live: bool = True
+
+
+class HumanDecisionRequest(BaseModel):
+    text: str = Field(default="", max_length=4000)
+
+
+class SealRunRequest(BaseModel):
     reason: str = Field(default="user_exit", max_length=256)
 
 
@@ -168,6 +189,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         status = 423 if "Archivist view is locked" in str(exc) else 409 if isinstance(exc, WorldlineConflict) else 400
         return HTTPException(status_code=status, detail=str(exc))
 
+    def crisis_engine() -> CrisisRunEngine:
+        return CrisisRunEngine(current_config())
+
+    def crisis_http_error(exc: CrisisRunError) -> HTTPException:
+        return HTTPException(
+            status_code=409 if isinstance(exc, CrisisRunConflict) else 400,
+            detail=str(exc),
+        )
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "chronicle-host"}
@@ -185,10 +215,223 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "reasoning_effort": active.llm_reasoning_effort,
             "api_key": active.masked_api_key(),
             "hermes_base_url": active.hermes_base_url,
-            "runtime_mode": "live" if hermes_ready else "fixture",
+            "runtime_mode": "live",
             "hermes_ready": hermes_ready,
             "hermes_status": readiness["status"],
         }
+
+    @app.get("/api/crisis")
+    async def crisis() -> dict[str, Any]:
+        active = current_config()
+        pack = CrisisPack.load(active.crisis_path)
+        return {
+            "summary": pack.summary(),
+            "title": pack.crisis.title,
+            "subtitle": pack.crisis.subtitle,
+            "checkpoint": pack.crisis.checkpoint.model_dump(mode="json"),
+            "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
+            "actors": [
+                {
+                    "id": actor.id,
+                    "display_name": actor.display_name,
+                    "role_charter": actor.role_charter.model_dump(mode="json"),
+                }
+                for actor in pack.crisis.actors
+            ],
+            "corridor": [
+                location.model_dump(mode="json")
+                for location in sorted(pack.crisis.corridor, key=lambda item: item.order)
+            ],
+        }
+
+    @app.post("/api/runs")
+    async def create_run(request: CreateRunRequest) -> dict[str, Any]:
+        active = current_config()
+        if not request.live and not active.dev:
+            raise HTTPException(
+                status_code=409,
+                detail="正式体验只使用真实主体运行；测试替身仅在开发模式开放。",
+            )
+        if request.live and not active.llm_configured:
+            raise HTTPException(
+                status_code=409,
+                detail="请先在设置页连接主体所需的模型服务。",
+            )
+        engine = CrisisRunEngine(active)
+        try:
+            created = await asyncio.to_thread(
+                engine.create,
+                RunMode(request.mode),
+                runtime_mode="live" if request.live else "fixture",
+            )
+            start_error = (
+                "主体身份已建立；请重新启动本地主体服务，待设置页显示就绪后再继续这一局。"
+                if request.live
+                else ""
+            )
+            if not request.live:
+                await asyncio.to_thread(engine.advance_one, created["run"]["id"])
+            return {
+                "run": engine.run_summary(created["run"]["id"]),
+                "started": not start_error,
+                "start_error": start_error,
+            }
+        except CrisisRunConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="已有一局尚未封存，请先继续或封存当前这一局。",
+            ) from exc
+        except CrisisRunError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="这一局未能建立，请确认设置页中的模型连接和本地主体服务后重试。",
+            ) from exc
+
+    @app.get("/api/runs/active")
+    async def active_run() -> dict[str, Any]:
+        engine = crisis_engine()
+        run = engine.db.active_run()
+        if run is None:
+            return {"run": None}
+        return {"run": engine.run_summary(run["id"])}
+
+    @app.post("/api/runs/{run_id}/continue")
+    async def continue_run(run_id: str) -> dict[str, Any]:
+        active = current_config()
+        engine = CrisisRunEngine(active)
+        try:
+            summary = engine.run_summary(run_id)
+            if summary["runtime_mode"] == "live":
+                readiness = await asyncio.to_thread(doctor, active)
+                if readiness["status"] != "READY":
+                    raise CrisisRunConflict(
+                        "主体服务尚未就绪；请在设置页确认就绪后再继续。"
+                    )
+            advanced = await asyncio.to_thread(engine.advance_one, run_id)
+            return {
+                "advanced": advanced,
+                "run": engine.run_summary(run_id),
+            }
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.get("/api/runs/{run_id}/world")
+    async def run_world(run_id: str) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            summary = engine.run_summary(run_id)
+            if summary["mode"] == "TAKEOVER" and summary["status"] == "ACTIVE":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Human Takeover is locked to the Human perspective",
+                )
+            return engine.world_view(run_id)
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.get("/api/runs/{run_id}/perspective/{actor_id}")
+    async def run_perspective(run_id: str, actor_id: str) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            summary = engine.run_summary(run_id)
+            if (
+                summary["mode"] == "TAKEOVER"
+                and summary["status"] == "ACTIVE"
+                and actor_id != summary["human_actor"]
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Human Takeover is locked to the Human perspective",
+                )
+            return engine.product_perspective(run_id, actor_id)
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.post("/api/runs/{run_id}/decision")
+    async def decide(run_id: str, request: HumanDecisionRequest) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            return await asyncio.to_thread(engine.submit_human_decision, run_id, request.text)
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.post("/api/runs/{run_id}/seal")
+    async def seal_run(run_id: str, request: SealRunRequest) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            return {"run": await asyncio.to_thread(engine.seal, run_id, request.reason)}
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.get("/api/runs/{run_id}/replay")
+    async def replay_run(run_id: str) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            return engine.replay(run_id)
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.get("/api/archive")
+    async def archive() -> dict[str, Any]:
+        active = current_config()
+        db = ChronicleDB(active.database_path)
+        runs = []
+        for row in db.worldlines(status="SEALED"):
+            if row["kind"] == "CRISIS":
+                runs.append(CrisisRunEngine(active, db=db).run_summary(row["id"]))
+            else:
+                runs.append(
+                    {
+                        "id": row["id"],
+                        "mode": "LEGACY_V2",
+                        "status": row["status"],
+                        "current_tick": row["current_tick"],
+                        "created_at": row["created_at"],
+                        "seal_reason": row["seal_reason"],
+                    }
+                )
+        return {"runs": runs}
+
+    @app.get("/api/history")
+    async def historical_background() -> dict[str, Any]:
+        pack = CrisisPack.load(current_config().crisis_path)
+        return {
+            "sources": [source.model_dump(mode="json") for source in pack.sources],
+            "assertions": [assertion.model_dump(mode="json") for assertion in pack.assertions],
+            "anchors": [anchor.model_dump(mode="json") for anchor in pack.crisis.anchors],
+            "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
+        }
+
+    @app.get("/api/dev/runs/{run_id}")
+    async def dev_run(run_id: str) -> dict[str, Any]:
+        active = current_config()
+        if not active.dev:
+            raise HTTPException(status_code=404, detail="Developer diagnostics are disabled")
+        engine = CrisisRunEngine(active)
+        try:
+            summary = engine.run_summary(run_id)
+            events = engine.db.worldline_events(run_id)
+            wakes = engine.db.crisis_wakes(run_id)
+            lifetimes = engine.db.worldline_lifetimes(run_id)
+            if summary["mode"] == "TAKEOVER" and summary["status"] == "ACTIVE":
+                human_actor = str(summary["human_actor"])
+                lifetimes = [item for item in lifetimes if item["seat"] == human_actor]
+                wakes = [item for item in wakes if item["actor_id"] == human_actor]
+                events = [
+                    item
+                    for item in events
+                    if not item["seat_id"]
+                    or item["seat_id"] == human_actor
+                    or human_actor in item["payload"].get("visibility", [])
+                ]
+            return {
+                "run": summary,
+                "wakes": wakes,
+                "events": events,
+                "lifetimes": lifetimes,
+            }
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
 
     @app.get("/api/scenario")
     async def scenario() -> dict[str, Any]:

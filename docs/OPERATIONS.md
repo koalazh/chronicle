@@ -1,93 +1,91 @@
-# 运维与验证
+# Chronicle V3 运维与验收
 
-## V2 数据迁移
+这是本地 runbook。先把服务安全地跑起来，再分别验证确定性合同、fixture、Doctor、浏览器和真实业务；健康检查从来不等于业务成功。
 
-V2 初始化会按 schema version 做 additive migration。旧数据库会先生成
-带时间戳的 SQLite backup，再创建 worldlines、worldline_events、
-worldline_snapshots 和 worldline_lifetimes。旧 Branch 表不删除；已有记录导入
-为 SEALED legacy Worldline，并保留 LEGACY_IMPORT 事件作为审计入口。
+## 1. 安全边界
 
-不要删除数据库或 Hermes Home 来“重置”迁移。需要隔离实验时，使用新的显式
-CHRONICLE_DATABASE_URL 或 CHRONICLE_HERMES_HOME。
+- Chronicle 只绑定 `127.0.0.1`、`::1` 或 `localhost`；当前没有登录层，不得暴露到局域网或公网；
+- Provider URL 不得嵌入凭据，不得指向私网、metadata、link-local、保留或组播地址；远程 Provider 必须使用 HTTPS；
+- Secret 只写入被忽略且权限为 `0600` 的 `.chronicle/runtime.env`、Profile `.env` 和项目私有 Hermes Home；
+- 不提交 `.env`、`.chronicle/`、SQLite、完整模型正文、Profile 私钥或带凭据的日志；
+- 迁移和试验使用副本或新路径，不删除真实数据库或 Hermes Home 来“重置”。
 
-## V2 旅程检查
+## 2. 确定性检查
 
-fixture 验证应覆盖 Observe → Enter → Live → Debrief：进入后刷新仍恢复同一
-active Worldline；Archivist 读取在 423 Locked；自然语言输入返回明确的
-interaction status；高影响动作需要确认；advance 处理 Canon、观察 delivery 和 message delivery，并按 wake policy 决定是否唤醒人物模型；
-输入的 context、原文和结果事件在同一 SQLite moment 中提交；失败不能留下半条输入或
-虚假的 current tick。seal 后 debrief 不含 score 或 LLM 事后总结。
-
-V2 API 的完整清单和证据边界见 V2_MIGRATION.md。浏览器截图只能证明当前本地
-fixture/API 状态；不能代替 Hermes provider、真实业务 wake 或外部服务证据。
-
-## 日常检查
+修改源码、Scenario 或前端后运行：
 
 ```bash
 uv sync
 uv run chronicle source validate
 uv run chronicle scenario validate
-uv run ruff check chronicle
+uv run chronicle crisis validate
 uv run pytest -q
-uv run chronicle doctor
+uv run ruff check .
+node --check web/app.js
+git diff --check
 ```
 
-`doctor` 的 `NOT_READY` 是有意义的结果：它表示 provider、project-local Hermes profile 或 gateway 仍未完成，而不是把缺少外部依赖伪装成成功。
+启动页面：
 
-## Setup 与 Bootstrap
+```bash
+uv run chronicle serve
+```
 
-1. 启动服务并打开 `/`。
-2. 在 Setup 填写 OpenAI-compatible base URL、API Key、model 和 mode。
-3. Test connection 只调用 provider 的 `/models` 端点。
-4. Configure 将配置写入 server-side runtime env。
-5. 在另一个终端启动项目私有 Gateway：`HERMES_HOME="$PWD/.chronicle/hermes-home" hermes gateway run --external-supervisor`。
-6. 使用 CLI 或后续 UI Bootstrap 创建 project-local profiles；只有 Gateway 已监听且现场能力检查通过时，Bootstrap 才会返回 `ready=true`。
+服务默认在 <http://127.0.0.1:8711>。设置页的“保存并核对”先请求 Provider 的 `/models`，通过后才把配置写入 runtime env；原始 API Key 不回显。正式页面只创建 live Run，不能把未配置或失败的 live 请求静默改成 fixture。
 
-服务启动只接受 loopback host（`127.0.0.1`、`::1`、`localhost`）。不要通过
-`--host 0.0.0.0` 或 `CHRONICLE_HOST` 将当前无登录层的 UI/API 暴露到网络；这类配置会在
-应用创建或 CLI 启动前失败。Setup 的 Provider URL 必须是 `http`/`https`，不能带用户凭据，
-并且不能解析到私网、link-local、metadata、保留或组播地址；远程 Provider 使用 HTTPS。
-连接测试只向经过校验的 Provider `/models` 发送一次带凭据的请求，并要求返回的模型列表
-包含用户选择的模型。
+## 3. 真实 Hermes 的启动顺序
 
-Bootstrap 不会覆盖带有 Chronicle genesis marker 的 Home；V1 不实现原地 reset，`--force-reset` 会明确返回未实现错误。需要全新实验时，应显式指定一个新的项目私有 `CHRONICLE_HERMES_HOME`，不要删除现有 Home 或数据库。
+V3 创建 live Run 时会立即创建该局所需的 Run-scoped Profiles，并为每个 Agent-controlled Actor 排入 `ORIENT` Wake。Gateway 必须在 Profile 注册写入项目私有 Home 之后启动，因此顺序固定为：
 
-## 证据记录
+1. 找到并停止旧的项目私有 Gateway；未知或全局进程不要直接终止；
+2. 在页面创建 live Watch 或 Takeover；
+3. 使用项目私有 Hermes Home 启动 Gateway，使它加载本局 Profile/MCP 注册；
+4. 运行 `uv run chronicle doctor`，确认状态为 `READY`；
+5. 回到页面点击“继续”。
 
-将确定性测试、浏览器截图、Hermes probe、真实 wake 和 LLM response 分开保存。截图只说明对应 fixture/API 状态下的 UI；不能替代 live provider 或持久化验证。
+命令示例：
 
-## Live acceptance smoke
-
-Live Hermes 是 V2 的运行门槛，不以 doctor 单独通过作为完整业务证据。使用项目私有
-Hermes Home 启动 Gateway：
-
-~~~bash
+```bash
 HERMES_HOME="$PWD/.chronicle/hermes-home" \
   hermes gateway run --external-supervisor --accept-hooks
-~~~
+```
 
-另一个终端确认：
+V3 不需要先运行旧 `bootstrap` 才能创建危局主体；`bootstrap` 只服务 legacy Profile 初始化路径。停止旧 Gateway 前先用 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 识别进程归属，未知服务保持不动。
 
-~~~bash
-uv run chronicle doctor
-~~~
+## 4. READY 到底证明什么
 
-必须同时看到 READY、shared listener reachable、profile routes reachable、
-memory only 和 valid/cross-profile key isolation。随后在隔离的临时 SQLite 数据库
-上执行 Observe → Enter → Live → Debrief：
+对当前 live Run，`READY` 至少检查：Source、Scenario、Crisis Pack 和 schema v7 可加载；Snapshot tick/hash 与 Ledger cursor 对齐；每个 Agent binding 都对应存在的 Profile；Profile identity、Run/Actor marker、唯一 token hash、Memory lineage 与 Life State 对齐；没有 RUNNING/STAGED/FAILED Wake；已完成 Wake 的 Session 非空且唯一；Gateway health、Profile route、cross-profile key isolation 和四工具 MCP discovery 通过；Commitment 与 `COMMITMENT_DUE` Wake 一一对应。
 
-1. POST /api/canon/advance 到 Entry tick；
-2. POST /api/worldlines，live=true；
-3. POST /api/worldlines/{id}/input；
-4. POST /api/worldlines/{id}/advance，live=true；
-5. 核对 agent_wakes 中 source=hermes、Fresh Session ID 和结构化 ActorWakeResponse；
-6. 核对 Worldline Ledger 中的 MESSAGE_DELIVERED、AGENT_WAKE 和 lazy branch Profile；
-7. POST /api/worldlines/{id}/seal，再 GET /api/worldlines/{id}/debrief。
+`/v1/toolsets` 只报告 builtin `memory`，不能代替 `hermes mcp test`。READY 是能力与隔离前置条件，不证明任何一次 Agent Wake 已经完成，也不证明消息已经送达或 Run 已正确封存。
 
-只有真实业务 Wake、Session、Ledger 和 Debrief 都存在时，才可以声称 live 链路已打通。
-临时数据库与临时 HTTP 服务不能替代正式用户数据；不要把响应正文、API Key 或运行时
-Home 提交到仓库。
+## 5. 数据迁移
 
-## 数据安全
+schema v7 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`；系统保留已知和未知旧表，只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 V2 Worldline 才会封存为 `LEGACY_V2_SEALED`，ACTIVE Canon 不会被封存。随后增加 V3 Run/Wake/operation/Life State/binding revocation 结构，并建立“最多一个 active playable Run”的约束。
 
-不要提交 `.env`、`.chronicle/`、SQLite 数据库或 runtime screenshot。不要在日志、错误页面、测试快照或 issue 中粘贴 API Key。更换 provider 时，新的 runtime epoch 会隔离后续 Lifetime 解释。
+验证迁移时先复制数据库：
+
+```bash
+CHRONICLE_DATABASE_URL=sqlite:////absolute/copy.db uv run chronicle doctor
+```
+
+检查 backup、legacy seal、未知表和第二次打开的幂等性。不要在真实用户数据库上用 SQL 改写状态来制造验收结果。
+
+## 6. Fixture 烟测
+
+fixture 只在 `CHRONICLE_DEV=1` 的开发/自动化环境开放，只替代模型输出，不替代 scheduler、WorldService、Ledger、Life State 或权限校验。
+
+最小 smoke 应覆盖：创建 `WATCH` fixture Run；连续调用 `/api/runs/{id}/continue`，确认无 trigger 不 Wake、未来 Commitment 会到期、信件会抵达；切换三位主体 perspective，确认未送达信息不泄漏；创建 fixture Takeover，确认活动期间 `/world` 和其他主体 perspective 返回 403；提交多动作决定和空文本沉默；seal 后读取 Replay、Archive 和 History。
+
+fixture 通过只能写成“确定性合同通过”，不能写成“真实 Hermes 已通过”。
+
+## 7. 真实业务验收
+
+真实验收使用隔离的临时 SQLite，不覆盖用户数据。必须在同一 live Watch Run 中关联三条 identity binding、三个 Agent Profile、`ORIENT` 与后续 Wake 的 fresh Session、真实 World MCP 请求及其 operation/Ledger 记录、Plan/Commitment/Memory lineage、消息 transit 与 delivery、拒绝后修正或合法 no-op、cross-profile key/perspective isolation，以及 seal 后的 binding revocation 和 Replay/Archive。
+
+健康探针、Doctor、fixture、截图和一段模型最终文本都不能替代这条关联链。安全报告只记录 Run ID、Profile 名、Session 是否独立、工具名、事件类型、tick、状态和计数，不记录 token、API Key 或完整模型正文。
+
+## 8. 浏览器验收
+
+至少检查 1440、1280、768 和 390 宽度：首页、Watch、Takeover Desk、回看、卷册、史实背景和设置均可达；桌面 Corridor 横向、手机 Corridor 纵向，无横向溢出；Takeover 文本在 busy rerender 前被捕获，多动作不会变成 silence；活动 Takeover 不显示世界全局或其他主体私态；Desk 四个区域持久可见，手机为单列；回看默认 lens、自然语言 cause、console 和内部词泄漏符合 [前端合同](FRONTEND.md)。
+
+截图只证明当时本地 API/fixture 下的视觉与交互。业务证据和已知边界见 [验收记录](ACCEPTANCE.md)。

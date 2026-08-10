@@ -7,6 +7,7 @@ data/
 artifacts/runtime/
 artifacts/ui/*.png
 artifacts/ui/*.jpg
+artifacts/v3-qa/*.png
 __pycache__/
 .pytest_cache/
 .ruff_cache/

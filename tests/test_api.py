@@ -25,7 +25,7 @@ def test_api_exposes_canon_sources_branch_and_masked_setup(app_config):
     setup = client.get("/api/config").json()
     assert setup["setup_required"] is True
     assert "CHRONICLE" not in setup.get("api_key", "")
-    assert setup["runtime_mode"] == "fixture"
+    assert setup["runtime_mode"] == "live"
     assert setup["hermes_ready"] is False
     assert client.post("/api/setup/test", json={"base_url":"https://example.test/v1", "api_key":"", "model":"demo"}).json()["ok"] is False
 
@@ -61,7 +61,7 @@ def test_setup_writes_a_server_side_masked_runtime(app_config, monkeypatch):
     config = client.get("/api/config").json()
     assert config["setup_required"] is False
     assert config["api_key"] == "••••••••••••"
-    assert config["runtime_mode"] == "fixture"
+    assert config["runtime_mode"] == "live"
 
 
 def test_live_wake_fails_closed_without_hermes(app_config):

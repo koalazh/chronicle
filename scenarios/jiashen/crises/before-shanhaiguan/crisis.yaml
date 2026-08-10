@@ -1,0 +1,124 @@
+id: before-shanhaiguan
+title: 山海关之前
+subtitle: 三封未决的信，四处仍在移动的人
+
+checkpoint:
+  native_date_window: 顺治元年四月中旬前
+  summary: 李自成已在北京建立新秩序，吴三桂守山海关，多尔衮率军西行；吴的首封求助信仍在辽西路上，三方尚未形成不可逆选择。
+  start_tick: 0
+  safety_horizon_days: 9
+  facts: [c001, c002, c003, c008]
+  unresolved:
+    - 李自成是否继续以招抚、压力或东进处理吴三桂
+    - 吴三桂如何回应大顺与关外两方，是否以及在何种条件下形成承诺
+    - 多尔衮收到求助后如何解释、回应并调整西进计划
+  in_transit:
+    - id: letter-li-wu-opening
+      sender: li-zicheng
+      recipient: wu-sangui
+      dispatch_tick: -1
+      delivery_tick: 1
+      content: 北京方面以吴襄名义转来招抚与保全家属的条件；来信的实际约束力与诚意均未得到验证。
+      assertion_ids: [c003, c010]
+      disputed: true
+    - id: letter-wu-dorgon-first
+      sender: wu-sangui
+      recipient: dorgon
+      dispatch_tick: -1
+      delivery_tick: 3
+      content: 山海关来使请求关外出兵共同对付北京的大顺军，并以事后酬谢作承诺；信中没有接受清朝臣属身份。
+      assertion_ids: [c004, c011]
+
+simulation_boundary:
+  stop_before: 世界需要裁定山海关一带大规模军队直接交战结果
+  reason: V3 第一场只模拟主体决策、通信、等待、有限移动与前置行动，不引入战役结算。
+  maximum_tick: 9
+
+actors:
+  - id: li-zicheng
+    display_name: 李自成
+    role_charter:
+      who: 大顺政权的最高决策者，正在北京处理新政权的秩序与东部边防。
+      responsibility: [维持北京与近畿秩序, 处置前明军政人员, 决定如何处理山海关方向]
+      authority: [发送使者与命令, 调整可用部队的有限部署, 谈判与提出条件, 等待或拒绝]
+      tensions: [巩固新政权与快速消除东部威胁之间, 招抚吴三桂与施加强制之间]
+    initial_location: beijing
+    initial_knowledge: [c002, c003, c010]
+    initial_beliefs:
+      eastern_gate: 吴三桂仍可能通过条件与家属压力被纳入新秩序。
+      urgency: 北京秩序尚未稳固，东部问题不能无限等待。
+    resources:
+      political_control: fragile
+      field_force: available-but-dispersed
+      courier_network: active
+    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+
+  - id: wu-sangui
+    display_name: 吴三桂
+    role_charter:
+      who: 前明关宁军主将，守在山海关并面对北京与关外两个方向。
+      responsibility: [维持山海关与所部秩序, 保护军民与家属利益, 决定对两方来信的回应]
+      authority: [发送使者, 调整关内外有限部署, 谈判条件, 拒绝或延迟承诺]
+      tensions: [故明责任与现实生存之间, 父亲家属安危与所部安全之间, 借援与失去自主之间]
+    initial_location: shanhaiguan
+    initial_knowledge: [c002, c003, c010, c011]
+    initial_beliefs:
+      balance: 单独长期对抗任一大方都存在风险。
+      correspondence: 两方承诺都需要通过行动和新消息验证。
+    resources:
+      pass_control: contested-but-held
+      field_force: cohesive-limited
+      couriers: scarce
+    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+
+  - id: dorgon
+    display_name: 多尔衮
+    role_charter:
+      who: 清朝摄政王与此次西征统帅，正在辽西向中原方向移动。
+      responsibility: [决定西征路径与目标, 保护军队行动自由, 判断关内来信的价值与风险]
+      authority: [调整行军, 回复或拒绝外部请求, 提出政治条件, 调动随军资源]
+      tensions: [既定西征目标与突发合作机会之间, 快速利用局势与避免受骗之间]
+    initial_location: liaoxi
+    initial_knowledge: [c001, c002, c008]
+    initial_beliefs:
+      central_plains: 明朝秩序正在崩解，西进可能出现新的政治机会。
+      shanhai: 山海关仍是进入关内的重要物理边界。
+    resources:
+      command: expeditionary-army
+      mobility: high
+      artillery: following-column
+    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+
+corridor:
+  - {id: beijing, display_name: 北京, order: 0}
+  - {id: yongping, display_name: 永平, order: 1}
+  - {id: shanhaiguan, display_name: 山海关, order: 2}
+  - {id: liaoxi, display_name: 辽西行军路, order: 3}
+
+routes:
+  - {id: beijing-yongping, from_location: beijing, to_location: yongping, travel_days: 2}
+  - {id: yongping-beijing, from_location: yongping, to_location: beijing, travel_days: 2}
+  - {id: yongping-shanhaiguan, from_location: yongping, to_location: shanhaiguan, travel_days: 2}
+  - {id: shanhaiguan-yongping, from_location: shanhaiguan, to_location: yongping, travel_days: 2}
+  - {id: shanhaiguan-liaoxi, from_location: shanhaiguan, to_location: liaoxi, travel_days: 2}
+  - {id: liaoxi-shanhaiguan, from_location: liaoxi, to_location: shanhaiguan, travel_days: 2}
+
+anchors:
+  - id: historical-dorgon-reply
+    title: 多尔衮后来回复吴三桂
+    tick: 4
+    policy: REFERENCE_ONLY
+    assertion_ids: [c005]
+    actor_ids: [dorgon]
+  - id: historical-li-eastward-march
+    title: 李自成后来亲率军队东进
+    tick: 6
+    policy: REFERENCE_ONLY
+    assertion_ids: [c006]
+    actor_ids: [li-zicheng]
+  - id: historical-shanhai-battle
+    title: 山海关大规模交战
+    tick: 9
+    policy: REFERENCE_ONLY
+    assertion_ids: [c006, c014]
+    actor_ids: [li-zicheng, wu-sangui, dorgon]

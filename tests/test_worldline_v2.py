@@ -250,7 +250,7 @@ def test_v2_migration_backups_and_imports_legacy_branch(tmp_path):
     db = ChronicleDB(path)
     assert db.migration_backup_path is not None
     assert db.migration_backup_path.exists()
-    assert db.get_meta("schema_version") == "4"
+    assert db.get_meta("schema_version") == "7"
     imported = db.worldline("legacy-branch-old")
     assert imported is not None
     assert imported["status"] == WorldlineStatus.SEALED.value

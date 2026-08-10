@@ -271,12 +271,15 @@ def test_frontend_exposes_real_result_and_accessibility_contract():
     source = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
     index = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
-    assert "canon_events" in source
+    assert "旁观这场危局" in source
+    assert "吴三桂的书案" in source
+    assert "corridorMarkup" in source
+    assert "封存后全景" in source
     assert "AbortController" in source
-    assert "reasoning_effort" in source
     assert "aria-live" in source or "aria-live" in index
-    assert "hash ·" not in source
-    assert "result.result.reason !== result.answer" in source
+    assert "observationCopies" not in source
+    assert "map-svg" not in source
+    assert "Worldline Tree" not in source
 
 
 def test_lazy_profile_compensates_partial_install(app_config, monkeypatch):

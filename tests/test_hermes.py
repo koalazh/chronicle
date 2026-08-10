@@ -11,6 +11,7 @@ from chronicle.hermes import (
     HermesRuntimeError,
     enabled_toolset_names,
     probe,
+    probe_mcp_tools,
 )
 
 
@@ -55,6 +56,30 @@ def test_gateway_probe_does_not_inherit_process_proxy(monkeypatch, app_config):
     HermesClient(app_config).get_json("/health")
 
     assert request["trust_env"] is False
+
+
+def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_config):
+    monkeypatch.setattr(
+        "chronicle.hermes._run_cli",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=(
+                "Connected (15ms)\nTools discovered: 4\n\n"
+                "    communicate                         Send a message\n"
+                "    act                                 Request an action\n"
+                "    update_plan                         Update a plan\n"
+                "    schedule_followup                   Schedule a wake\n"
+            ),
+            stderr="",
+            returncode=0,
+        ),
+    )
+
+    assert probe_mcp_tools(app_config, "chronicle-world") == (
+        "act",
+        "communicate",
+        "schedule_followup",
+        "update_plan",
+    )
 
 
 def test_probe_collects_profile_routes_toolsets_and_key_isolation(monkeypatch, app_config):

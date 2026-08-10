@@ -12,7 +12,7 @@ const state = {
   history: null,
   replay: null,
   replayLens: "then",
-  replayActor: "wu-sangui",
+  replayActor: "",
   busy: false,
   activity: null,
   operationSeq: 0,
@@ -22,11 +22,18 @@ const state = {
   error: "",
 };
 
-const actorNames = {
-  "li-zicheng": "李自成",
-  "wu-sangui": "吴三桂",
-  dorgon: "多尔衮",
-};
+function actorDisplayName(actorId) {
+  const actors = state.crisis?.actors || [];
+  return actors.find((actor) => actor.id === actorId)?.display_name || actorId;
+}
+
+function defaultPlayableActor() {
+  return state.crisis?.actors.find((actor) => actor.playable) || null;
+}
+
+function fallbackActorId() {
+  return state.active?.human_actor || state.crisis?.actors[0]?.id || "";
+}
 
 function escapeHtml(value = "") {
   return String(value)
@@ -245,6 +252,7 @@ function chrome(content, { compact = false } = {}) {
 }
 
 function homePage() {
+  const playableActor = defaultPlayableActor();
   const actors = state.crisis.actors
     .map(
       (actor, index) => `
@@ -263,14 +271,14 @@ function homePage() {
       <div class="hero-mast">
         <p class="kicker">一六四四 · 一段仍未决定的时间</p>
         <h1>甲申</h1>
-        <p class="hero-subtitle">山海关之前</p>
+        <p class="hero-subtitle">${escapeHtml(state.crisis.title)}</p>
       </div>
       <div class="hero-copy">
         <p>${escapeHtml(state.crisis.checkpoint.summary)}</p>
         <p class="runtime-note">${escapeHtml(runtimeLabel())}</p>
         <div class="hero-actions">
           <button class="primary" data-action="start-watch" ${state.busy || state.active || state.config.setup_required ? "disabled" : ""}>旁观这场危局</button>
-          <button class="secondary" data-action="start-takeover" ${state.busy || state.active || state.config.setup_required ? "disabled" : ""}>成为吴三桂</button>
+          <button class="secondary" data-action="start-takeover" ${state.busy || state.active || state.config.setup_required || !playableActor ? "disabled" : ""}>${playableActor ? `成为${escapeHtml(playableActor.display_name)}` : "暂无可成为的主体"}</button>
         </div>
         ${
           state.active
@@ -279,11 +287,11 @@ function homePage() {
         }
       </div>
     </section>
-    <section class="home-corridor" aria-label="危局走廊预览">
-      ${corridorMarkup(state.crisis.corridor, [], [], { preview: true })}
+    <section class="home-corridor" aria-label="危局态势预览">
+      ${surfaceMarkup(state.crisis.surface, { preview: true })}
     </section>
     <section class="actor-intros">
-      <div class="section-heading"><span>三个人</span><h2>各自知道一部分，也各自承担选择</h2></div>
+      <div class="section-heading"><span>${state.crisis.actors.length} 个主体</span><h2>各自知道一部分，也各自承担选择</h2></div>
       ${actors}
     </section>
     <section class="boundary-note">
@@ -294,14 +302,23 @@ function homePage() {
   `);
 }
 
-function corridorMarkup(corridor, actors, messages, options = {}) {
+function surfaceMarkup(surface, options = {}) {
+  if (!surface) return "";
+  if (surface.kind === "SPATIAL") return spatialSurfaceMarkup(surface, options);
+  return `<section class="surface-unavailable"><p>${escapeHtml(surface.title || "危局态势")}</p></section>`;
+}
+
+function spatialSurfaceMarkup(surface, options = {}) {
+  const locations = surface.locations || [];
+  const actors = surface.actors || [];
+  const messages = surface.messages || [];
   const actorAt = new Map();
   actors.forEach((actor) => {
     const items = actorAt.get(actor.location) || [];
     items.push(actor);
     actorAt.set(actor.location, items);
   });
-  const nodes = corridor
+  const nodes = locations
     .map((location) => {
       const present = actorAt.get(location.id) || [];
       return `<div class="corridor-node" data-location="${escapeHtml(location.id)}">
@@ -324,7 +341,7 @@ function corridorMarkup(corridor, actors, messages, options = {}) {
     .map(
       (message) => `<li>
         <span>${message.status === "delivered" ? "已抵达" : "在途中"}</span>
-        <strong>${escapeHtml(actorNames[message.sender] || message.sender)} → ${escapeHtml(actorNames[message.recipient] || message.recipient)}</strong>
+        <strong>${escapeHtml(actorDisplayName(message.sender))} → ${escapeHtml(actorDisplayName(message.recipient))}</strong>
         ${options.preview ? "" : `<small>第 ${message.arrival_tick} 日抵达</small>`}
       </li>`,
     )
@@ -340,7 +357,7 @@ function runHeader(title, lede) {
   const locked = interactionLocked() || runtimeTransitionLocked();
   return `<header class="run-header">
     <div>
-      <p class="kicker">山海关之前 · 第 ${run.current_tick} 日</p>
+      <p class="kicker">${escapeHtml(state.crisis.title)} · 第 ${run.current_tick} 日</p>
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(lede)}</p>
     </div>
@@ -355,9 +372,7 @@ function watchPage() {
   if (!state.active) return homePage();
   const lensButtons = [
     ["world", "世界"],
-    ["li-zicheng", "李自成"],
-    ["wu-sangui", "吴三桂"],
-    ["dorgon", "多尔衮"],
+    ...(state.crisis?.actors || []).map((actor) => [actor.id, actor.display_name]),
   ]
     .map(
       ([id, label]) => `<button data-lens="${id}" ${state.lens === id ? 'aria-current="true"' : ""} ${interactionLocked() ? "disabled" : ""}>${label}</button>`,
@@ -380,10 +395,10 @@ function worldLens() {
   const inTransit = state.world.messages.filter((message) => message.status === "in_transit").length;
   return `<section class="lens-sheet">
     <div class="sheet-heading">
-      <div><span>世界视野</span><h2>同一条走廊，三处不同的现在</h2></div>
+      <div><span>世界视野</span><h2>${escapeHtml(state.world.surface?.title || "危局态势")}</h2></div>
       <p>旁观者可以看见世界事实，但人物的私下打算仍留在各自视角中。</p>
     </div>
-    ${corridorMarkup(state.world.corridor, state.world.actors, state.world.messages)}
+    ${surfaceMarkup(state.world.surface)}
     <div class="world-marginalia">
       <article><span>仍在路上</span><strong>${inTransit}</strong><p>消息必须走完路程，收信人才会知道。</p></article>
       <article><span>模拟边界</span><strong>第 ${state.active.maximum_tick} 日前</strong><p>进入大规模交战裁定前，本局停止。</p></article>
@@ -406,19 +421,12 @@ function actorLens() {
     .slice(-5)
     .map((item) => `<li>${escapeHtml(typeof item === "string" ? item : item.content || item.observation || "一项已知情况")}</li>`)
     .join("");
-  const actors = [
-    {
-      id: view.actor.id,
-      display_name: view.actor.display_name,
-      location: view.location,
-    },
-  ];
   return `<section class="lens-sheet actor-sheet">
     <div class="actor-title">
       <span>人物视野</span><h2>${escapeHtml(view.actor.display_name)}</h2>
       <p>${escapeHtml(view.role_charter.who)}</p>
     </div>
-    ${corridorMarkup(state.crisis.corridor, actors, [], { ownActor: view.actor.id })}
+    ${surfaceMarkup(view.surface, { ownActor: view.actor.id })}
     <p class="corridor-unknown">其他人物的当前位置与动向，尚未进入这一视野。</p>
     <div class="private-columns">
       <article>
@@ -445,7 +453,7 @@ function deskPage() {
     .filter((item) => typeof item === "object" && item.kind === "message")
     .slice(-6)
     .map(
-      (item) => `<article class="letter-sheet"><span>第 ${item.received_tick} 日抵达 · ${escapeHtml(actorNames[item.sender])}</span><p>${escapeHtml(item.content)}</p></article>`,
+      (item) => `<article class="letter-sheet"><span>第 ${item.received_tick} 日抵达 · ${escapeHtml(actorDisplayName(item.sender))}</span><p>${escapeHtml(item.content)}</p></article>`,
     )
     .join("");
   const knownSituation = (view?.known_situation || [])
@@ -466,7 +474,7 @@ function deskPage() {
   const outgoing = (view?.outgoing_messages || [])
     .slice(-5)
     .map(
-      (item) => `<li><span>${item.source === "checkpoint" ? "场景起始信" : "本局决定"} · ${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorNames[item.recipient])}</span>${escapeHtml(item.content)}</li>`,
+      (item) => `<li><span>${item.source === "checkpoint" ? "场景起始信" : "本局决定"} · ${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorDisplayName(item.recipient))}</span>${escapeHtml(item.content)}</li>`,
     )
     .join("");
   const resolved = (view?.commitments || [])
@@ -474,13 +482,6 @@ function deskPage() {
     .slice(-3)
     .map((item) => `<li><span>已经处理</span>${escapeHtml(item.purpose)}</li>`)
     .join("");
-  const actors = [
-    {
-      id: "wu-sangui",
-      display_name: "吴三桂",
-      location: view?.location || "shanhaiguan",
-    },
-  ];
   const committedDecision = (view?.decisions || [])
     .slice()
     .reverse()
@@ -522,13 +523,13 @@ function deskPage() {
       </footer>`
     : "";
   return chrome(`
-    ${runHeader("吴三桂的书案", "你只能看见抵达山海关的消息；北京与辽西仍会在视野之外行动。")}
+    ${runHeader(`${view?.actor?.display_name || "你的"}书案`, "你只能看见进入自己视野的消息；其它主体仍会在视野之外行动。")}
     <section class="desk-layout">
       <div class="desk-main">
         <div class="desk-corridor">
-          <span class="column-label">此刻所见的走廊</span>
-          ${corridorMarkup(state.crisis.corridor, actors, [], { ownActor: "wu-sangui" })}
-          <p class="corridor-unknown">北京与辽西的人物动向，尚未有可靠消息。</p>
+          <span class="column-label">此刻所见的态势</span>
+          ${surfaceMarkup(view?.surface, { ownActor: view?.actor?.id })}
+          <p class="corridor-unknown">其它主体的动向，尚未有可靠消息。</p>
           <div class="known-strip"><span>已经知道</span><ul>${knownSituation || '<li class="empty">尚无可确认的新情况。</li>'}</ul></div>
         </div>
         <div class="inbox">
@@ -570,7 +571,7 @@ function replayPage() {
           .join("、");
         return `<article class="replay-item ${item.private ? "revealed" : ""}" data-event-id="${escapeHtml(item.id)}">
         <span class="replay-day">第 ${item.tick} 日</span>
-        <div><small>${item.actor_id ? escapeHtml(actorNames[item.actor_id] || "人物") : "世界"}</small><h3>${escapeHtml(item.title)}</h3>${causes ? `<span class="replay-cause">${causes}</span>` : ""}${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : ""}</div>
+        <div><small>${item.actor_id ? escapeHtml(actorDisplayName(item.actor_id) || "人物") : "世界"}</small><h3>${escapeHtml(item.title)}</h3>${causes ? `<span class="replay-cause">${causes}</span>` : ""}${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : ""}</div>
       </article>`;
       },
     )
@@ -703,7 +704,7 @@ async function loadRunView() {
       perspective = await api(`/api/runs/${runId}/perspective/${lens}`);
     }
   } else {
-    perspective = await api(`/api/runs/${runId}/perspective/wu-sangui`);
+    perspective = await api(`/api/runs/${runId}/perspective/${run.human_actor}`);
   }
   if (viewSeq !== state.viewSeq || state.active?.id !== runId || state.lens !== lens || state.page !== page) {
     return;
@@ -784,9 +785,18 @@ async function runAction(action, activity = null) {
 }
 
 async function startRun(mode) {
+  const payload = {
+    crisis_id: state.crisis.summary.id,
+    mode,
+    live: true,
+  };
+  if (mode === "TAKEOVER") {
+    const actor = defaultPlayableActor();
+    if (actor) payload.human_actor_id = actor.id;
+  }
   const result = await api("/api/runs", {
     method: "POST",
-    body: JSON.stringify({ mode, live: true }),
+    body: JSON.stringify(payload),
   });
   state.active = result.run;
   state.config = await api("/api/config");
@@ -836,7 +846,7 @@ async function sealRun() {
   state.active = null;
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
-  state.replayActor = state.replay.run.human_actor || "wu-sangui";
+  state.replayActor = state.replay.run.human_actor || fallbackActorId();
   state.page = "replay";
   go("replay");
 }
@@ -949,7 +959,7 @@ async function reconcileActive() {
       if (!state.active) {
         state.replay = await api(`/api/runs/${activity.runId}/replay`);
         state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
-        state.replayActor = state.replay.run.human_actor || "wu-sangui";
+        state.replayActor = state.replay.run.human_actor || fallbackActorId();
         state.page = "replay";
         finishActivity(seq);
       } else {
@@ -976,7 +986,7 @@ async function reconcileActive() {
 async function openReplay(runId) {
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
-  state.replayActor = state.replay.run.human_actor || "wu-sangui";
+  state.replayActor = state.replay.run.human_actor || fallbackActorId();
   state.page = "replay";
   go("replay");
 }

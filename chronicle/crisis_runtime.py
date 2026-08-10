@@ -1999,6 +1999,7 @@ class CrisisRunEngine:
         }
         return {
             "tick": int(projection["tick"]),
+            "surface": self.pack.surface_projection(projection, include_messages=True),
             "corridor": [
                 location.model_dump(mode="json")
                 for location in sorted(self.pack.crisis.corridor, key=lambda item: item.order)
@@ -2116,6 +2117,9 @@ class CrisisRunEngine:
             ],
             "decisions": decisions,
             "role_charter": actor.role_charter.model_dump(mode="json"),
+            "surface": self.pack.surface_projection(
+                snapshot["projection"], visible_actor_ids={actor_id}
+            ),
         }
 
     def seal(self, run_id: str, reason: str = "user_exit") -> dict[str, Any]:

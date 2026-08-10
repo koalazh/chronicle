@@ -315,8 +315,9 @@ def test_frontend_exposes_real_result_and_accessibility_contract():
     index = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
     assert "旁观这场危局" in source
-    assert "吴三桂的书案" in source
-    assert "corridorMarkup" in source
+    assert "defaultPlayableActor" in source
+    assert "surfaceMarkup" in source
+    assert "corridorMarkup" not in source
     assert "封存后全景" in source
     assert "AbortController" in source
     assert "aria-live" in source or "aria-live" in index

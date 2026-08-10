@@ -8,6 +8,7 @@ import yaml
 
 from chronicle.crisis import (
     CrisisPack,
+    CrisisSurfaceKind,
     CrisisValidationError,
     HistoricalPolicy,
     VolumeRegistry,
@@ -63,6 +64,41 @@ def test_before_shanhaiguan_crisis_pack_is_complete():
         for term in ("Runtime", "checkpoint", "Run ", " tick", "Crisis", "Battle Resolver")
     )
     assert "Battle Resolver" not in pack.crisis.simulation_boundary.reason
+
+
+def test_spatial_surface_projects_locations_and_only_visible_actors():
+    pack = CrisisPack.load(CRISIS_ROOT)
+
+    surface = pack.surface_projection(
+        {
+            "positions": {
+                "li-zicheng": "beijing",
+                "wu-sangui": "shanhaiguan",
+                "dorgon": "liaoxi",
+            },
+            "messages": [{"id": "letter-1", "status": "in_transit"}],
+            "movements": [{"actor_id": "dorgon", "status": "in_transit"}],
+        },
+        visible_actor_ids={"wu-sangui"},
+    )
+
+    assert pack.crisis.surface.kind == CrisisSurfaceKind.SPATIAL
+    assert surface["kind"] == "SPATIAL"
+    assert [location["id"] for location in surface["locations"]] == [
+        "beijing",
+        "yongping",
+        "shanhaiguan",
+        "liaoxi",
+    ]
+    assert surface["actors"] == [
+        {
+            "id": "wu-sangui",
+            "display_name": "吴三桂",
+            "location": "shanhaiguan",
+            "in_transit": False,
+        }
+    ]
+    assert surface["messages"] == []
 
 
 def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set():

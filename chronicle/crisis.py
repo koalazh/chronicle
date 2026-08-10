@@ -25,6 +25,11 @@ class HistoricalPolicy(StrEnum):
     REFERENCE_ONLY = "REFERENCE_ONLY"
 
 
+class CrisisSurfaceKind(StrEnum):
+    SPATIAL = "SPATIAL"
+    POLITICAL = "POLITICAL"
+
+
 class RoleCharter(StrictModel):
     who: str
     responsibility: list[str]
@@ -98,6 +103,12 @@ class ResolutionContractReference(StrictModel):
     version: int = Field(ge=1)
 
 
+class CrisisSurfaceDefinition(StrictModel):
+    kind: CrisisSurfaceKind
+    title: str
+    description: str = ""
+
+
 class CrisisDefinition(StrictModel):
     id: str
     version: int = Field(ge=1)
@@ -106,6 +117,7 @@ class CrisisDefinition(StrictModel):
     checkpoint: CrisisCheckpoint
     simulation_boundary: SimulationBoundary
     resolution_contract: ResolutionContractReference
+    surface: CrisisSurfaceDefinition
     actors: list[CrisisActorDefinition]
     playable_actor_ids: list[str]
     corridor: list[CorridorLocation]
@@ -175,6 +187,43 @@ class CrisisPack:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
+    def surface_projection(
+        self,
+        projection: dict[str, Any],
+        *,
+        visible_actor_ids: set[str] | None = None,
+        include_messages: bool = False,
+    ) -> dict[str, Any]:
+        surface = self.crisis.surface
+        if surface.kind != CrisisSurfaceKind.SPATIAL:
+            raise CrisisValidationError([f"unsupported surface kind {surface.kind}"])
+        movements = {
+            movement["actor_id"]
+            for movement in projection.get("movements", [])
+            if movement.get("status") == "in_transit"
+        }
+        actor_ids = visible_actor_ids if visible_actor_ids is not None else set(self.actor_by_id)
+        return {
+            "kind": surface.kind.value,
+            "title": surface.title,
+            "description": surface.description,
+            "locations": [
+                location.model_dump(mode="json")
+                for location in sorted(self.crisis.corridor, key=lambda item: item.order)
+            ],
+            "actors": [
+                {
+                    "id": actor.id,
+                    "display_name": actor.display_name,
+                    "location": projection.get("positions", {}).get(actor.id, ""),
+                    "in_transit": actor.id in movements,
+                }
+                for actor in self.crisis.actors
+                if actor.id in actor_ids
+            ],
+            "messages": list(projection.get("messages", [])) if include_messages else [],
+        }
+
     def validate(self) -> None:
         errors: list[str] = []
         actor_ids = [actor.id for actor in self.crisis.actors]
@@ -206,6 +255,8 @@ class CrisisPack:
         location_ids = [location.id for location in self.crisis.corridor]
         if len(location_ids) != len(set(location_ids)):
             errors.append("corridor: location ids must be unique")
+        if self.crisis.surface.kind == CrisisSurfaceKind.SPATIAL and not location_ids:
+            errors.append("surface: SPATIAL requires locations")
         orders = [location.order for location in self.crisis.corridor]
         if sorted(orders) != list(range(len(orders))):
             errors.append("corridor: order must be contiguous from zero")
@@ -269,6 +320,7 @@ class CrisisPack:
             "version": self.crisis.version,
             "content_hash": self.content_hash,
             "resolution_contract": self.crisis.resolution_contract.model_dump(mode="json"),
+            "surface_kind": self.crisis.surface.kind.value,
             "title": self.crisis.title,
             "actors": [actor.id for actor in self.crisis.actors],
             "playable_actor_ids": list(self.crisis.playable_actor_ids),

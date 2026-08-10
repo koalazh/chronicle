@@ -39,6 +39,11 @@ resolution_contract:
   id: legacy-v3-boundary
   version: 1
 
+surface:
+  kind: SPATIAL
+  title: 山海关一线
+  description: 北京、山海关与辽西之间，消息和兵力都必须经过现实的距离。
+
 actors:
   - id: li-zicheng
     display_name: 李自成

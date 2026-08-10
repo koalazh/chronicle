@@ -44,11 +44,8 @@ def test_frontend_uses_chinese_product_language():
 
     for required in (
         "旁观这场危局",
-        "成为吴三桂",
-        "山海关之前",
         "世界视野",
         "人物视野",
-        "吴三桂的书案",
         "送入这段历史",
         "暂不追加命令，继续",
         "回看这一局",
@@ -65,17 +62,25 @@ def test_frontend_uses_chinese_product_language():
         "runtimeTransitionLocked",
         'kind: "runtime", phase: "bootstrapping"',
         "AbortController",
-        "corridorMarkup",
+        "surfaceMarkup",
         "/api/runs/active",
         "/api/runs/${state.active.id}/decision",
     ):
         assert required in source
 
+    assert "corridorMarkup" not in source
+    assert "成为吴三桂" not in source
+    assert "吴三桂的书案" not in source
+    assert "defaultPlayableActor" in source
+    assert "state.crisis.title" in source
+
 
 def test_product_start_is_live_only_and_fail_closed_in_the_ui():
     source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
-    assert 'body: JSON.stringify({ mode, live: true })' in source
+    assert "crisis_id: state.crisis.summary.id" in source
+    assert "payload.human_actor_id = actor.id" in source
+    assert "body: JSON.stringify(payload)" in source
     assert "const useLive" not in source
     assert "state.config.setup_required ? \"disabled\"" in source
     start_run = source[source.index("async function startRun"):source.index("async function continueRun")]

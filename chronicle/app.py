@@ -210,6 +210,9 @@ def create_app(
             "subtitle": pack.crisis.subtitle,
             "checkpoint": pack.crisis.checkpoint.model_dump(mode="json"),
             "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
+            "surface": pack.surface_projection(
+                {"positions": {}, "messages": []}, visible_actor_ids=set()
+            ),
             "actors": [
                 {
                     "id": actor.id,

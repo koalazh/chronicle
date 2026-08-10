@@ -20,6 +20,14 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
 
     assert crisis.status_code == 200
     assert crisis.json()["title"] == "山海关之前"
+    assert crisis.json()["surface"] == {
+        "kind": "SPATIAL",
+        "title": "山海关一线",
+        "description": "北京、山海关与辽西之间，消息和兵力都必须经过现实的距离。",
+        "locations": crisis.json()["corridor"],
+        "actors": [],
+        "messages": [],
+    }
     assert volume.json()["id"] == "jiashen"
     assert crises.json()["crises"][0]["id"] == "before-shanhaiguan"
     assert crisis_detail.json()["actors"][0]["playable"] is True
@@ -29,11 +37,24 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     assert created.json()["run"]["current_tick"] == 0
     assert created.json()["run"]["human_decision"]["state"] == "NONE"
     assert client.get("/api/runs/active").json()["run"]["id"] == run_id
-    assert client.get(f"/api/runs/{run_id}/world").status_code == 200
+    world = client.get(f"/api/runs/{run_id}/world")
+    assert world.status_code == 200
+    assert world.json()["surface"]["kind"] == "SPATIAL"
+    assert {actor["id"] for actor in world.json()["surface"]["actors"]} == {
+        "li-zicheng",
+        "wu-sangui",
+        "dorgon",
+    }
+    assert world.json()["surface"]["messages"] == world.json()["messages"]
     for actor_id in ("li-zicheng", "wu-sangui", "dorgon"):
         perspective = client.get(f"/api/runs/{run_id}/perspective/{actor_id}")
         assert perspective.status_code == 200
         assert perspective.json()["actor"]["id"] == actor_id
+        assert perspective.json()["surface"]["kind"] == "SPATIAL"
+        assert perspective.json()["surface"]["messages"] == []
+        assert [actor["id"] for actor in perspective.json()["surface"]["actors"]] == [
+            actor_id
+        ]
 
     assert client.post(f"/api/runs/{run_id}/continue").json()["advanced"] is True
     sealed = client.post(f"/api/runs/{run_id}/seal", json={"reason": "test_complete"})

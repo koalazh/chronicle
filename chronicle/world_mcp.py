@@ -6,9 +6,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .config import load_config
-from .crisis import CrisisPack
+from .crisis import VolumeRegistry
 from .db import ChronicleDB
-from .world import WorldAccessError, WorldService
+from .world import WorldAccessError, WorldService, token_hash
 
 mcp = FastMCP("chronicle-world")
 
@@ -18,7 +18,15 @@ def _world():
     if not token:
         raise WorldAccessError("Chronicle world binding is missing")
     config = load_config(environ=os.environ)
-    service = WorldService(ChronicleDB(config.database_path), CrisisPack.load(config.crisis_path))
+    db = ChronicleDB(config.database_path)
+    binding = db.agent_binding_for_token_hash(token_hash(token))
+    if binding is None:
+        raise WorldAccessError("invalid Chronicle world binding")
+    run = db.worldline(str(binding["worldline_id"]))
+    if run is None or run["kind"] != "CRISIS":
+        raise WorldAccessError("Chronicle Run is unavailable")
+    pack = VolumeRegistry.load(config.volume_path).pack(str(run["crisis_id"]))
+    service = WorldService(db, pack)
     return service.session_for_current_token(token)
 
 

@@ -1,0 +1,8 @@
+id: jiashen
+title: 甲申
+subtitle: 崇祯十七年
+native_period: 崇祯十七年
+description: 两场彼此独立的历史危局；每一局都从自己的校验过的起点开始，不构成连续战役。
+crises:
+  - id: before-shanhaiguan
+    path: crises/before-shanhaiguan

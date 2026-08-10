@@ -26,7 +26,13 @@ class LiveRuntimeManager:
         self._engine_factory = engine_factory
         self._lock = threading.RLock()
 
-    def create(self, mode: RunMode | str) -> dict[str, Any]:
+    def create(
+        self,
+        mode: RunMode | str,
+        *,
+        human_actor_id: str | None = None,
+        crisis_id: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             db = ChronicleDB(self.config.database_path)
             for sealed in db.worldlines(status="SEALED"):
@@ -48,7 +54,12 @@ class LiveRuntimeManager:
                             state="CLEANUP_PENDING",
                         )
             engine = self._engine()
-            created = engine.create(mode, runtime_mode="live")
+            created = engine.create(
+                mode,
+                runtime_mode="live",
+                human_actor_id=human_actor_id,
+                crisis_id=crisis_id,
+            )
             return self._bootstrap(engine, str(created["run"]["id"]))
 
     def reconcile_active(self) -> dict[str, Any] | None:

@@ -1,11 +1,43 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
-from chronicle.crisis import CrisisPack, HistoricalPolicy, validate_crisis_pack
+import pytest
+import yaml
+
+from chronicle.crisis import (
+    CrisisPack,
+    CrisisValidationError,
+    HistoricalPolicy,
+    VolumeRegistry,
+    validate_crisis_pack,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CRISIS_ROOT = PROJECT_ROOT / "scenarios" / "jiashen" / "crises" / "before-shanhaiguan"
+
+
+def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    template = crisis["actors"][0]
+    crisis["actors"] = []
+    for actor_id in actor_ids:
+        actor = copy.deepcopy(template)
+        actor["id"] = actor_id
+        actor["display_name"] = actor_id
+        crisis["actors"].append(actor)
+    crisis["playable_actor_ids"] = [actor_ids[0]]
+    crisis["checkpoint"]["in_transit"] = []
+    crisis["anchors"] = []
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
 
 
 def test_before_shanhaiguan_crisis_pack_is_complete():
@@ -31,6 +63,44 @@ def test_before_shanhaiguan_crisis_pack_is_complete():
         for term in ("Runtime", "checkpoint", "Run ", " tick", "Crisis", "Battle Resolver")
     )
     assert "Battle Resolver" not in pack.crisis.simulation_boundary.reason
+
+
+def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set():
+    registry = VolumeRegistry.load(PROJECT_ROOT / "scenarios" / "jiashen")
+
+    assert registry.volume.id == "jiashen"
+    assert registry.default_pack.crisis.id == "before-shanhaiguan"
+    assert registry.default_pack.crisis.playable_actor_ids == [
+        "wu-sangui",
+        "li-zicheng",
+        "dorgon",
+    ]
+    assert registry.summary()["crises"][0]["id"] == "before-shanhaiguan"
+
+
+@pytest.mark.parametrize("actor_count", [2, 3, 5])
+def test_crisis_pack_supports_a_generic_two_to_five_actor_cast(tmp_path, actor_count):
+    actor_ids = [f"actor-{index}" for index in range(actor_count)]
+    root = tmp_path / f"crisis-{actor_count}"
+    _write_generic_crisis(root, actor_ids)
+
+    pack = CrisisPack.load(root)
+
+    assert [actor.id for actor in pack.crisis.actors] == actor_ids
+    assert pack.crisis.playable_actor_ids == [actor_ids[0]]
+
+
+def test_crisis_pack_rejects_a_playable_actor_that_is_not_in_the_cast(tmp_path):
+    root = tmp_path / "invalid-playable"
+    _write_generic_crisis(root, ["actor-a", "actor-b"])
+    crisis = yaml.safe_load((root / "crisis.yaml").read_text(encoding="utf-8"))
+    crisis["playable_actor_ids"] = ["not-an-actor"]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(CrisisValidationError, match="playable_actor_ids: unknown actors"):
+        CrisisPack.load(root)
 
 
 def test_checkpoint_preserves_private_perspectives_and_unresolved_choices():

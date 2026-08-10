@@ -13,10 +13,16 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     client = TestClient(create_app(replace(app_config, dev=True)))
 
     crisis = client.get("/api/crisis")
+    volume = client.get("/api/volume")
+    crises = client.get("/api/crises")
+    crisis_detail = client.get("/api/crises/before-shanhaiguan")
     created = client.post("/api/runs", json={"mode": "WATCH", "live": False})
 
     assert crisis.status_code == 200
     assert crisis.json()["title"] == "山海关之前"
+    assert volume.json()["id"] == "jiashen"
+    assert crises.json()["crises"][0]["id"] == "before-shanhaiguan"
+    assert crisis_detail.json()["actors"][0]["playable"] is True
     assert created.status_code == 200
     run_id = created.json()["run"]["id"]
     assert created.json()["started"] is True
@@ -76,6 +82,27 @@ def test_takeover_api_enforces_perspective_lock_and_single_decision_slot(
     assert client.post(f"/api/runs/{run_id}/seal", json={}).status_code == 200
     assert client.get(f"/api/runs/{run_id}/world").status_code == 200
     assert client.get(f"/api/runs/{run_id}/replay").status_code == 200
+
+
+def test_takeover_api_accepts_any_playable_actor(app_config, tmp_path):
+    config = replace(app_config, database_path=tmp_path / "li-takeover-api.db", dev=True)
+    client = TestClient(create_app(config))
+    created = client.post(
+        "/api/runs",
+        json={
+            "crisis_id": "before-shanhaiguan",
+            "mode": "TAKEOVER",
+            "human_actor_id": "li-zicheng",
+            "live": False,
+        },
+    )
+    run_id = created.json()["run"]["id"]
+
+    assert created.status_code == 200
+    assert created.json()["run"]["human_actor"] == "li-zicheng"
+    assert client.get(f"/api/runs/{run_id}/perspective/li-zicheng").status_code == 200
+    assert client.get(f"/api/runs/{run_id}/perspective/wu-sangui").status_code == 403
+    assert client.post(f"/api/runs/{run_id}/decision", json={"text": ""}).status_code == 200
 
 
 def test_historical_api_keeps_actor_future_anchors_reference_only(app_config):

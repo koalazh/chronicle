@@ -98,9 +98,24 @@ class CrisisDefinition(StrictModel):
     checkpoint: CrisisCheckpoint
     simulation_boundary: SimulationBoundary
     actors: list[CrisisActorDefinition]
+    playable_actor_ids: list[str]
     corridor: list[CorridorLocation]
     routes: list[CrisisRoute]
     anchors: list[HistoricalAnchor]
+
+
+class CrisisReference(StrictModel):
+    id: str
+    path: str
+
+
+class VolumeDefinition(StrictModel):
+    id: str
+    title: str
+    subtitle: str
+    native_period: str
+    description: str
+    crises: list[CrisisReference]
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -144,20 +159,24 @@ class CrisisPack:
     def validate(self) -> None:
         errors: list[str] = []
         actor_ids = [actor.id for actor in self.crisis.actors]
-        expected_actors = {"li-zicheng", "wu-sangui", "dorgon"}
         if len(actor_ids) != len(set(actor_ids)):
             errors.append("actors: ids must be unique")
-        if set(actor_ids) != expected_actors:
-            errors.append("actors: before-shanhaiguan requires Li Zicheng, Wu Sangui and Dorgon")
+        if not 2 <= len(actor_ids) <= 5:
+            errors.append("actors: a crisis requires between 2 and 5 decision actors")
+        playable_actor_ids = self.crisis.playable_actor_ids
+        if len(playable_actor_ids) != len(set(playable_actor_ids)):
+            errors.append("playable_actor_ids: ids must be unique")
+        unknown_playable = set(playable_actor_ids) - set(actor_ids)
+        if unknown_playable:
+            errors.append(
+                "playable_actor_ids: unknown actors " + ", ".join(sorted(unknown_playable))
+            )
 
         source_ids = {source.id for source in self.sources}
         assertion_ids = [assertion.id for assertion in self.assertions]
         if len(assertion_ids) != len(set(assertion_ids)):
             errors.append("assertions: ids must be unique")
         known_assertions = set(assertion_ids)
-        required_works = {"《清实录·世祖章皇帝实录》", "《明季北略》", "《清史稿》"}
-        if not required_works.issubset({source.work for source in self.sources}):
-            errors.append("sources: Qing Shilu, Mingji Beilue and Qingshi Gao are required")
         for assertion in self.assertions:
             if not assertion.normalized_evidence:
                 errors.append(f"assertion {assertion.id}: normalized evidence is required")
@@ -177,13 +196,6 @@ class CrisisPack:
                 errors.append(f"actor {actor.id}: unknown initial location {actor.initial_location}")
             if not actor.role_charter.responsibility or not actor.role_charter.authority:
                 errors.append(f"actor {actor.id}: role charter is incomplete")
-            required_tools = {"communicate", "update_plan", "schedule_followup"}
-            if not required_tools.issubset(actor.world_authority) or not {
-                "hold",
-                "prepare",
-                "move",
-            }.intersection(actor.world_authority):
-                errors.append(f"actor {actor.id}: world authority is incomplete")
             for assertion_id in actor.initial_knowledge:
                 if assertion_id not in known_assertions:
                     errors.append(f"actor {actor.id}: unknown knowledge assertion {assertion_id}")
@@ -195,7 +207,7 @@ class CrisisPack:
         if self.crisis.simulation_boundary.maximum_tick > checkpoint.safety_horizon_days:
             errors.append("boundary: maximum tick exceeds the safety horizon")
         for message in checkpoint.in_transit:
-            if message.sender not in expected_actors or message.recipient not in expected_actors:
+            if message.sender not in actor_ids or message.recipient not in actor_ids:
                 errors.append(f"message {message.id}: sender and recipient must be crisis actors")
             if message.delivery_tick <= checkpoint.start_tick:
                 errors.append(f"message {message.id}: must arrive after the checkpoint")
@@ -209,7 +221,7 @@ class CrisisPack:
             for assertion_id in anchor.assertion_ids:
                 if assertion_id not in known_assertions:
                     errors.append(f"anchor {anchor.id}: unknown assertion {assertion_id}")
-            unknown_actors = set(anchor.actor_ids) - expected_actors
+            unknown_actors = set(anchor.actor_ids) - set(actor_ids)
             if unknown_actors:
                 errors.append(f"anchor {anchor.id}: unknown actors {', '.join(sorted(unknown_actors))}")
             if anchor.actor_ids and anchor.policy != HistoricalPolicy.REFERENCE_ONLY:
@@ -237,6 +249,7 @@ class CrisisPack:
             "id": self.crisis.id,
             "title": self.crisis.title,
             "actors": [actor.id for actor in self.crisis.actors],
+            "playable_actor_ids": list(self.crisis.playable_actor_ids),
             "source_count": len(self.sources),
             "assertion_count": len(self.assertions),
             "horizon_days": self.crisis.checkpoint.safety_horizon_days,
@@ -250,4 +263,71 @@ def validate_crisis_pack(root: Path) -> list[str]:
         "Crisis Pack valid: "
         f"{len(pack.crisis.actors)} actors, {len(pack.sources)} sources, "
         f"{len(pack.assertions)} assertions, horizon {pack.crisis.checkpoint.safety_horizon_days} days"
+    ]
+
+
+@dataclass(frozen=True)
+class VolumeRegistry:
+    root: Path
+    volume: VolumeDefinition
+    packs: dict[str, CrisisPack]
+
+    @classmethod
+    def load(cls, root: Path) -> "VolumeRegistry":
+        root = root.resolve()
+        volume = VolumeDefinition.model_validate(_read_yaml(root / "volume.yaml"))
+        errors: list[str] = []
+        crisis_ids = [reference.id for reference in volume.crises]
+        if not crisis_ids:
+            errors.append("volume: at least one crisis is required")
+        if len(crisis_ids) != len(set(crisis_ids)):
+            errors.append("volume: crisis ids must be unique")
+        packs: dict[str, CrisisPack] = {}
+        for reference in volume.crises:
+            candidate = (root / reference.path).resolve()
+            if root not in candidate.parents:
+                errors.append(f"volume: crisis {reference.id} path escapes the volume")
+                continue
+            try:
+                pack = CrisisPack.load(candidate)
+            except (FileNotFoundError, CrisisValidationError) as exc:
+                errors.append(f"volume: crisis {reference.id} is invalid: {exc}")
+                continue
+            if pack.crisis.id != reference.id:
+                errors.append(
+                    f"volume: crisis reference {reference.id} does not match pack {pack.crisis.id}"
+                )
+                continue
+            packs[reference.id] = pack
+        if errors:
+            raise CrisisValidationError(errors)
+        return cls(root=root, volume=volume, packs=packs)
+
+    @property
+    def default_pack(self) -> CrisisPack:
+        return self.packs[self.volume.crises[0].id]
+
+    def pack(self, crisis_id: str) -> CrisisPack:
+        try:
+            return self.packs[crisis_id]
+        except KeyError as exc:
+            raise CrisisValidationError([f"volume: unknown crisis {crisis_id}"]) from exc
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "id": self.volume.id,
+            "title": self.volume.title,
+            "subtitle": self.volume.subtitle,
+            "native_period": self.volume.native_period,
+            "description": self.volume.description,
+            "crises": [self.packs[reference.id].summary() for reference in self.volume.crises],
+        }
+
+
+def validate_volume(root: Path) -> list[str]:
+    registry = VolumeRegistry.load(root)
+    return [
+        "Volume valid: "
+        f"{registry.volume.id}, {len(registry.packs)} crisis"
+        f"{'es' if len(registry.packs) != 1 else ''}"
     ]

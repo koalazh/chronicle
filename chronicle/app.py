@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppConfig, is_loopback_host, load_config, write_runtime_env
-from .crisis import CrisisPack
+from .crisis import CrisisPack, CrisisValidationError, VolumeRegistry
 from .crisis_runtime import (
     CrisisRunConflict,
     CrisisRunEngine,
@@ -73,7 +73,9 @@ class WorldlineSealRequest(BaseModel):
 
 
 class CreateRunRequest(BaseModel):
+    crisis_id: str | None = Field(default=None, min_length=1, max_length=128)
     mode: Literal["WATCH", "TAKEOVER"]
+    human_actor_id: str | None = Field(default=None, min_length=1, max_length=128)
     live: bool = True
 
 
@@ -198,6 +200,31 @@ def create_app(
     def crisis_engine() -> CrisisRunEngine:
         return CrisisRunEngine(current_config())
 
+    def volume_registry() -> VolumeRegistry:
+        return VolumeRegistry.load(current_config().volume_path)
+
+    def crisis_payload(pack: CrisisPack) -> dict[str, Any]:
+        return {
+            "summary": pack.summary(),
+            "title": pack.crisis.title,
+            "subtitle": pack.crisis.subtitle,
+            "checkpoint": pack.crisis.checkpoint.model_dump(mode="json"),
+            "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
+            "actors": [
+                {
+                    "id": actor.id,
+                    "display_name": actor.display_name,
+                    "role_charter": actor.role_charter.model_dump(mode="json"),
+                    "playable": actor.id in pack.crisis.playable_actor_ids,
+                }
+                for actor in pack.crisis.actors
+            ],
+            "corridor": [
+                location.model_dump(mode="json")
+                for location in sorted(pack.crisis.corridor, key=lambda item: item.order)
+            ],
+        }
+
     managed_runtime = live_runtime
 
     def crisis_runtime(active: AppConfig) -> LiveRuntimeManager:
@@ -266,31 +293,31 @@ def create_app(
 
     @app.get("/api/crisis")
     async def crisis() -> dict[str, Any]:
-        active = current_config()
-        pack = CrisisPack.load(active.crisis_path)
-        return {
-            "summary": pack.summary(),
-            "title": pack.crisis.title,
-            "subtitle": pack.crisis.subtitle,
-            "checkpoint": pack.crisis.checkpoint.model_dump(mode="json"),
-            "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
-            "actors": [
-                {
-                    "id": actor.id,
-                    "display_name": actor.display_name,
-                    "role_charter": actor.role_charter.model_dump(mode="json"),
-                }
-                for actor in pack.crisis.actors
-            ],
-            "corridor": [
-                location.model_dump(mode="json")
-                for location in sorted(pack.crisis.corridor, key=lambda item: item.order)
-            ],
-        }
+        return crisis_payload(volume_registry().default_pack)
+
+    @app.get("/api/volume")
+    async def volume() -> dict[str, Any]:
+        return volume_registry().summary()
+
+    @app.get("/api/crises")
+    async def crises() -> dict[str, Any]:
+        registry = volume_registry()
+        return {"crises": [pack.summary() for pack in registry.packs.values()]}
+
+    @app.get("/api/crises/{crisis_id}")
+    async def crisis_detail(crisis_id: str) -> dict[str, Any]:
+        try:
+            return crisis_payload(volume_registry().pack(crisis_id))
+        except CrisisValidationError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/runs")
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:
         active = current_config()
+        try:
+            pack = volume_registry().pack(request.crisis_id) if request.crisis_id else volume_registry().default_pack
+        except CrisisValidationError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         if not request.live and not active.dev:
             raise HTTPException(
                 status_code=409,
@@ -301,18 +328,26 @@ def create_app(
                 status_code=409,
                 detail="请先在设置页连接主体所需的模型服务。",
             )
-        engine = CrisisRunEngine(active)
+        engine = CrisisRunEngine(active, pack=pack)
         try:
             if request.live:
                 summary = await asyncio.to_thread(
-                    crisis_runtime(active).create, RunMode(request.mode)
+                    crisis_runtime(active).create,
+                    RunMode(request.mode),
+                    human_actor_id=request.human_actor_id,
+                    crisis_id=pack.crisis.id,
                 )
                 return {
                     "run": summary,
                     "started": summary["runtime_phase"] == "READY",
                     "start_error": runtime_message(summary),
                 }
-            created = await asyncio.to_thread(engine.create, RunMode(request.mode), runtime_mode="fixture")
+            created = await asyncio.to_thread(
+                engine.create,
+                RunMode(request.mode),
+                runtime_mode="fixture",
+                human_actor_id=request.human_actor_id,
+            )
             if not request.live:
                 await asyncio.to_thread(engine.advance_one, created["run"]["id"])
             return {
@@ -458,7 +493,17 @@ def create_app(
 
     @app.get("/api/history")
     async def historical_background() -> dict[str, Any]:
-        pack = CrisisPack.load(current_config().crisis_path)
+        pack = volume_registry().default_pack
+        return historical_payload(pack)
+
+    @app.get("/api/crises/{crisis_id}/history")
+    async def crisis_history(crisis_id: str) -> dict[str, Any]:
+        try:
+            return historical_payload(volume_registry().pack(crisis_id))
+        except CrisisValidationError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def historical_payload(pack: CrisisPack) -> dict[str, Any]:
         return {
             "sources": [source.model_dump(mode="json") for source in pack.sources],
             "assertions": [assertion.model_dump(mode="json") for assertion in pack.assertions],

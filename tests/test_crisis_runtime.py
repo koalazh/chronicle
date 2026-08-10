@@ -92,6 +92,53 @@ def test_takeover_uses_same_engine_but_only_agent_actors_orient(app_config):
         engine.create(RunMode.WATCH)
 
 
+@pytest.mark.parametrize("human_actor_id", ["li-zicheng", "wu-sangui", "dorgon"])
+def test_takeover_can_select_any_playable_actor(app_config, human_actor_id):
+    engine = CrisisRunEngine(app_config)
+    created = engine.create(RunMode.TAKEOVER, human_actor_id=human_actor_id)
+    run_id = created["run"]["id"]
+
+    assert engine.run_summary(run_id)["human_actor"] == human_actor_id
+    assert created["run"]["controller_map"][human_actor_id] == "HUMAN"
+    assert engine.db.worldline_lifetime(run_id, human_actor_id)["profile_name"] == ""
+    assert {
+        wake["actor_id"]
+        for wake in engine.db.crisis_wakes(run_id, status="QUEUED", tick=0)
+    } == {"li-zicheng", "wu-sangui", "dorgon"} - {human_actor_id}
+
+    result = engine.submit_human_decision(run_id, "")
+
+    assert result["silence"] is True
+    assert all(event["seat_id"] == human_actor_id for event in result["events"])
+
+
+def test_takeover_rejects_an_actor_outside_the_playable_cast(app_config):
+    engine = CrisisRunEngine(app_config)
+
+    with pytest.raises(CrisisRunError, match="not playable"):
+        engine.create(RunMode.TAKEOVER, human_actor_id="not-an-actor")
+
+    with pytest.raises(CrisisRunError, match="WATCH Runs cannot"):
+        engine.create(RunMode.WATCH, human_actor_id="li-zicheng")
+
+
+def test_human_controller_path_has_no_historical_actor_id():
+    human_controller_source = "\n".join(
+        inspect.getsource(method)
+        for method in (
+            CrisisRunEngine.create,
+            CrisisRunEngine.human_decision_state,
+            CrisisRunEngine.submit_human_decision,
+            CrisisRunEngine._commit_human_wake,
+            CrisisRunEngine._resolve_human_commitments,
+            CrisisRunEngine._human_decision_operation_results,
+            CrisisRunEngine._human_actor_id,
+        )
+    )
+
+    assert "wu-sangui" not in human_controller_source
+
+
 def test_live_orient_without_world_operation_fails_closed(app_config):
     class SilentHermesDriver:
         source = "hermes"

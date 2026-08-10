@@ -89,6 +89,8 @@ actors:
       artillery: following-column
     world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
 
+playable_actor_ids: [wu-sangui, li-zicheng, dorgon]
+
 corridor:
   - {id: beijing, display_name: 北京, order: 0}
   - {id: yongping, display_name: 永平, order: 1}

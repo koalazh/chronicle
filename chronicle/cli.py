@@ -8,7 +8,7 @@ import uvicorn
 
 from .app import create_app
 from .config import is_loopback_host, load_config
-from .crisis import validate_crisis_pack
+from .crisis import validate_volume
 from .doctor import doctor
 from .hermes import bootstrap
 from .scenario import validate_scenario, validate_source_pack
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "scenario" and args.scenario_command == "validate":
             print("\n".join(validate_scenario(config.scenario_path)))
         elif args.command == "crisis" and args.crisis_command == "validate":
-            print("\n".join(validate_crisis_pack(config.crisis_path)))
+            print("\n".join(validate_volume(config.volume_path)))
         elif args.command == "doctor":
             result = doctor(config)
             print(json.dumps(result, ensure_ascii=False, indent=2))

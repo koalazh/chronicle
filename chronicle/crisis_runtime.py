@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from .config import AppConfig
-from .crisis import CrisisPack
+from .crisis import CrisisPack, VolumeRegistry
 from .db import ChronicleDB, content_hash, stable_hash
 from .decision import (
     DecisionInterpreter,
@@ -377,7 +377,8 @@ class CrisisRunEngine:
     ):
         self.config = config
         self.db = db or ChronicleDB(config.database_path)
-        self.pack = pack or CrisisPack.load(config.crisis_path)
+        self.registry = VolumeRegistry.load(config.volume_path)
+        self.pack = pack or self.registry.default_pack
         active = self.db.active_run()
         self._actor_driver_provided = actor_driver is not None
         self.actor_driver = actor_driver or (
@@ -387,18 +388,52 @@ class CrisisRunEngine:
         )
         self.world = WorldService(self.db, self.pack)
 
-    def create(self, mode: RunMode | str, *, runtime_mode: str = "fixture") -> dict[str, Any]:
+    def select_crisis(self, crisis_id: str) -> CrisisPack:
+        pack = self.registry.pack(crisis_id)
+        self.pack = pack
+        self.world = WorldService(self.db, pack)
+        return pack
+
+    def _activate_run_pack(self, run_id: str) -> dict[str, Any]:
+        run = self.db.worldline(run_id)
+        if run is None or run["kind"] != "CRISIS":
+            raise CrisisRunError("Run not found")
+        if self.pack.crisis.id != run["crisis_id"]:
+            self.select_crisis(str(run["crisis_id"]))
+        return run
+
+    def create(
+        self,
+        mode: RunMode | str,
+        *,
+        runtime_mode: str = "fixture",
+        human_actor_id: str | None = None,
+        crisis_id: str | None = None,
+    ) -> dict[str, Any]:
         mode = RunMode(mode)
+        if crisis_id is not None:
+            self.select_crisis(crisis_id)
         if self.db.active_run() is not None or self.db.active_human_worldline() is not None:
             raise CrisisRunConflict("an active Chronicle Run already exists")
         if runtime_mode not in {"fixture", "live"}:
             raise CrisisRunError("runtime_mode must be fixture or live")
+        if mode == RunMode.WATCH and human_actor_id is not None:
+            raise CrisisRunError("WATCH Runs cannot select a Human actor")
+        selected_human_actor: str | None = None
+        if mode == RunMode.TAKEOVER:
+            selected_human_actor = human_actor_id or next(
+                iter(self.pack.crisis.playable_actor_ids), None
+            )
+            if selected_human_actor is None:
+                raise CrisisRunError("this Crisis has no playable actor")
+            if selected_human_actor not in self.pack.crisis.playable_actor_ids:
+                raise CrisisRunError("Human actor is not playable in this Crisis")
 
         run_id = f"run-{uuid.uuid4().hex[:16]}"
         controllers = {
             actor.id: (
                 "HUMAN"
-                if mode == RunMode.TAKEOVER and actor.id == "wu-sangui"
+                if actor.id == selected_human_actor
                 else "AGENT"
             )
             for actor in self.pack.crisis.actors
@@ -557,7 +592,7 @@ class CrisisRunEngine:
         return {"run": run, "lifetimes": self.db.worldline_lifetimes(run_id)}
 
     def live_profile_specs(self, run_id: str) -> list[dict[str, Any]]:
-        run = self.db.worldline(run_id)
+        run = self._activate_run_pack(run_id)
         if run is None or run["kind"] != "CRISIS" or run["runtime_mode"] != "live":
             raise CrisisRunError("live Run not found")
         specs: list[dict[str, Any]] = []
@@ -666,12 +701,15 @@ class CrisisRunEngine:
         run = self.db.worldline(run_id)
         if run is None or run["kind"] != "CRISIS":
             raise CrisisRunError("Run not found")
+        human_actor_id = self._human_actor_id(run_id)
         current_tick = int(run["current_tick"] if tick is None else tick)
+        if human_actor_id is None:
+            return {"state": "NONE", "kind": "", "tick": current_tick}
         decision_wake = next(
             (
                 wake
                 for wake in self.db.crisis_wakes(run_id, tick=current_tick)
-                if wake["actor_id"] == "wu-sangui"
+                if wake["actor_id"] == human_actor_id
                 and wake["wake_type"] == "DECISION"
                 and wake["trigger_event_id"] == ""
             ),
@@ -693,7 +731,7 @@ class CrisisRunEngine:
             }
         if any(
             event["event_type"] == "HUMAN_SILENCE"
-            and event["seat_id"] == "wu-sangui"
+            and event["seat_id"] == human_actor_id
             and int(event["tick"]) == current_tick
             for event in self.db.worldline_events(run_id)
         ):
@@ -733,15 +771,15 @@ class CrisisRunEngine:
         run = self.db.worldline(run_id)
         if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
+        self._activate_run_pack(run_id)
         if run["runtime_mode"] == "live" and run.get("runtime_phase") != "READY":
             raise CrisisRunConflict(
                 "这一局正在准备或恢复，暂不能提交决定。",
                 code="runtime_not_ready",
                 state=str(run.get("runtime_phase") or "FAILED"),
             )
-        controllers = self._controller_map(run_id)
-        human_actors = [actor_id for actor_id, controller in controllers.items() if controller == "HUMAN"]
-        if human_actors != ["wu-sangui"]:
+        human_actor_id = self._human_actor_id(run_id)
+        if human_actor_id is None:
             raise CrisisRunError("this Run has no Human decision desk")
         tick = int(run["current_tick"])
         if self.human_decision_state(run_id, tick)["state"] != "NONE":
@@ -750,21 +788,21 @@ class CrisisRunEngine:
             snapshot = self.db.worldline_snapshot(run_id)
             if snapshot is None:
                 raise CrisisRunError("Run snapshot is missing")
-            lifetime = self.db.worldline_lifetime(run_id, "wu-sangui")
+            lifetime = self.db.worldline_lifetime(run_id, human_actor_id)
             if lifetime is None:
                 raise CrisisRunError("Human life state is missing")
             try:
                 wake = self.db.create_crisis_wake(
                     {
                         "worldline_id": run_id,
-                        "actor_id": "wu-sangui",
+                        "actor_id": human_actor_id,
                         "wake_type": "DECISION",
                         "tick": tick,
                         "status": "RUNNING",
                         "source": "human",
                         "hermes_session_id": f"human-{uuid.uuid4().hex[:12]}",
                         "frozen_perspective": self._perspective_from(
-                            run_id, "wu-sangui", snapshot["projection"]
+                            run_id, human_actor_id, snapshot["projection"]
                         ),
                     }
                 )
@@ -775,8 +813,8 @@ class CrisisRunEngine:
                     run_id,
                     tick,
                     "HUMAN_SILENCE",
-                    {"visibility": ["wu-sangui"]},
-                    seat_id="wu-sangui",
+                    {"visibility": [human_actor_id]},
+                    seat_id=human_actor_id,
                 )
                 commitments = list(lifetime["commitments"])
                 fulfilled_events = self._resolve_human_commitments(
@@ -784,6 +822,7 @@ class CrisisRunEngine:
                     tick,
                     commitments,
                     event["id"],
+                    human_actor_id,
                 )
                 self.db.commit_worldline_moment(
                     run_id,
@@ -791,7 +830,7 @@ class CrisisRunEngine:
                     current_tick=tick,
                     lifetime_updates=[
                         {
-                            "seat": "wu-sangui",
+                            "seat": human_actor_id,
                             "commitments_json": json.dumps(
                                 commitments, ensure_ascii=False, sort_keys=True
                             ),
@@ -815,12 +854,12 @@ class CrisisRunEngine:
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
         projection = copy.deepcopy(snapshot["projection"])
-        perspective = self._perspective_from(run_id, "wu-sangui", projection)
+        perspective = self._perspective_from(run_id, human_actor_id, projection)
         try:
             wake = self.db.create_crisis_wake(
                 {
                     "worldline_id": run_id,
-                    "actor_id": "wu-sangui",
+                    "actor_id": human_actor_id,
                     "wake_type": "DECISION",
                     "tick": tick,
                     "status": "RUNNING",
@@ -840,7 +879,7 @@ class CrisisRunEngine:
                         "display_name": actor.display_name,
                     }
                     for actor in self.pack.crisis.actors
-                    if actor.id != "wu-sangui"
+                    if actor.id != human_actor_id
                 ),
             )
             if run["runtime_mode"] == "live"
@@ -848,7 +887,7 @@ class CrisisRunEngine:
         )
         try:
             interpretation = selected.interpret(text.strip(), perspective)
-            world = self.world.human_session(wake["id"], "wu-sangui")
+            world = self.world.human_session(wake["id"], human_actor_id)
             for index, operation in enumerate(interpretation.operations):
                 self._invoke_decision_operation(
                     world,
@@ -863,6 +902,7 @@ class CrisisRunEngine:
                 wake,
                 interpretation.summary,
                 selected.source,
+                human_actor_id,
             )
         except Exception as exc:
             self.db.update_crisis_wake(
@@ -904,8 +944,9 @@ class CrisisRunEngine:
         wake: dict[str, Any],
         summary: str,
         source: str,
+        actor_id: str,
     ) -> list[dict[str, Any]]:
-        lifetime = self.db.worldline_lifetime(run_id, "wu-sangui")
+        lifetime = self.db.worldline_lifetime(run_id, actor_id)
         if lifetime is None:
             raise CrisisRunError("Human life state is missing")
         state = {
@@ -921,9 +962,9 @@ class CrisisRunEngine:
                 "summary": summary,
                 "interpreter_source": source,
                 "operation_count": len(self.db.crisis_wake_operations(wake["id"])),
-                "visibility": ["wu-sangui"],
+                "visibility": [actor_id],
             },
-            seat_id="wu-sangui",
+            seat_id=actor_id,
         )
         events: list[dict[str, Any]] = [decision_event]
         events.extend(
@@ -932,6 +973,7 @@ class CrisisRunEngine:
                 tick,
                 state["commitments"],
                 decision_event["id"],
+                actor_id,
             )
         )
         queued_wakes: list[dict[str, Any]] = []
@@ -947,9 +989,9 @@ class CrisisRunEngine:
                         {
                             "tool": operation["tool_name"],
                             "code": operation["result"].get("code", "rejected"),
-                            "visibility": ["wu-sangui"],
+                            "visibility": [actor_id],
                         },
-                        seat_id="wu-sangui",
+                        seat_id=actor_id,
                         causal_parent_ids=[decision_event["id"]],
                     )
                 )
@@ -959,8 +1001,8 @@ class CrisisRunEngine:
                     run_id,
                     tick,
                     "HUMAN_REQUEST_INTERPRETED",
-                    {"tool": operation["tool_name"], "visibility": ["wu-sangui"]},
-                    seat_id="wu-sangui",
+                    {"tool": operation["tool_name"], "visibility": [actor_id]},
+                    seat_id=actor_id,
                     causal_parent_ids=[causal_parent_id],
                 )
             )
@@ -979,7 +1021,7 @@ class CrisisRunEngine:
         projection["tick"] = tick
         perspective = self._perspective_from(
             run_id,
-            "wu-sangui",
+            actor_id,
             projection,
             beliefs=state["beliefs"],
             plan=state["plan"],
@@ -991,7 +1033,7 @@ class CrisisRunEngine:
             current_tick=tick,
             lifetime_updates=[
                 {
-                    "seat": "wu-sangui",
+                    "seat": actor_id,
                     "belief_json": json.dumps(state["beliefs"], ensure_ascii=False, sort_keys=True),
                     "plan_json": json.dumps(state["plan"], ensure_ascii=False, sort_keys=True),
                     "commitments_json": json.dumps(
@@ -1020,6 +1062,7 @@ class CrisisRunEngine:
         tick: int,
         commitments: list[dict[str, Any]],
         decision_event_id: str,
+        actor_id: str,
     ) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
         for commitment in commitments:
@@ -1036,16 +1079,16 @@ class CrisisRunEngine:
                     "COMMITMENT_FULFILLED",
                     {
                         "commitment_id": commitment["id"],
-                        "visibility": ["wu-sangui"],
+                        "visibility": [actor_id],
                     },
-                    seat_id="wu-sangui",
+                    seat_id=actor_id,
                     causal_parent_ids=parents,
                 )
             )
         return events
 
     def advance_one(self, run_id: str, *, allow_runtime_bootstrap: bool = False) -> bool:
-        run = self.db.worldline(run_id)
+        run = self._activate_run_pack(run_id)
         if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
         if run["runtime_mode"] == "live" and run.get("runtime_phase") != "READY":
@@ -1896,6 +1939,7 @@ class CrisisRunEngine:
         next_tick = self._next_tick(run_id)
         return {
             "id": run_id,
+            "crisis_id": run["crisis_id"],
             "mode": "TAKEOVER" if "HUMAN" in controllers.values() else "WATCH",
             "status": run["status"],
             "current_tick": int(run["current_tick"]),
@@ -1918,6 +1962,7 @@ class CrisisRunEngine:
         }
 
     def world_view(self, run_id: str) -> dict[str, Any]:
+        self._activate_run_pack(run_id)
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
@@ -1946,12 +1991,14 @@ class CrisisRunEngine:
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
-    def _human_decision_operation_results(self, run_id: str, tick: int) -> list[dict[str, Any]]:
+    def _human_decision_operation_results(
+        self, run_id: str, tick: int, actor_id: str
+    ) -> list[dict[str, Any]]:
         wake = next(
             (
                 item
                 for item in self.db.crisis_wakes(run_id, tick=tick)
-                if item["actor_id"] == "wu-sangui"
+                if item["actor_id"] == actor_id
                 and item["wake_type"] == "DECISION"
             ),
             None,
@@ -1978,6 +2025,7 @@ class CrisisRunEngine:
         return results
 
     def product_perspective(self, run_id: str, actor_id: str) -> dict[str, Any]:
+        self._activate_run_pack(run_id)
         if actor_id not in self.pack.actor_by_id:
             raise CrisisRunError("Actor not found")
         actor = self.pack.actor_by_id[actor_id]
@@ -2014,7 +2062,7 @@ class CrisisRunEngine:
                         "tick": int(event["tick"]),
                         "summary": str(event["payload"]["summary"]),
                         "operation_results": self._human_decision_operation_results(
-                            run_id, int(event["tick"])
+                            run_id, int(event["tick"]), actor_id
                         ),
                     }
                 )
@@ -2088,6 +2136,7 @@ class CrisisRunEngine:
         return self.run_summary(run_id)
 
     def replay(self, run_id: str) -> dict[str, Any]:
+        self._activate_run_pack(run_id)
         run = self.run_summary(run_id)
         if run["status"] != "SEALED":
             raise CrisisRunError("Replay becomes available after the Run is sealed")
@@ -2206,6 +2255,16 @@ class CrisisRunEngine:
         if run is None:
             raise CrisisRunError("Run not found")
         return json.loads(run["controller_map_json"])
+
+    def _human_actor_id(self, run_id: str) -> str | None:
+        human_actors = [
+            actor_id
+            for actor_id, controller in self._controller_map(run_id).items()
+            if controller == "HUMAN"
+        ]
+        if len(human_actors) > 1:
+            raise CrisisRunError("a Crisis Run can have only one Human actor")
+        return human_actors[0] if human_actors else None
 
     def _queue_wake(
         self,

@@ -133,6 +133,24 @@ def test_live_runtime_retries_the_same_bootstrap_run_after_gateway_failure(
     assert len([wake for wake in engine.db.crisis_wakes(run_id) if wake["wake_type"] == "ORIENT"]) == 2
 
 
+def test_live_runtime_materializes_every_agent_except_the_selected_human(
+    app_config, tmp_path, monkeypatch
+):
+    config = replace(app_config, database_path=tmp_path / "li-takeover.db")
+    _install_fake_profiles(monkeypatch)
+    runtime = _runtime(config, FakeGatewayController())
+
+    ready = runtime.create(RunMode.TAKEOVER, human_actor_id="li-zicheng")
+    engine = CrisisRunEngine(config)
+
+    assert ready["human_actor"] == "li-zicheng"
+    assert {binding["role"] for binding in engine.db.agent_bindings(ready["id"])} == {
+        "dorgon",
+        "wu-sangui",
+    }
+    assert engine.db.worldline_lifetime(ready["id"], "li-zicheng")["profile_name"] == ""
+
+
 def test_live_runtime_marks_interrupted_running_wake_unresolved(app_config, tmp_path, monkeypatch):
     config = replace(app_config, database_path=tmp_path / "interrupted.db")
     _install_fake_profiles(monkeypatch)

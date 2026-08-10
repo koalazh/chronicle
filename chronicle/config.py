@@ -69,8 +69,14 @@ class AppConfig:
         return self.runtime_dir / "runtime.env"
 
     @property
+    def volume_path(self) -> Path:
+        return self.scenario_path
+
+    @property
     def crisis_path(self) -> Path:
-        return self.scenario_path / "crises" / "before-shanhaiguan"
+        from .crisis import VolumeRegistry
+
+        return VolumeRegistry.load(self.volume_path).default_pack.root
 
     def provider_hash(self) -> str:
         return hashlib.sha256(self.llm_base_url.encode()).hexdigest()[:16]

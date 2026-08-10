@@ -6,7 +6,7 @@ import sqlite3
 from chronicle.db import SCHEMA, V2_SCHEMA, V3_SCHEMA, ChronicleDB
 
 
-def test_v8_migration_backs_up_and_seals_active_v2(tmp_path):
+def test_v9_migration_backs_up_and_seals_active_v2(tmp_path):
     path = tmp_path / "chronicle.db"
     with sqlite3.connect(path) as connection:
         connection.executescript(SCHEMA)
@@ -32,7 +32,7 @@ def test_v8_migration_backs_up_and_seals_active_v2(tmp_path):
 
     db = ChronicleDB(path)
 
-    assert db.get_meta("schema_version") == "8"
+    assert db.get_meta("schema_version") == "9"
     assert db.migration_backup_path is not None
     assert ".pre-v7." in db.migration_backup_path.name
     assert db.worldline("legacy-active")["status"] == "SEALED"
@@ -49,7 +49,7 @@ def test_v8_migration_backs_up_and_seals_active_v2(tmp_path):
     }
 
 
-def test_v8_schema_preserves_preexisting_v6_tables(tmp_path):
+def test_v9_schema_preserves_preexisting_v6_tables(tmp_path):
     path = tmp_path / "chronicle.db"
     db = ChronicleDB(path)
     with db.transaction() as connection:
@@ -64,7 +64,7 @@ def test_v8_schema_preserves_preexisting_v6_tables(tmp_path):
 
     migrated = ChronicleDB(path)
 
-    assert migrated.get_meta("schema_version") == "8"
+    assert migrated.get_meta("schema_version") == "9"
     with migrated.transaction() as connection:
         row = connection.execute(
             "SELECT payload_json FROM preserved_v6_state WHERE id = 'keep-me'"
@@ -76,9 +76,28 @@ def test_v8_schema_preserves_preexisting_v6_tables(tmp_path):
             item["name"] for item in connection.execute("PRAGMA table_info(worldlines)")
         }
     assert json.loads(row["payload_json"]) == {"preserved": True}
-    assert {"role_charter_json", "plan_json", "commitments_json", "resources_json"}.issubset(
+    assert {
+        "role_charter_json",
+        "plan_json",
+        "commitments_json",
+        "revisits_json",
+        "resources_json",
+    }.issubset(
         lifetime_columns
     )
-    assert {"crisis_id", "controller_map_json", "simulation_boundary_json", "runtime_phase", "runtime_error_code"}.issubset(
-        worldline_columns
-    )
+    assert {
+        "crisis_id",
+        "volume_id",
+        "crisis_version",
+        "crisis_hash",
+        "resolution_contract_id",
+        "resolution_contract_version",
+        "resolution_seed",
+        "crisis_phase",
+        "outcome_json",
+        "settlement_reason",
+        "controller_map_json",
+        "simulation_boundary_json",
+        "runtime_phase",
+        "runtime_error_code",
+    }.issubset(worldline_columns)

@@ -62,7 +62,7 @@ Chronicle 只复用或停止同时满足 owner record、项目私有 Hermes Home
 
 ## 5. 数据迁移
 
-schema v8 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`。系统保留已知和未知旧表，只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 V2 Worldline 才会封存为 `LEGACY_V2_SEALED`，ACTIVE Canon 不会被封存。v8 为 Crisis Run 增加无密钥的运行阶段和失败码；迁移到 v8 的旧 live Run 会在下一次 `start` 时重新核验或清理，不会被静默当作已就绪。
+schema v9 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`、v8→`.pre-v9.*`。系统保留已知和未知旧表；旧 active V2 `BRANCH` 封存为 `LEGACY_V2_SEALED`，旧 active V3 `CRISIS` 封存为 `LEGACY_V3_SEALED`，不把旧 Commitment/9 日语义伪装成 V4。v9 为 Crisis Run 增加内容/Resolution pin、`crisis_phase`、`outcome_json`、`settlement_reason` 与独立的 `revisits_json`；旧 `commitments_json` 不删除。迁移到 v9 的旧 live Crisis Run 标为 `CLEANUP_PENDING`，仍只会走已验证归属的既有清理路径，不会被静默当作已就绪。
 
 验证迁移时先复制数据库：
 

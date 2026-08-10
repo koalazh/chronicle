@@ -113,7 +113,7 @@ Takeover 的吴三桂没有 Hermes Actor Profile。Interpreter 只把用户文�
 
 V2 的正式路径是 `Canon → Entry → Human Seat → Branch/Worldline → Debrief`；V3 改为 `Crisis Checkpoint → Run → 多主体推进 → Seal → Replay`。V2 的 Source Pack、Ledger、Snapshot、Perspective 边界、Profile 管理、Memory guard、旧表和旧 API 继续保留给迁移、History 和回归，但不再是首页入口。
 
-schema v8 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`。v8 添加 `runtime_phase` 和无密钥失败码；旧 active live Run 进入 `RECONCILING`，旧 sealed live Run 进入可重试清理。只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 Worldline 才会写入 `LEGACY_V2_SEALED`；ACTIVE Canon 或已经封存的旧行不会被重复包装。V2 细节见 [V2 归档](archive/v2/V2_MIGRATION.md)。
+schema v9 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`、v8→`.pre-v9.*`。v9 新增 Volume/Crisis 内容与 Resolution pin、`crisis_phase`、`outcome_json`、`settlement_reason` 和 `revisits_json`；旧 `commitments_json` 保留为 legacy replay field。迁移时仍会把旧 active `BRANCH` 写为 `LEGACY_V2_SEALED`；active V3 `CRISIS` 则写入 `LEGACY_V3_SEALED` 并封存，不把旧 9 日/Commitment 语义热迁移成 V4。旧 live Crisis 会标为 `CLEANUP_PENDING`，由既有受限清理路径处理；ACTIVE Canon 或已经封存的旧行不会被重复包装。V2 细节见 [V2 归档](archive/v2/V2_MIGRATION.md)。
 
 ## 不要把证据混在一起
 

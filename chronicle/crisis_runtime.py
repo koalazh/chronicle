@@ -474,7 +474,14 @@ class CrisisRunEngine:
                 0,
                 "RUN_CREATED",
                 {
+                    "volume_id": self.registry.volume.id,
                     "crisis_id": self.pack.crisis.id,
+                    "crisis_version": self.pack.crisis.version,
+                    "crisis_hash": self.pack.content_hash,
+                    "resolution_contract_id": self.pack.crisis.resolution_contract.id,
+                    "resolution_contract_version": self.pack.crisis.resolution_contract.version,
+                    "resolution_seed": uuid.uuid4().hex,
+                    "crisis_phase": "OPEN",
                     "mode": mode.value,
                     "controller_map": controllers,
                     "runtime_mode": runtime_mode,
@@ -548,6 +555,7 @@ class CrisisRunEngine:
                     "role_charter": actor.role_charter.model_dump(mode="json"),
                     "plan": [],
                     "commitments": [],
+                    "revisits": [],
                     "resources": dict(actor.resources),
                     "last_perspective": perspective,
                 }
@@ -556,7 +564,14 @@ class CrisisRunEngine:
             run = self.db.create_crisis_run_bundle(
                 {
                     "id": run_id,
+                    "volume_id": self.registry.volume.id,
                     "crisis_id": self.pack.crisis.id,
+                    "crisis_version": self.pack.crisis.version,
+                    "crisis_hash": self.pack.content_hash,
+                    "resolution_contract_id": self.pack.crisis.resolution_contract.id,
+                    "resolution_contract_version": self.pack.crisis.resolution_contract.version,
+                    "resolution_seed": events[0]["payload"]["resolution_seed"],
+                    "crisis_phase": "OPEN",
                     "controller_map": controllers,
                     "simulation_boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
                     "runtime_mode": runtime_mode,
@@ -1937,9 +1952,19 @@ class CrisisRunEngine:
         controllers = json.loads(run["controller_map_json"])
         maximum_tick = json.loads(run["simulation_boundary_json"])["maximum_tick"]
         next_tick = self._next_tick(run_id)
+        outcome_json = json.loads(run.get("outcome_json", "{}"))
         return {
             "id": run_id,
+            "volume_id": run.get("volume_id", ""),
             "crisis_id": run["crisis_id"],
+            "crisis_version": int(run.get("crisis_version", 0)),
+            "crisis_hash": run.get("crisis_hash", ""),
+            "resolution_contract_id": run.get("resolution_contract_id", ""),
+            "resolution_contract_version": int(run.get("resolution_contract_version", 0)),
+            "resolution_seed": run.get("resolution_seed", ""),
+            "crisis_phase": run.get("crisis_phase", ""),
+            "outcome_json": outcome_json,
+            "settlement_reason": run.get("settlement_reason", ""),
             "mode": "TAKEOVER" if "HUMAN" in controllers.values() else "WATCH",
             "status": run["status"],
             "current_tick": int(run["current_tick"]),

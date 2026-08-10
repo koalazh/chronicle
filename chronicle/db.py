@@ -531,6 +531,34 @@ class ChronicleDB:
                     "INSERT INTO app_meta(key, value) VALUES ('schema_version', '8') "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
                 )
+            version = 8
+        if version < 9:
+            if existing_before and self.migration_backup_path is None:
+                self.migration_backup_path = self._backup_before_v9()
+            with self.transaction() as connection:
+                for name, declaration in (
+                    ("volume_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("crisis_version", "INTEGER NOT NULL DEFAULT 0"),
+                    ("crisis_hash", "TEXT NOT NULL DEFAULT ''"),
+                    ("resolution_contract_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("resolution_contract_version", "INTEGER NOT NULL DEFAULT 0"),
+                    ("resolution_seed", "TEXT NOT NULL DEFAULT ''"),
+                    ("crisis_phase", "TEXT NOT NULL DEFAULT ''"),
+                    ("outcome_json", "TEXT NOT NULL DEFAULT '{}'"),
+                    ("settlement_reason", "TEXT NOT NULL DEFAULT ''"),
+                ):
+                    self._add_column(connection, "worldlines", name, declaration)
+                self._add_column(
+                    connection,
+                    "worldline_lifetimes",
+                    "revisits_json",
+                    "TEXT NOT NULL DEFAULT '[]'",
+                )
+                self._seal_active_v3_for_v4(connection)
+                connection.execute(
+                    "INSERT INTO app_meta(key, value) VALUES ('schema_version', '9') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
 
     @staticmethod
     def _add_column(
@@ -583,6 +611,92 @@ class ChronicleDB:
                 (changed_at, row["id"]),
             )
 
+    @staticmethod
+    def _seal_active_v3_for_v4(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT id, current_tick, runtime_epoch, runtime_mode FROM worldlines "
+            "WHERE kind = 'CRISIS' AND status = 'ACTIVE'"
+        ).fetchall()
+        changed_at = now_iso()
+        for row in rows:
+            event_id = f"v4-legacy-seal-{row['id']}"
+            connection.execute(
+                "INSERT OR IGNORE INTO worldline_events(id, worldline_id, tick, event_type, seat_id, "
+                "payload_json, provenance, causal_parent_ids, runtime_epoch, created_at) "
+                "VALUES (?, ?, ?, 'LEGACY_V3_SEALED', NULL, ?, 'branch_derived', '[]', ?, ?)",
+                (
+                    event_id,
+                    row["id"],
+                    int(row["current_tick"]),
+                    json.dumps(
+                        {
+                            "reason": "LEGACY_V3",
+                            "resumable_as_v4": False,
+                            "replay_mode": "legacy_v3",
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    row["runtime_epoch"],
+                    changed_at,
+                ),
+            )
+            snapshot = connection.execute(
+                "SELECT projection_json, projection_hash FROM worldline_snapshot_history "
+                "WHERE worldline_id = ? ORDER BY tick DESC, ledger_cursor DESC LIMIT 1",
+                (row["id"],),
+            ).fetchone()
+            if snapshot is not None:
+                ledger_cursor = connection.execute(
+                    "SELECT MAX(sequence) FROM worldline_events WHERE worldline_id = ?",
+                    (row["id"],),
+                ).fetchone()[0]
+                connection.execute(
+                    "INSERT OR IGNORE INTO worldline_snapshot_history("
+                    "worldline_id, tick, ledger_cursor, projection_json, projection_hash, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        row["id"],
+                        int(row["current_tick"]),
+                        int(ledger_cursor),
+                        snapshot["projection_json"],
+                        snapshot["projection_hash"],
+                        changed_at,
+                    ),
+                )
+            runtime_phase = (
+                "CLEANUP_PENDING" if row["runtime_mode"] == "live" else "READY"
+            )
+            runtime_error_code = "legacy_v3_migration" if row["runtime_mode"] == "live" else ""
+            connection.execute(
+                "UPDATE worldlines SET status = 'SEALED', seal_reason = 'LEGACY_V3', "
+                "runtime_phase = ?, runtime_error_code = ?, crisis_phase = 'LEGACY_V3', "
+                "outcome_json = ?, settlement_reason = 'LEGACY_V3', updated_at = ? "
+                "WHERE id = ? AND status = 'ACTIVE'",
+                (
+                    runtime_phase,
+                    runtime_error_code,
+                    json.dumps({"kind": "LEGACY_V3"}, ensure_ascii=False, sort_keys=True),
+                    changed_at,
+                    row["id"],
+                ),
+            )
+            connection.execute(
+                "UPDATE worldline_lifetimes SET status = 'SEALED', updated_at = ? "
+                "WHERE worldline_id = ?",
+                (changed_at, row["id"]),
+            )
+            connection.execute(
+                "UPDATE worldline_agent_bindings SET status = 'REVOKED', revoked_at = ?, "
+                "updated_at = ? WHERE worldline_id = ? AND status = 'ACTIVE'",
+                (changed_at, changed_at, row["id"]),
+            )
+            connection.execute(
+                "UPDATE crisis_wakes SET status = 'CANCELLED', updated_at = ? "
+                "WHERE worldline_id = ? AND status = 'QUEUED'",
+                (changed_at, row["id"]),
+            )
+
     def _backup_before_v2(self) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         backup = self.path.with_name(f"{self.path.stem}.pre-v2.{stamp}{self.path.suffix}")
@@ -599,6 +713,19 @@ class ChronicleDB:
     def _backup_before_v3(self) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         backup = self.path.with_name(f"{self.path.stem}.pre-v3.{stamp}{self.path.suffix}")
+        source = self._connect()
+        destination = sqlite3.connect(backup)
+        try:
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+        return backup
+
+    def _backup_before_v9(self) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        backup = self.path.with_name(f"{self.path.stem}.pre-v9.{stamp}{self.path.suffix}")
         source = self._connect()
         destination = sqlite3.connect(backup)
         try:
@@ -768,6 +895,8 @@ class ChronicleDB:
         for key in ("controller_map_json", "simulation_boundary_json"):
             if key in item:
                 item[key.removesuffix("_json")] = json.loads(item.pop(key))
+        if "outcome_json" in item:
+            item["outcome_data"] = json.loads(item["outcome_json"])
         return item
 
     def create_worldline(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -907,7 +1036,7 @@ class ChronicleDB:
         lifetimes: list[dict[str, Any]],
         projection: dict[str, Any],
     ) -> dict[str, Any]:
-        """Create one V3 Run, actor life states, ledger, and first snapshot atomically."""
+        """Create one Crisis Run, actor life states, ledger, and first snapshot atomically."""
 
         worldline = {
             "id": values["id"],
@@ -925,6 +1054,15 @@ class ChronicleDB:
             "outcome": "",
             "pending_confirmation_json": "",
             "crisis_id": values["crisis_id"],
+            "volume_id": values.get("volume_id", ""),
+            "crisis_version": int(values.get("crisis_version", 0)),
+            "crisis_hash": values.get("crisis_hash", ""),
+            "resolution_contract_id": values.get("resolution_contract_id", ""),
+            "resolution_contract_version": int(values.get("resolution_contract_version", 0)),
+            "resolution_seed": values.get("resolution_seed", ""),
+            "crisis_phase": values.get("crisis_phase", "OPEN"),
+            "outcome_json": json.dumps(values.get("outcome", {}), ensure_ascii=False, sort_keys=True),
+            "settlement_reason": values.get("settlement_reason", ""),
             "controller_map_json": json.dumps(
                 values["controller_map"], ensure_ascii=False, sort_keys=True
             ),
@@ -939,12 +1077,16 @@ class ChronicleDB:
                 "INSERT INTO worldlines(id, scenario_id, kind, status, entry_id, controller_seat, "
                 "current_tick, runtime_epoch, runtime_mode, runtime_phase, runtime_error_code, "
                 "seal_reason, outcome, "
-                "pending_confirmation_json, crisis_id, controller_map_json, "
+                "pending_confirmation_json, crisis_id, volume_id, crisis_version, crisis_hash, "
+                "resolution_contract_id, resolution_contract_version, resolution_seed, crisis_phase, "
+                "outcome_json, settlement_reason, controller_map_json, "
                 "simulation_boundary_json, created_at, updated_at) "
                 "VALUES (:id, :scenario_id, :kind, :status, :entry_id, :controller_seat, "
                 ":current_tick, :runtime_epoch, :runtime_mode, :runtime_phase, :runtime_error_code, "
                 ":seal_reason, :outcome, "
-                ":pending_confirmation_json, :crisis_id, :controller_map_json, "
+                ":pending_confirmation_json, :crisis_id, :volume_id, :crisis_version, :crisis_hash, "
+                ":resolution_contract_id, :resolution_contract_version, :resolution_seed, :crisis_phase, "
+                ":outcome_json, :settlement_reason, :controller_map_json, "
                 ":simulation_boundary_json, :created_at, :updated_at)",
                 worldline,
             )
@@ -957,12 +1099,12 @@ class ChronicleDB:
                     "parent_canon_lifetime, profile_name, profile_metadata_json, genesis_hash, "
                     "memory_text, memory_hash, knowledge_json, belief_json, authority_json, "
                     "role_charter_json, plan_json, commitments_json, resources_json, "
-                    "last_perspective_json, wake_count, created_at, updated_at) "
+                    "last_perspective_json, revisits_json, wake_count, created_at, updated_at) "
                     "VALUES (:id, :worldline_id, :seat, :controller, 'ACTIVE', '', :profile_name, "
                     ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, "
                     ":knowledge_json, :belief_json, :authority_json, :role_charter_json, "
                     ":plan_json, :commitments_json, :resources_json, :last_perspective_json, "
-                    "0, :created_at, :updated_at)",
+                    ":revisits_json, 0, :created_at, :updated_at)",
                     {
                         "id": lifetime["id"],
                         "worldline_id": values["id"],
@@ -998,6 +1140,9 @@ class ChronicleDB:
                         ),
                         "last_perspective_json": json.dumps(
                             lifetime.get("last_perspective", {}), ensure_ascii=False, sort_keys=True
+                        ),
+                        "revisits_json": json.dumps(
+                            lifetime.get("revisits", []), ensure_ascii=False, sort_keys=True
                         ),
                         "created_at": lifetime.get("created_at", now_iso()),
                         "updated_at": lifetime.get("updated_at", now_iso()),
@@ -1256,6 +1401,7 @@ class ChronicleDB:
                     "role_charter_json",
                     "plan_json",
                     "commitments_json",
+                    "revisits_json",
                     "resources_json",
                     "last_perspective_json",
                     "wake_count",
@@ -1495,6 +1641,7 @@ class ChronicleDB:
             "role_charter_json",
             "plan_json",
             "commitments_json",
+            "revisits_json",
             "resources_json",
             "last_perspective_json",
         ):
@@ -1519,6 +1666,7 @@ class ChronicleDB:
             "role_charter_json",
             "plan_json",
             "commitments_json",
+            "revisits_json",
             "resources_json",
             "last_perspective_json",
             "wake_count",

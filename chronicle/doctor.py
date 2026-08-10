@@ -47,7 +47,7 @@ def doctor(config: AppConfig) -> dict[str, Any]:
     add("hermes", hermes_ok, hermes_version)
     db = ChronicleDB(config.database_path)
     schema_version = db.get_meta("schema_version")
-    add("schema_version", schema_version == "8", f"expected=8, actual={schema_version or 'missing'}")
+    add("schema_version", schema_version == "9", f"expected=9, actual={schema_version or 'missing'}")
     active_run = db.active_run()
     live_v3 = active_run is not None and active_run["runtime_mode"] == "live"
     if active_run is not None:

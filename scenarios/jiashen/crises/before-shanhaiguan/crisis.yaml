@@ -1,4 +1,5 @@
 id: before-shanhaiguan
+version: 1
 title: 山海关之前
 subtitle: 三封未决的信，四处仍在移动的人
 
@@ -33,6 +34,10 @@ simulation_boundary:
   stop_before: 世界需要裁定山海关一带大规模军队直接交战结果
   reason: V3 第一场只模拟主体决策、通信、等待、有限移动与前置行动，不引入战役结算。
   maximum_tick: 9
+
+resolution_contract:
+  id: legacy-v3-boundary
+  version: 1
 
 actors:
   - id: li-zicheng

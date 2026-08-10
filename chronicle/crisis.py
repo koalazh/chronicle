@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -91,12 +93,19 @@ class SimulationBoundary(StrictModel):
     maximum_tick: int = Field(gt=0)
 
 
+class ResolutionContractReference(StrictModel):
+    id: str
+    version: int = Field(ge=1)
+
+
 class CrisisDefinition(StrictModel):
     id: str
+    version: int = Field(ge=1)
     title: str
     subtitle: str
     checkpoint: CrisisCheckpoint
     simulation_boundary: SimulationBoundary
+    resolution_contract: ResolutionContractReference
     actors: list[CrisisActorDefinition]
     playable_actor_ids: list[str]
     corridor: list[CorridorLocation]
@@ -155,6 +164,16 @@ class CrisisPack:
     @property
     def location_by_id(self) -> dict[str, CorridorLocation]:
         return {location.id: location for location in self.crisis.corridor}
+
+    @property
+    def content_hash(self) -> str:
+        payload = {
+            "crisis": self.crisis.model_dump(mode="json"),
+            "sources": [source.model_dump(mode="json") for source in self.sources],
+            "assertions": [assertion.model_dump(mode="json") for assertion in self.assertions],
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     def validate(self) -> None:
         errors: list[str] = []
@@ -247,6 +266,9 @@ class CrisisPack:
     def summary(self) -> dict[str, Any]:
         return {
             "id": self.crisis.id,
+            "version": self.crisis.version,
+            "content_hash": self.content_hash,
+            "resolution_contract": self.crisis.resolution_contract.model_dump(mode="json"),
             "title": self.crisis.title,
             "actors": [actor.id for actor in self.crisis.actors],
             "playable_actor_ids": list(self.crisis.playable_actor_ids),

@@ -30,6 +30,49 @@ def test_cli_rejects_non_loopback_host_override(app_config, monkeypatch, capsys)
     assert "loopback" in capsys.readouterr().err
 
 
+def test_cli_start_uses_the_product_runtime_entry(app_config, monkeypatch):
+    created: dict[str, object] = {}
+    served: dict[str, object] = {}
+
+    def fake_create(config, *, manage_live_runtime_on_startup=False):
+        created.update(
+            {
+                "config": config,
+                "manage_live_runtime_on_startup": manage_live_runtime_on_startup,
+            }
+        )
+        return "chronicle-app"
+
+    def fake_run(app, **kwargs):
+        served.update({"app": app, **kwargs})
+
+    monkeypatch.setattr(cli_module, "load_config", lambda: app_config)
+    monkeypatch.setattr(cli_module, "create_app", fake_create)
+    monkeypatch.setattr(cli_module.uvicorn, "run", fake_run)
+
+    assert cli_module.main(["start"]) == 0
+    assert created == {"config": app_config, "manage_live_runtime_on_startup": True}
+    assert served["app"] == "chronicle-app"
+    assert served["reload"] is False
+
+
+def test_cli_serve_uses_an_import_string_when_development_reload_is_enabled(
+    app_config, monkeypatch
+):
+    served: dict[str, object] = {}
+
+    monkeypatch.setattr(cli_module, "load_config", lambda: replace(app_config, dev=True))
+    monkeypatch.setattr(
+        cli_module.uvicorn,
+        "run",
+        lambda app, **kwargs: served.update({"app": app, **kwargs}),
+    )
+
+    assert cli_module.main(["serve"]) == 0
+    assert served["app"] == "chronicle.app:app"
+    assert served["reload"] is True
+
+
 def test_app_rejects_non_loopback_binding(app_config):
     with pytest.raises(ValueError, match="loopback"):
         create_app(replace(app_config, host="0.0.0.0"))

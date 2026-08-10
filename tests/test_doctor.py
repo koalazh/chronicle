@@ -105,8 +105,8 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
         records = {}
         for actor in actors:
             actor_id = actor["id"]
-            profile = f"chronicle-{run_id[-8:]}-{actor_id}"
-            server = f"chronicle-world-{run_id[-8:]}-{actor_id}"
+            profile = actor["profile"]
+            server = actor["world_server_name"]
             profile_home = config.hermes_home / "profiles" / profile
             profile_home.mkdir(parents=True)
             (profile_home / "chronicle-genesis.json").write_text(
@@ -119,8 +119,9 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
                         "worldline_id": run_id,
                         "genesis_hash": actor["genesis_hash"],
                         "initial_memory_snapshot": actor["initial_memory_snapshot"],
-                        "runtime_epoch": runtime_epoch,
-                        "ownership_marker": f"marker-{actor_id}",
+                            "runtime_epoch": runtime_epoch,
+                            "ownership_marker": actor["ownership_marker"],
+                            "toolsets": ["memory", server],
                     }
                 ),
                 encoding="utf-8",
@@ -138,18 +139,25 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
                 "profile": profile,
                 "profile_key": f"key-{actor_id}",
                 "world_token": f"token-{actor_id}",
-                "ownership_marker": f"marker-{actor_id}",
+                "ownership_marker": actor["ownership_marker"],
                 "world_server_name": server,
             }
         return records
 
-    monkeypatch.setattr("chronicle.hermes.materialize_crisis_profiles", fake_materialize)
-    run_id = CrisisRunEngine(configured).create(
-        RunMode.WATCH, runtime_mode="live"
-    )["run"]["id"]
+    engine = CrisisRunEngine(configured)
+    run_id = engine.create(RunMode.WATCH, runtime_mode="live")["run"]["id"]
+    run = engine.db.worldline(run_id)
+    records = fake_materialize(
+        configured,
+        run_id,
+        engine.live_profile_specs(run_id),
+        crisis_id=run["crisis_id"],
+        runtime_epoch=run["runtime_epoch"],
+    )
+    engine.activate_live_runtime(run_id, records)
     profiles = [
         lifetime["profile_name"]
-        for lifetime in CrisisRunEngine(configured).db.worldline_lifetimes(run_id)
+        for lifetime in engine.db.worldline_lifetimes(run_id)
     ]
     monkeypatch.setattr("chronicle.doctor.cli_version", lambda _config: "Hermes Agent v0.20.0")
     monkeypatch.setattr(
@@ -193,7 +201,7 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
     assert checks["ledger_snapshot_integrity"]["ok"] is True
     assert checks["memory_lineage"]["ok"] is True
 
-    db = CrisisRunEngine(configured).db
+    db = engine.db
     binding = db.agent_bindings(run_id)[0]
     with db.transaction() as connection:
         connection.execute(

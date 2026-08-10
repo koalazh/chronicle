@@ -205,7 +205,9 @@ class HermesActorDriver:
         if not key:
             raise HermesRuntimeError(f"live Actor Profile key is missing for {actor_id}")
         client = HermesClient(self.config)
-        session_id = client.create_fresh_session(profile, key, str(wake["id"]))
+        session_id = str(wake.get("hermes_session_id") or "")
+        if not session_id:
+            session_id = client.create_fresh_session(profile, key, str(wake["id"])) or ""
         if not session_id:
             raise HermesRuntimeError(f"live Hermes session creation failed for {actor_id}")
         memory_text, memory_hash = read_profile_memory(self.config, profile)
@@ -377,6 +379,7 @@ class CrisisRunEngine:
         self.db = db or ChronicleDB(config.database_path)
         self.pack = pack or CrisisPack.load(config.crisis_path)
         active = self.db.active_run()
+        self._actor_driver_provided = actor_driver is not None
         self.actor_driver = actor_driver or (
             HermesActorDriver(config, self.db)
             if active is not None and active["runtime_mode"] == "live"
@@ -405,33 +408,7 @@ class CrisisRunEngine:
             if runtime_mode == "fixture"
             else f"hermes-{self.config.provider_hash()}-{uuid.uuid4().hex[:8]}"
         )
-        profile_records: dict[str, dict[str, Any]] = {}
-        if runtime_mode == "live":
-            from .hermes import materialize_crisis_profiles
-
-            agent_actors = [
-                {
-                    "id": actor.id,
-                    "role_charter": actor.role_charter.model_dump(mode="json"),
-                    "genesis_hash": stable_hash(self.pack.initial_perspective(actor.id)),
-                    "initial_memory_snapshot": {
-                        "memory_text": "",
-                        "memory_hash": content_hash(""),
-                    },
-                }
-                for actor in self.pack.crisis.actors
-                if controllers[actor.id] == "AGENT"
-            ]
-            try:
-                profile_records = materialize_crisis_profiles(
-                    self.config,
-                    run_id,
-                    agent_actors,
-                    crisis_id=self.pack.crisis.id,
-                    runtime_epoch=epoch,
-                )
-            except Exception as exc:
-                raise CrisisRunError("eager Hermes Profile materialization failed") from exc
+        if runtime_mode == "live" and not self._actor_driver_provided:
             self.actor_driver = HermesActorDriver(self.config, self.db)
         projection = {
             "crisis_id": self.pack.crisis.id,
@@ -501,24 +478,32 @@ class CrisisRunEngine:
             memory_text = ""
             memory_hash = content_hash("")
             if controllers[actor.id] == "AGENT":
-                profile_name = (
-                    f"fixture://{actor.id}"
-                    if runtime_mode == "fixture"
-                    else str(profile_records[actor.id]["profile"])
-                )
-                if runtime_mode == "live":
-                    from .hermes import read_profile_memory
+                if runtime_mode == "fixture":
+                    profile_name = f"fixture://{actor.id}"
+                    profile_metadata = {"source": runtime_mode}
+                else:
+                    from .hermes import (
+                        _crisis_profile_name,
+                        _crisis_world_server_name,
+                        stable_profile_marker,
+                    )
 
-                    memory_text, memory_hash = read_profile_memory(self.config, profile_name)
+                    profile_name = _crisis_profile_name(run_id, actor.id)
+                    profile_metadata = {
+                        "source": runtime_mode,
+                        "ownership_marker": stable_profile_marker(run_id, actor.id, profile_name),
+                        "world_server_name": _crisis_world_server_name(run_id, actor.id),
+                    }
             else:
                 profile_name = ""
+                profile_metadata = {}
             lifetimes.append(
                 {
                     "id": f"life-{uuid.uuid4().hex[:16]}",
                     "actor_id": actor.id,
                     "controller": controllers[actor.id],
                     "profile_name": profile_name,
-                    "profile_metadata": {"source": runtime_mode} if profile_name else {},
+                    "profile_metadata": profile_metadata,
                     "genesis_hash": stable_hash(perspective),
                     "memory_text": memory_text,
                     "memory_hash": memory_hash,
@@ -541,29 +526,20 @@ class CrisisRunEngine:
                     "simulation_boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
                     "runtime_mode": runtime_mode,
                     "runtime_epoch": epoch,
+                    "runtime_phase": "BOOTSTRAPPING" if runtime_mode == "live" else "READY",
                 },
                 events,
                 lifetimes,
                 projection,
             )
         except Exception:
-            if profile_records:
-                from .hermes import remove_crisis_profiles
-
-                remove_crisis_profiles(
-                    self.config,
-                    run_id,
-                    [str(item["profile"]) for item in profile_records.values()],
-                )
             raise
+        if runtime_mode == "live":
+            return {"run": run, "lifetimes": self.db.worldline_lifetimes(run_id)}
         for actor_id, controller in controllers.items():
             if controller != "AGENT":
                 continue
-            profile_name = (
-                f"fixture://{actor_id}"
-                if runtime_mode == "fixture"
-                else str(profile_records[actor_id]["profile"])
-            )
+            profile_name = f"fixture://{actor_id}"
             self.db.create_agent_binding(
                 {
                     "worldline_id": run_id,
@@ -573,18 +549,104 @@ class CrisisRunEngine:
                         stable_hash(
                             {"run_id": run_id, "actor_id": actor_id, "source": "fixture"}
                         )
-                        if runtime_mode == "fixture"
-                        else str(profile_records[actor_id]["ownership_marker"])
                     ),
-                    "token_hash": (
-                        ""
-                        if runtime_mode == "fixture"
-                        else token_hash(str(profile_records[actor_id]["world_token"]))
-                    ),
+                    "token_hash": "",
                 }
             )
             self._queue_wake(run_id, actor_id, CrisisWakeType.ORIENT, 0)
         return {"run": run, "lifetimes": self.db.worldline_lifetimes(run_id)}
+
+    def live_profile_specs(self, run_id: str) -> list[dict[str, Any]]:
+        run = self.db.worldline(run_id)
+        if run is None or run["kind"] != "CRISIS" or run["runtime_mode"] != "live":
+            raise CrisisRunError("live Run not found")
+        specs: list[dict[str, Any]] = []
+        for lifetime in self.db.worldline_lifetimes(run_id):
+            if lifetime["controller"] != "AGENT":
+                continue
+            actor = self.pack.actor_by_id[lifetime["seat"]]
+            metadata = dict(lifetime["profile_metadata"])
+            specs.append(
+                {
+                    "id": actor.id,
+                    "profile": lifetime["profile_name"],
+                    "world_server_name": metadata.get("world_server_name", ""),
+                    "ownership_marker": metadata.get("ownership_marker", ""),
+                    "role_charter": actor.role_charter.model_dump(mode="json"),
+                    "genesis_hash": lifetime["genesis_hash"],
+                    "initial_memory_snapshot": {
+                        "memory_text": lifetime["memory_text"],
+                        "memory_hash": lifetime["memory_hash"],
+                    },
+                }
+            )
+        return specs
+
+    def activate_live_runtime(self, run_id: str, records: dict[str, dict[str, Any]]) -> None:
+        run = self.db.worldline(run_id)
+        if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
+            raise CrisisRunError("Run is not active")
+        if run["runtime_mode"] != "live":
+            raise CrisisRunError("Run does not use the live runtime")
+        specs = self.live_profile_specs(run_id)
+        bindings: list[dict[str, Any]] = []
+        wakes: list[dict[str, Any]] = []
+        for spec in specs:
+            actor_id = str(spec["id"])
+            record = records.get(actor_id)
+            if record is None:
+                raise CrisisRunError("live Profile materialization is incomplete")
+            if (
+                record.get("profile") != spec["profile"]
+                or record.get("ownership_marker") != spec["ownership_marker"]
+                or record.get("world_server_name") != spec["world_server_name"]
+            ):
+                raise CrisisRunError("live Profile identity does not match the Run")
+            bindings.append(
+                {
+                    "actor_id": actor_id,
+                    "profile_name": str(record["profile"]),
+                    "ownership_marker": str(record["ownership_marker"]),
+                    "token_hash": token_hash(str(record["world_token"])),
+                }
+            )
+            wakes.append(
+                {
+                    "actor_id": actor_id,
+                    "wake_type": CrisisWakeType.ORIENT.value,
+                    "tick": 0,
+                    "source": "hermes",
+                }
+            )
+        self.db.activate_crisis_runtime(run_id, bindings, wakes)
+
+    def initial_orient_completed(self, run_id: str) -> bool:
+        expected = {str(spec["id"]) for spec in self.live_profile_specs(run_id)}
+        wakes = [
+            wake
+            for wake in self.db.crisis_wakes(run_id, tick=0)
+            if wake["wake_type"] == CrisisWakeType.ORIENT.value
+        ]
+        by_actor = {str(wake["actor_id"]): wake for wake in wakes}
+        if set(by_actor) != expected or not expected:
+            return False
+        for wake in by_actor.values():
+            if wake["status"] != "COMPLETED":
+                return False
+            if not any(
+                operation["tool_name"] == "update_plan" and operation["status"] == "COMMITTED"
+                for operation in self.db.crisis_wake_operations(wake["id"])
+            ):
+                return False
+        return True
+
+    def mark_live_runtime_ready(self, run_id: str) -> dict[str, Any]:
+        if not self.initial_orient_completed(run_id):
+            raise CrisisRunError("initial live Orient has not completed")
+        return self.db.set_crisis_runtime_state(run_id, "READY")
+
+    def mark_live_runtime_failed(self, run_id: str, code: str) -> dict[str, Any]:
+        return self.db.set_crisis_runtime_state(run_id, "FAILED", error_code=code)
 
     def run_until_idle(self, run_id: str, *, max_moments: int = 80) -> dict[str, Any]:
         moments = 0
@@ -671,6 +733,12 @@ class CrisisRunEngine:
         run = self.db.worldline(run_id)
         if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
+        if run["runtime_mode"] == "live" and run.get("runtime_phase") != "READY":
+            raise CrisisRunConflict(
+                "这一局正在准备或恢复，暂不能提交决定。",
+                code="runtime_not_ready",
+                state=str(run.get("runtime_phase") or "FAILED"),
+            )
         controllers = self._controller_map(run_id)
         human_actors = [actor_id for actor_id, controller in controllers.items() if controller == "HUMAN"]
         if human_actors != ["wu-sangui"]:
@@ -966,10 +1034,20 @@ class CrisisRunEngine:
             )
         return events
 
-    def advance_one(self, run_id: str) -> bool:
+    def advance_one(self, run_id: str, *, allow_runtime_bootstrap: bool = False) -> bool:
         run = self.db.worldline(run_id)
         if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
+        if run["runtime_mode"] == "live" and run.get("runtime_phase") != "READY":
+            if not (
+                allow_runtime_bootstrap
+                and run.get("runtime_phase") in {"BOOTSTRAPPING", "RECONCILING"}
+            ):
+                raise CrisisRunConflict(
+                    "这一局正在准备或恢复，暂不能继续推进。",
+                    code="runtime_not_ready",
+                    state=str(run.get("runtime_phase") or "FAILED"),
+                )
         next_tick = self._next_tick(run_id)
         if next_tick is None:
             return False
@@ -1811,6 +1889,8 @@ class CrisisRunEngine:
             "current_tick": int(run["current_tick"]),
             "maximum_tick": json.loads(run["simulation_boundary_json"])["maximum_tick"],
             "runtime_mode": run["runtime_mode"],
+            "runtime_phase": run.get("runtime_phase", "READY"),
+            "runtime_error_code": run.get("runtime_error_code", ""),
             "human_actor": next(
                 (actor_id for actor_id, controller in controllers.items() if controller == "HUMAN"),
                 None,
@@ -1914,6 +1994,19 @@ class CrisisRunEngine:
         run = self.db.worldline(run_id)
         if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
+        running = [
+            wake
+            for wake in self.db.nonterminal_crisis_wakes(run_id)
+            if wake["status"] in {"RUNNING", "STAGED"}
+        ]
+        if running:
+            if run["runtime_mode"] == "live":
+                self.db.set_crisis_runtime_state(run_id, "SEALING")
+            raise CrisisRunConflict(
+                "这一刻仍在结束，暂不能封存。",
+                code="seal_waits_for_wake",
+                state="SEALING",
+            )
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
@@ -1932,8 +2025,11 @@ class CrisisRunEngine:
             reason=reason,
             outcome=f"危局在第 {run['current_tick']} 日封存",
             snapshot=snapshot["projection"],
+            revoke_agent_bindings=True,
+            runtime_phase="CLEANUP_PENDING" if run["runtime_mode"] == "live" else None,
+            runtime_error_code="runtime_cleanup_pending" if run["runtime_mode"] == "live" else "",
+            cancel_queued_wakes=True,
         )
-        self.db.revoke_agent_bindings(run_id)
         return self.run_summary(run_id)
 
     def replay(self, run_id: str) -> dict[str, Any]:

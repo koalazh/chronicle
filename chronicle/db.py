@@ -493,6 +493,44 @@ class ChronicleDB:
                     "INSERT INTO app_meta(key, value) VALUES ('schema_version', '7') "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
                 )
+            version = 7
+        if version < 8:
+            if existing_before and self.migration_backup_path is None:
+                self.migration_backup_path = self._backup_before_v8()
+            with self.transaction() as connection:
+                self._add_column(
+                    connection,
+                    "worldlines",
+                    "runtime_phase",
+                    "TEXT NOT NULL DEFAULT 'READY'",
+                )
+                self._add_column(
+                    connection,
+                    "worldlines",
+                    "runtime_error_code",
+                    "TEXT NOT NULL DEFAULT ''",
+                )
+                connection.execute(
+                    "UPDATE worldlines SET runtime_phase = 'RECONCILING' "
+                    "WHERE kind = 'CRISIS' AND status = 'ACTIVE' AND runtime_mode = 'live'"
+                )
+                connection.execute(
+                    "UPDATE worldlines SET runtime_phase = 'CLEANUP_PENDING', "
+                    "runtime_error_code = 'runtime_cleanup_pending' "
+                    "WHERE kind = 'CRISIS' AND status = 'SEALED' AND runtime_mode = 'live'"
+                )
+                changed_at = now_iso()
+                connection.execute(
+                    "UPDATE worldline_agent_bindings SET status = 'REVOKED', revoked_at = ?, "
+                    "updated_at = ? WHERE worldline_id IN "
+                    "(SELECT id FROM worldlines WHERE kind = 'CRISIS' AND status = 'SEALED') "
+                    "AND status = 'ACTIVE'",
+                    (changed_at, changed_at),
+                )
+                connection.execute(
+                    "INSERT INTO app_meta(key, value) VALUES ('schema_version', '8') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
 
     @staticmethod
     def _add_column(
@@ -595,6 +633,13 @@ class ChronicleDB:
         finally:
             destination.close()
             source.close()
+        return backup
+
+    def _backup_before_v8(self) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        backup = self.path.with_name(f"{self.path.stem}.pre-v8.{stamp}{self.path.suffix}")
+        with self._connect() as source, sqlite3.connect(backup) as target:
+            source.backup(target)
         return backup
 
     def _import_legacy_branches(self) -> None:
@@ -874,6 +919,8 @@ class ChronicleDB:
             "current_tick": int(values.get("current_tick", 0)),
             "runtime_epoch": values.get("runtime_epoch", ""),
             "runtime_mode": values.get("runtime_mode", "fixture"),
+            "runtime_phase": values.get("runtime_phase", "READY"),
+            "runtime_error_code": values.get("runtime_error_code", ""),
             "seal_reason": "",
             "outcome": "",
             "pending_confirmation_json": "",
@@ -890,11 +937,13 @@ class ChronicleDB:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO worldlines(id, scenario_id, kind, status, entry_id, controller_seat, "
-                "current_tick, runtime_epoch, runtime_mode, seal_reason, outcome, "
+                "current_tick, runtime_epoch, runtime_mode, runtime_phase, runtime_error_code, "
+                "seal_reason, outcome, "
                 "pending_confirmation_json, crisis_id, controller_map_json, "
                 "simulation_boundary_json, created_at, updated_at) "
                 "VALUES (:id, :scenario_id, :kind, :status, :entry_id, :controller_seat, "
-                ":current_tick, :runtime_epoch, :runtime_mode, :seal_reason, :outcome, "
+                ":current_tick, :runtime_epoch, :runtime_mode, :runtime_phase, :runtime_error_code, "
+                ":seal_reason, :outcome, "
                 ":pending_confirmation_json, :crisis_id, :controller_map_json, "
                 ":simulation_boundary_json, :created_at, :updated_at)",
                 worldline,
@@ -1009,6 +1058,40 @@ class ChronicleDB:
                     worldline_id,
                 ),
             )
+
+    def set_crisis_runtime_state(
+        self,
+        worldline_id: str,
+        phase: str,
+        *,
+        error_code: str = "",
+    ) -> dict[str, Any]:
+        valid = {
+            "BOOTSTRAPPING",
+            "READY",
+            "RECONCILING",
+            "FAILED",
+            "SEALING",
+            "CLEANUP_PENDING",
+        }
+        if phase not in valid:
+            raise ValueError(f"unknown crisis runtime phase: {phase}")
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT kind, status FROM worldlines WHERE id = ?", (worldline_id,)
+            ).fetchone()
+            if row is None or row["kind"] != "CRISIS":
+                raise sqlite3.IntegrityError("crisis Run does not exist")
+            if row["status"] == "SEALED" and phase != "CLEANUP_PENDING":
+                raise sqlite3.IntegrityError("sealed Run only supports cleanup")
+            if row["status"] != "SEALED" and phase == "CLEANUP_PENDING":
+                raise sqlite3.IntegrityError("active Run cannot enter cleanup")
+            connection.execute(
+                "UPDATE worldlines SET runtime_phase = ?, runtime_error_code = ?, updated_at = ? "
+                "WHERE id = ?",
+                (phase, error_code, now_iso(), worldline_id),
+            )
+        return self.worldline(worldline_id) or {}
 
     def append_worldline_event(
         self,
@@ -1228,6 +1311,10 @@ class ChronicleDB:
         outcome: str,
         pre_events: list[dict[str, Any]] | None = None,
         snapshot: dict[str, Any] | None = None,
+        revoke_agent_bindings: bool = False,
+        runtime_phase: str | None = None,
+        runtime_error_code: str = "",
+        cancel_queued_wakes: bool = False,
     ) -> dict[str, Any]:
         """Seal a Worldline, its event ledger, and all branch lifetimes atomically."""
 
@@ -1254,11 +1341,16 @@ class ChronicleDB:
             for pre_event in pre_events or []:
                 self._insert_worldline_event(connection, worldline_id, pre_event)
             seal_cursor = self._insert_worldline_event(connection, worldline_id, event)
+            runtime_sql = ", runtime_phase = ?, runtime_error_code = ?" if runtime_phase else ""
+            runtime_args: tuple[Any, ...] = (
+                (runtime_phase, runtime_error_code) if runtime_phase else ()
+            )
             updated = connection.execute(
                 "UPDATE worldlines SET status = 'SEALED', seal_reason = ?, outcome = ?, "
-                "pending_confirmation_json = '', updated_at = ? "
-                "WHERE id = ? AND status = 'ACTIVE'",
-                (reason, outcome, now_iso(), worldline_id),
+                "pending_confirmation_json = ''"
+                + runtime_sql
+                + ", updated_at = ? WHERE id = ? AND status = 'ACTIVE'",
+                (reason, outcome, *runtime_args, now_iso(), worldline_id),
             )
             if updated.rowcount != 1:
                 raise sqlite3.IntegrityError("worldline is no longer active")
@@ -1266,6 +1358,19 @@ class ChronicleDB:
                 "UPDATE worldline_lifetimes SET status = 'SEALED', updated_at = ? WHERE worldline_id = ?",
                 (now_iso(), worldline_id),
             )
+            if revoke_agent_bindings:
+                changed_at = now_iso()
+                connection.execute(
+                    "UPDATE worldline_agent_bindings SET status = 'REVOKED', revoked_at = ?, "
+                    "updated_at = ? WHERE worldline_id = ? AND status = 'ACTIVE'",
+                    (changed_at, changed_at, worldline_id),
+                )
+            if cancel_queued_wakes:
+                connection.execute(
+                    "UPDATE crisis_wakes SET status = 'CANCELLED', updated_at = ? "
+                    "WHERE worldline_id = ? AND status = 'QUEUED'",
+                    (now_iso(), worldline_id),
+                )
             if snapshot is not None:
                 self._insert_snapshot(
                     connection,
@@ -1455,6 +1560,102 @@ class ChronicleDB:
             )
         return record
 
+    def activate_crisis_runtime(
+        self,
+        worldline_id: str,
+        bindings: list[dict[str, Any]],
+        wakes: list[dict[str, Any]],
+    ) -> None:
+        """Authorize one bootstrapped live Run and queue its initial Wakes atomically."""
+
+        with self.transaction() as connection:
+            run = connection.execute(
+                "SELECT kind, status FROM worldlines WHERE id = ?", (worldline_id,)
+            ).fetchone()
+            if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
+                raise sqlite3.IntegrityError("crisis Run is not active")
+            for values in bindings:
+                existing = connection.execute(
+                    "SELECT profile_identity, ownership_marker, token_hash, status "
+                    "FROM worldline_agent_bindings WHERE worldline_id = ? AND role = ?",
+                    (worldline_id, values["actor_id"]),
+                ).fetchone()
+                if existing is not None:
+                    matches = (
+                        existing["profile_identity"] == values["profile_name"]
+                        and existing["ownership_marker"] == values["ownership_marker"]
+                        and existing["token_hash"] == values["token_hash"]
+                        and existing["status"] == "ACTIVE"
+                    )
+                    if not matches:
+                        raise sqlite3.IntegrityError("crisis binding does not match bootstrap identity")
+                    continue
+                record = {
+                    "id": values.get("id", f"binding-{uuid.uuid4().hex[:16]}"),
+                    "worldline_id": worldline_id,
+                    "role": values["actor_id"],
+                    "profile_identity": values["profile_name"],
+                    "distribution_version": values.get("distribution_version", "chronicle-actor-v3"),
+                    "ownership_marker": values["ownership_marker"],
+                    "status": "ACTIVE",
+                    "token_hash": values["token_hash"],
+                    "revoked_at": "",
+                    "created_at": values.get("created_at", now_iso()),
+                    "updated_at": values.get("updated_at", now_iso()),
+                }
+                connection.execute(
+                    "INSERT INTO worldline_agent_bindings(id, worldline_id, role, profile_identity, "
+                    "distribution_version, ownership_marker, status, token_hash, revoked_at, "
+                    "created_at, updated_at) VALUES (:id, :worldline_id, :role, :profile_identity, "
+                    ":distribution_version, :ownership_marker, :status, :token_hash, :revoked_at, "
+                    ":created_at, :updated_at)",
+                    record,
+                )
+            for values in wakes:
+                existing = connection.execute(
+                    "SELECT id FROM crisis_wakes WHERE worldline_id = ? AND actor_id = ? "
+                    "AND wake_type = ? AND tick = ? AND trigger_event_id = ?",
+                    (
+                        worldline_id,
+                        values["actor_id"],
+                        values["wake_type"],
+                        int(values["tick"]),
+                        values.get("trigger_event_id", ""),
+                    ),
+                ).fetchone()
+                if existing is not None:
+                    continue
+                record = {
+                    "id": values.get("id", f"wake-{uuid.uuid4().hex[:16]}"),
+                    "worldline_id": worldline_id,
+                    "actor_id": values["actor_id"],
+                    "wake_type": values["wake_type"],
+                    "tick": int(values["tick"]),
+                    "status": "QUEUED",
+                    "source": values.get("source", "hermes"),
+                    "trigger_event_id": values.get("trigger_event_id", ""),
+                    "hermes_session_id": "",
+                    "frozen_perspective_json": "{}",
+                    "result_json": "{}",
+                    "error_json": "{}",
+                    "created_at": values.get("created_at", now_iso()),
+                    "updated_at": values.get("updated_at", now_iso()),
+                }
+                connection.execute(
+                    "INSERT INTO crisis_wakes(id, worldline_id, actor_id, wake_type, tick, status, "
+                    "source, trigger_event_id, hermes_session_id, frozen_perspective_json, "
+                    "result_json, error_json, created_at, updated_at) "
+                    "VALUES (:id, :worldline_id, :actor_id, :wake_type, :tick, :status, :source, "
+                    ":trigger_event_id, :hermes_session_id, :frozen_perspective_json, "
+                    ":result_json, :error_json, :created_at, :updated_at)",
+                    record,
+                )
+            connection.execute(
+                "UPDATE worldlines SET runtime_phase = 'BOOTSTRAPPING', runtime_error_code = '', "
+                "updated_at = ? WHERE id = ?",
+                (now_iso(), worldline_id),
+            )
+
     def agent_binding_for_token_hash(self, token_hash: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -1480,6 +1681,15 @@ class ChronicleDB:
                 "updated_at = ? WHERE worldline_id = ? AND status = 'ACTIVE'",
                 (changed_at, changed_at, worldline_id),
             )
+
+    def nonterminal_crisis_wakes(self, worldline_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM crisis_wakes WHERE worldline_id = ? "
+                "AND status IN ('QUEUED', 'RUNNING', 'STAGED') ORDER BY tick, actor_id, id",
+                (worldline_id,),
+            ).fetchall()
+        return [self._decode_crisis_wake(row) for row in rows]
 
     def create_crisis_wake(self, values: dict[str, Any]) -> dict[str, Any]:
         record = {

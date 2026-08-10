@@ -32,6 +32,8 @@ Watch 回看默认是“封存后全景”，标题为“三条人生如何相�
 
 封存卷册只列已封存的危局，旧 V2 数据标成“旧版留存”；史实背景解释来源、证据状态、争议和建模边界；设置收集模型服务地址、API Key、模型和接口类型，“保存并核对”先测试 Provider，再保存 Secret。
 
+封存请求即使遇到本地资源收束失败，也先打开可回看的卷册；卷册和回看页会保留“再次收束”入口，不把失败伪装成已经清理完成。
+
 ## 视觉方向
 
 Chronicle 是可交互的 Living Historical Document，不是策略游戏 HUD、地图编辑器或 Agent 控制台。纸色承载阅读，墨色建立层级，朱红标记当前危局/未决选择/封存边界，蓝灰表示在途、未抵达或尚未确认的信息。
@@ -48,6 +50,8 @@ Corridor 是四个有序地点的关系：北京 → 永平 → 山海关 → �
 
 未配置时入口禁用；未就绪时继续、决定和沉默不可提交；忙碌时先捕获输入再重绘；视角切换只重新加载合法投影；封存时说明停止原因并打开回看；空状态和错误使用领域语言，不显示 traceback、token、Session ID 或 HTTP 状态码。
 
+live Run 的 `BOOTSTRAPPING`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP_PENDING` 用现有纸页、朱印与细蓝线显示为一张轻量的“待续页”。它只说明已知状态：正在建立、正在恢复、尚未准备好或已经封存；不显示假进度、倒计时或“主体正在思考”。建立、恢复、推进、决定和封存共享一个 mutation lock，书案在这段时间展示已提交文字的只读纸条。`FAILED` 只提供“重新准备”或封存，不允许继续输入。
+
 至少检查 1440、1280、768 和 390 宽度：没有横向溢出，Corridor 方向正确，Desk 记录在手机为单列，按钮、label、textarea 可键盘操作并有清晰 disabled 状态。浏览器截图只证明当时本地 API/fixture 的页面状态。
 
 ## 前后端接缝
@@ -58,7 +62,7 @@ Corridor 是四个有序地点的关系：北京 → 永平 → 山海关 → �
 | --- | --- |
 | 危局与检查点 | `GET /api/crisis` |
 | 设置与就绪状态 | `GET /api/config`、`POST /api/setup/test`、`POST /api/setup/configure` |
-| 创建/恢复一局 | `POST /api/runs`、`GET /api/runs/active` |
+| 创建/恢复一局 | `POST /api/runs`、`GET /api/runs/active`、`POST /api/runs/{id}/runtime/retry` |
 | 合法视野 | `GET /api/runs/{id}/world`、`GET /api/runs/{id}/perspective/{actor}` |
 | 推进/决定/封存 | `POST /api/runs/{id}/continue`、`POST /api/runs/{id}/decision`、`POST /api/runs/{id}/seal` |
 | 回看/卷册/史实 | `GET /api/runs/{id}/replay`、`GET /api/archive`、`GET /api/history` |

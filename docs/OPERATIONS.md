@@ -25,42 +25,44 @@ node --check web/app.js
 git diff --check
 ```
 
-启动页面：
+启动正式体验：
 
 ```bash
-uv run chronicle serve
+uv run chronicle start
 ```
 
-服务默认在 <http://127.0.0.1:8711>。设置页的“保存并核对”先请求 Provider 的 `/models`，通过后才把配置写入 runtime env；原始 API Key 不回显。正式页面只创建 live Run，不能把未配置或失败的 live 请求静默改成 fixture。
+服务默认在 <http://127.0.0.1:8711>。`start` 会在页面服务启动时恢复同一局的本地运行资源；`serve` 仅用于开发，不承担这次启动时恢复。设置页的“保存并核对”先请求 Provider 的 `/models`，通过后才把配置写入 runtime env；原始 API Key 不回显。正式页面只创建 live Run，不能把未配置或失败的 live 请求静默改成 fixture。
 
-## 3. 真实 Hermes 的启动顺序
+## 3. 正常使用的本地生命周期
 
-V3 创建 live Run 时会立即创建该局所需的 Run-scoped Profiles，并为每个 Agent-controlled Actor 排入 `ORIENT` Wake。Gateway 必须在 Profile 注册写入项目私有 Home 之后启动，因此顺序固定为：
+用户只需要运行 `uv run chronicle start` 并打开页面。创建 live Run 时，Chronicle 先持久化同一局的历史和主体身份，再建立该局的 Profile、写入当前局唯一的 MCP allowlist、启动项目私有 Gateway child，并完成初始 `ORIENT`。只有 `ORIENT` 已提交真实 World operation，页面才把这一局显示为可继续。
 
-1. 找到并停止旧的项目私有 Gateway；未知或全局进程不要直接终止；
-2. 在页面创建 live Watch 或 Takeover；
-3. 使用项目私有 Hermes Home 启动 Gateway，使它加载本局 Profile/MCP 注册；
-4. 运行 `uv run chronicle doctor`，确认状态为 `READY`，并确认 root Gateway probe 没有 401；
-5. 回到页面点击“继续”。
+重启后，`start` 只恢复尚未封存的同一局；它不会新建 Profile、Wake、epoch 或复制旧 Session。运行资源的唯一持久化状态是下列 `runtime_phase`；Run 的历史状态仍然只有 `ACTIVE` 或 `SEALED`。
 
-命令示例：
+| 阶段 | 用户看到什么 | 系统做什么 |
+| --- | --- | --- |
+| `BOOTSTRAPPING` | 正在建立主体 | 验证或补齐同一局的资源，尚不允许推进或落笔。 |
+| `READY` | 可以继续或落笔 | binding、初始行动和项目私有 child 都已通过当前局的核验。 |
+| `RECONCILING` | 正在恢复这一局 | 重启后只核验同一局；未确认的运行中 Wake 不会盲目重投。 |
+| `FAILED` | 可以重新准备或封存 | 保留同一局和无密钥失败码，不新建身份；无法核对的 Wake 只允许封存，不会重投。 |
+| `SEALING` | 正在封存卷册 | 等待正在结束的时刻终结，拒绝新的写入。 |
+| `CLEANUP_PENDING` | 已封存，可回看 | binding 已原子撤销；本地资源清理可安全重试。空失败码表示已经收束。 |
 
-```bash
-HERMES_HOME="$PWD/.chronicle/hermes-home" \
-  hermes gateway run --external-supervisor --accept-hooks
-```
+封存的原子边界先写入历史 seal、封存 Life State、撤销 binding 并取消尚未开始的 Wake；然后才停止 child、移除本局 root MCP/env 条目和带归属 marker 的 Profile。清理失败不会让旧主体回到新局 allowlist；下一次 `start` 或新开局前会重试。想重新选择时，先封存上一局，再创建全新的 Run/Profile/epoch，不能重入旧主体。
 
-V3 不需要先运行旧 `bootstrap` 才能创建危局主体；`bootstrap` 只服务 legacy Profile 初始化路径。停止旧 Gateway 前先用 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 识别进程归属，未知服务保持不动。
+封存请求会立即打开回看；如果本地资源仍处于 `CLEANUP_PENDING`，封存卷册和回看页都提供“再次收束”，不会把清理失败藏在页面之外。
 
-## 4. READY 到底证明什么
+Chronicle 只复用或停止同时满足 owner record、项目私有 Hermes Home 的 PID metadata、进程启动时间和当前配置指纹的 child。记录不含密钥。任何一项无法确认、PID 已复用或端口被未知服务占用时，系统会失败关闭：不接管、不停止、不覆盖未知服务，并在页面保留“重新准备”入口。
 
-对当前 live Run，`READY` 至少检查：Source、Scenario、Crisis Pack 和 schema v7 可加载；Snapshot tick/hash 与 Ledger cursor 对齐；每个 Agent binding 都对应存在的 Profile；Profile identity、Run/Actor marker、唯一 token hash、Memory lineage 与 Life State 对齐；没有 RUNNING/STAGED/FAILED Wake；已完成 Wake 的 Session 非空且唯一；Gateway health、root/API probe、Profile route、cross-profile key isolation 和四工具 MCP server discovery 通过；Commitment 与 `COMMITMENT_DUE` Wake 一一对应。第一次 live Agent `ORIENT` 完成后，还必须有已提交的 World operation，作为 Gateway 实际暴露 World MCP 的证据。
+## 4. 诊断与真实业务证据
 
-`/v1/toolsets` 只报告 builtin `memory`，不能代替 `hermes mcp test`；但 `hermes mcp test` 只证明独立 MCP server 能启动和发现工具，也不能单独证明 Gateway Profile 已加载它。READY 是能力与隔离前置条件；第一次 ORIENT 的 World operation 失败时，Run 会停止推进，不会把缺少工具伪装成合法 no-op。它仍不证明消息已经送达或 Run 已正确封存。
+`uv run chronicle doctor` 是故障诊断，不是正常页面流程的一步。它检查 Source、Scenario、Crisis Pack、数据库、Profile identity、密钥隔离和基础 Gateway/Profile 路由；它可以帮助定位配置问题，但不能替代当前 child 的业务调用证明。
+
+运行时的 `READY` 比 Doctor 更窄也更实际：它要求当前局初始 `ORIENT` 已经留下 `update_plan` 的 committed World operation。这样可以阻止 memory-only 会话被当作成功启动。它仍不证明后续消息送达、长期推进或最终封存已经完成。
 
 ## 5. 数据迁移
 
-schema v7 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`；系统保留已知和未知旧表，只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 V2 Worldline 才会封存为 `LEGACY_V2_SEALED`，ACTIVE Canon 不会被封存。随后增加 V3 Run/Wake/operation/Life State/binding revocation 结构，并建立“最多一个 active playable Run”的约束。
+schema v8 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`。系统保留已知和未知旧表，只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 V2 Worldline 才会封存为 `LEGACY_V2_SEALED`，ACTIVE Canon 不会被封存。v8 为 Crisis Run 增加无密钥的运行阶段和失败码；迁移到 v8 的旧 live Run 会在下一次 `start` 时重新核验或清理，不会被静默当作已就绪。
 
 验证迁移时先复制数据库：
 

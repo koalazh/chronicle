@@ -30,6 +30,9 @@ def _parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    start = sub.add_parser("start")
+    start.add_argument("--host", default=None)
+    start.add_argument("--port", type=int, default=None)
     return parser
 
 
@@ -53,11 +56,23 @@ def main(argv: list[str] | None = None) -> int:
             result = bootstrap(config, force_reset=args.force_reset)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("ready") else 1
-        elif args.command == "serve":
+        elif args.command in {"serve", "start"}:
             requested_host = args.host or config.host
             if not is_loopback_host(requested_host):
                 raise ValueError("Chronicle only supports loopback host binding")
-            uvicorn.run(create_app(config), host=requested_host, port=args.port or config.port, reload=config.dev)
+            product_start = args.command == "start"
+            if product_start:
+                app = create_app(config, manage_live_runtime_on_startup=True)
+            elif config.dev:
+                app = "chronicle.app:app"
+            else:
+                app = create_app(config)
+            uvicorn.run(
+                app,
+                host=requested_host,
+                port=args.port or config.port,
+                reload=config.dev and not product_start,
+            )
         else:
             _parser().print_help()
     except Exception as exc:

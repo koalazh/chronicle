@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .crisis import CrisisPack
-from .db import ChronicleDB
+from .db import ChronicleDB, stable_hash
 
 
 class WorldAccessError(PermissionError):
@@ -150,9 +150,16 @@ class WorldAffordanceSession:
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        host_key = stable_hash(
+            {
+                "wake_id": self.identity.wake_id,
+                "tool": tool_name,
+                "caller_slot": idempotency_key,
+            }
+        )
         existing = self.service.db.crisis_wake_operations(self.identity.wake_id)
         repeated = next(
-            (item for item in existing if item["idempotency_key"] == idempotency_key),
+            (item for item in existing if item["idempotency_key"] == host_key),
             None,
         )
         if repeated is not None:
@@ -167,7 +174,7 @@ class WorldAffordanceSession:
                 "payload": payload,
                 "result": result,
                 "status": status,
-                "idempotency_key": idempotency_key,
+                "idempotency_key": host_key,
             }
         )
         return operation["result"]

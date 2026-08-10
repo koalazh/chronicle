@@ -76,14 +76,58 @@ function go(page) {
 }
 
 function runtimeLabel() {
+  const phase = state.active?.runtime_mode === "live" ? state.active.runtime_phase : "";
+  if (phase === "BOOTSTRAPPING") return "这一局正在建立主体";
+  if (phase === "RECONCILING") return "这一局正在恢复主体";
+  if (phase === "FAILED") return "这一局尚未准备好";
+  if (phase === "SEALING") return "这一局正在封存";
+  if (phase === "CLEANUP_PENDING") return "卷册正在收束";
+  if (phase === "READY") return "这一局的主体已经就绪";
   if (!state.config) return "正在核对运行环境";
   if (state.config.setup_required) return "尚未连接主体所需的模型服务";
-  if (state.config.hermes_ready) return "真实主体运行已就绪";
-  return "模型已配置；主体服务尚待启动";
+  return "模型已配置；创建危局时会自动建立主体";
 }
 
 function interactionLocked() {
   return state.busy || Boolean(state.activity);
+}
+
+function runtimePending() {
+  return state.active?.runtime_mode === "live" && state.active.runtime_phase !== "READY";
+}
+
+function runMutationLocked() {
+  return interactionLocked() || runtimePending();
+}
+
+function runtimeTransitionLocked() {
+  return ["BOOTSTRAPPING", "RECONCILING", "SEALING", "CLEANUP_PENDING"].includes(
+    state.active?.runtime_phase,
+  );
+}
+
+function runtimeFolio() {
+  const run = state.active;
+  if (!run || run.runtime_mode !== "live" || run.runtime_phase === "READY") return "";
+  const copy = {
+    BOOTSTRAPPING: ["这一局正在建立主体", "人物、私有视野与第一段行动正在依次入卷。"],
+    RECONCILING: ["这一局正在恢复", "正在核对上一段历史留下的主体与运行状态。"],
+    FAILED: ["这一局尚未准备好", "这一页暂不能继续；可以重新准备，或将它封存。"],
+    SEALING: ["这一局正在封存", "此刻正在结束，暂不能再写入新的行动。"],
+    CLEANUP_PENDING: ["卷册已经封存", "历史已经可回看；本地的主体正在安全收束。"],
+  };
+  const [defaultTitle, defaultDescription] = copy[run.runtime_phase] || ["这一局正在处理", "请稍候。"];
+  const [title, description] = run.runtime_error_code === "runtime_wake_unresolved"
+    ? ["这一局无法安全恢复", "有一段行动的结果无法确认；可以封存这局，但不能再次投递它。"]
+    : [defaultTitle, defaultDescription];
+  const retry = run.runtime_phase === "FAILED" && run.runtime_error_code !== "runtime_wake_unresolved"
+    ? '<button class="quiet activity-reconcile" data-action="retry-runtime">重新准备</button>'
+    : "";
+  return `<section class="activity-banner runtime-${escapeHtml(run.runtime_phase.toLowerCase())}" role="status" aria-live="polite" aria-busy="${run.runtime_phase !== "FAILED"}">
+    <span class="activity-stamp" aria-hidden="true">卷</span>
+    <div class="activity-copy"><span class="column-label">这一局</span><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div>
+    ${retry}
+  </section>`;
 }
 
 function activityText(activity = state.activity) {
@@ -102,6 +146,10 @@ function activityText(activity = state.activity) {
     seal: {
       sealing: ["正在封存这一卷", "把已经发生的事收进可回看的卷册。"],
       reconciling: ["正在核对封存结果", "封存请求的结果尚未确认。"],
+    },
+    runtime: {
+      bootstrapping: ["正在建立这一局", "人物、私有视野与第一段行动正在依次入卷。"],
+      reconciling: ["正在重新准备这一局", "正在核对主体与运行状态。"],
     },
   };
   return copy[activity.kind]?.[activity.phase] || ["正在处理这一页", "请稍候，暂不能再次落笔。"];
@@ -264,7 +312,7 @@ function corridorMarkup(corridor, actors, messages, options = {}) {
 
 function runHeader(title, lede) {
   const run = state.active;
-  const locked = interactionLocked();
+  const locked = interactionLocked() || runtimeTransitionLocked();
   return `<header class="run-header">
     <div>
       <p class="kicker">山海关之前 · 第 ${run.current_tick} 日</p>
@@ -275,7 +323,7 @@ function runHeader(title, lede) {
       <span class="day-count">${run.current_tick}<small> / ${run.maximum_tick} 日</small></span>
       <button class="quiet" data-action="seal-run" ${locked ? "disabled" : ""}>封存这一局</button>
     </div>
-  </header>${activityBanner()}`;
+  </header>${runtimeFolio()}${activityBanner()}`;
 }
 
 function watchPage() {
@@ -297,7 +345,7 @@ function watchPage() {
     ${body}
     <footer class="continue-bar">
       <div><span>下一个有意义的时刻</span><small>送达、约定到期或主体的新行动</small></div>
-      <button class="primary" data-action="continue-run" ${interactionLocked() || (state.active.runtime_mode === "live" && !state.config.hermes_ready) ? "disabled" : ""}>继续</button>
+      <button class="primary" data-action="continue-run" ${runMutationLocked() ? "disabled" : ""}>继续</button>
     </footer>
   `);
 }
@@ -411,8 +459,10 @@ function deskPage() {
     .reverse()
     .find((item) => Number(item.tick) === Number(state.active.current_tick));
   const decisionState = decisionSlotState();
-  const decisionLocked = interactionLocked() || decisionState !== "NONE";
-  const busyCopy = activityText() || ["正在处理这一页", "请稍候，暂不能再次落笔。"];
+  const decisionLocked = runMutationLocked() || decisionState !== "NONE";
+  const busyCopy = activityText() || (runtimePending()
+    ? ["这一局正在准备", "请等待这一页恢复为可落笔的状态。"]
+    : ["正在处理这一页", "请稍候，暂不能再次落笔。"]);
   const decisionCopy = state.activity?.pendingText || "";
   const settledCopy = committedDecision?.summary || "这一日已经入卷。";
   const summaryTitle = decisionState === "COMMITTED"
@@ -426,14 +476,14 @@ function deskPage() {
       ? "这一笔处理失败；请先核对这一局的状态。"
       : "结果尚未确认，先保留这一页。";
   const decisionDesk = decisionLocked
-    ? `<div class="pending-folio ${decisionSlotCommitted() ? "settled" : ""}" role="status" aria-live="polite" aria-busy="${state.activity ? "true" : "false"}">
+    ? `<div class="pending-folio ${decisionSlotCommitted() ? "settled" : ""}" role="status" aria-live="polite" aria-busy="${state.activity || runtimePending() ? "true" : "false"}">
         <span class="activity-stamp" aria-hidden="true">卷</span>
         <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? "<small>当前没有新的触发；可以封存这一局。</small>" : ""}</div>
       </div>`
     : `<label for="decision">命令、回信或等待的理由</label>
         <textarea id="decision" rows="8" placeholder="例如：先向关外追问通行与指挥条件，两日后若仍无北京的可靠答复，再重新比较。">${escapeHtml(state.draftDecision)}</textarea>
-        <button class="primary wide" data-action="submit-decision" ${state.active.runtime_mode === "live" && !state.config.hermes_ready ? "disabled" : ""}>送入这段历史</button>
-        <button class="quiet wide" data-action="silence" ${state.active.runtime_mode === "live" && !state.config.hermes_ready ? "disabled" : ""}>暂不追加命令，继续</button>`;
+        <button class="primary wide" data-action="submit-decision">送入这段历史</button>
+        <button class="quiet wide" data-action="silence">暂不追加命令，继续</button>`;
   return chrome(`
     ${runHeader("吴三桂的书案", "你只能看见抵达山海关的消息；北京与辽西仍会在视野之外行动。")}
     <section class="desk-layout">
@@ -492,10 +542,17 @@ function replayPage() {
     .join("");
   const replayTitle =
     state.replay.run.mode === "WATCH" ? "三条人生如何相遇" : "在你看不见的地方";
+  const cleanupPending = state.replay.run.runtime_mode === "live"
+    && state.replay.run.runtime_phase === "CLEANUP_PENDING"
+    && state.replay.run.runtime_error_code;
+  const cleanupNotice = cleanupPending
+    ? `<section class="activity-banner runtime-cleanup_pending" role="status" aria-live="polite"><span class="activity-stamp" aria-hidden="true">卷</span><div class="activity-copy"><span class="column-label">封存之后</span><strong>卷册已经封存</strong><p>历史可以回看，本地资源还没有完全收束。</p></div><button class="quiet activity-reconcile" data-action="retry-cleanup" data-cleanup-id="${escapeHtml(state.replay.run.id)}">再次收束</button></section>`
+    : "";
   return chrome(`
     <header class="replay-header">
       <p class="kicker">回看这一局</p><h1>${replayTitle}</h1>
       <p>封存让你看见：当时的视野，与世界同时发生的事，并不是同一份记录。</p>
+      ${cleanupNotice}
       <div class="replay-switch">
         <button data-replay-lens="then" ${state.replayLens === "then" ? 'aria-current="true"' : ""}>当时可见</button>
         <button data-replay-lens="after" ${state.replayLens === "after" ? 'aria-current="true"' : ""}>封存后全景</button>
@@ -513,7 +570,7 @@ function archivePage() {
           (run) => `<article class="archive-row">
             <div><span>${run.mode === "WATCH" ? "旁观" : run.mode === "TAKEOVER" ? "吴三桂" : "旧版留存"}</span><h2>${run.mode === "LEGACY_V2" ? "甲申旧卷" : "山海关之前"}</h2></div>
             <p>封存于第 ${run.current_tick} 日<br><small>${escapeHtml(run.seal_reason || "已经结束")}</small></p>
-            ${run.mode !== "LEGACY_V2" ? `<button class="secondary" data-replay-id="${escapeHtml(run.id)}">打开回看</button>` : '<span class="legacy-mark">仅作历史留存</span>'}
+            ${run.mode !== "LEGACY_V2" ? `<div class="archive-actions"><button class="secondary" data-replay-id="${escapeHtml(run.id)}">打开回看</button>${run.runtime_phase === "CLEANUP_PENDING" && run.runtime_error_code ? `<button class="quiet" data-action="retry-cleanup" data-cleanup-id="${escapeHtml(run.id)}">再次收束</button>` : ""}</div>` : '<span class="legacy-mark">仅作历史留存</span>'}
           </article>`,
         )
         .join("")
@@ -727,12 +784,42 @@ async function sealRun() {
     body: JSON.stringify({ reason: "user_exit" }),
   });
   const runId = result.run.id;
+  state.notice = result.run.runtime_error_code
+    ? "卷册已经封存；本地资源仍在收束，可以稍后再次收束。"
+    : "这一局已经封存，可以回看。";
   state.active = null;
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || "wu-sangui";
   state.page = "replay";
   go("replay");
+}
+
+async function retryCleanup(runId = state.replay?.run?.id) {
+  if (!runId) return;
+  const result = await api(`/api/runs/${runId}/runtime/retry`, {
+    method: "POST",
+    body: "{}",
+  });
+  if (state.replay?.run?.id === runId) {
+    state.replay = await api(`/api/runs/${runId}/replay`);
+  }
+  if (state.page === "archive") state.archive = (await api("/api/archive")).runs;
+  state.notice = result.run.runtime_error_code
+    ? "本地资源仍在收束，请稍后再次核对。"
+    : "本地资源已经收束。";
+}
+
+async function retryRuntime() {
+  const result = await api(`/api/runs/${state.active.id}/runtime/retry`, {
+    method: "POST",
+    body: "{}",
+  });
+  state.active = result.run;
+  state.notice = result.run.runtime_phase === "READY"
+    ? "这一局已经恢复，可以继续。"
+    : "这一局仍在准备；页面会保留当前状态。";
+  await loadRunView();
 }
 
 async function submitDecision(silence = false, capturedText = "", seq) {
@@ -874,13 +961,22 @@ root.addEventListener("click", (event) => {
   }
   const replayId = event.target.closest("[data-replay-id]")?.dataset.replayId;
   if (replayId) return runAction(() => openReplay(replayId));
+  const cleanupId = event.target.closest("[data-cleanup-id]")?.dataset.cleanupId;
+  if (cleanupId) return runAction(() => retryCleanup(cleanupId), { kind: "seal", phase: "reconciling" });
   const capturedDecision = document.querySelector("#decision")?.value || "";
   const actions = {
     "go-home": () => go("home"),
     "retry-boot": () => boot(),
-    "start-watch": () => runAction(() => startRun("WATCH")),
-    "start-takeover": () => runAction(() => startRun("TAKEOVER")),
+    "start-watch": () => runAction(
+      () => startRun("WATCH"),
+      { kind: "runtime", phase: "bootstrapping" },
+    ),
+    "start-takeover": () => runAction(
+      () => startRun("TAKEOVER"),
+      { kind: "runtime", phase: "bootstrapping" },
+    ),
     "open-active": () => go(state.active.mode === "WATCH" ? "watch" : "desk"),
+    "retry-runtime": () => runAction(retryRuntime, { kind: "runtime", phase: "reconciling" }),
     "continue-run": () => runAction(continueRun, { kind: "continue", phase: "advancing" }),
     "seal-run": () => runAction(sealRun, { kind: "seal", phase: "sealing" }),
     "submit-decision": () => {

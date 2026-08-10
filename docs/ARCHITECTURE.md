@@ -48,9 +48,9 @@ Knowledge 不是 Truth 的副本，Belief 不是史实定论，Plan/Commitment �
 
 ### 创建
 
-同一时间最多一局可玩的 ACTIVE Run。Host 从 Crisis Pack 读取 checkpoint、主体、走廊、路线、初始信息和在途消息，建立 Projection 与每个主体的 Life State，写入创建/checkpoint 事件，并为每个 Agent-controlled Actor 排入一次 `ORIENT` Wake。
+同一时间最多一局可玩的 ACTIVE Run。Host 从 Crisis Pack 读取 checkpoint、主体、走廊、路线、初始信息和在途消息，建立 Projection 与每个主体的 Life State，并原子写入创建/checkpoint 事件。fixture Run 随后直接授权 Agent binding 和 `ORIENT` Wake。
 
-Watch 的 controller map 是三位 Agent；Takeover 是李自成 Agent、吴三桂 Human、多尔衮 Agent。live Run 创建时 eager materialize 所需 Hermes Profiles；Profile 或 bundle 失败，整次创建失败，只清理本次有归属标记的 Profile。
+Watch 的 controller map 是三位 Agent；Takeover 是李自成 Agent、吴三桂 Human、多尔衮 Agent。live Run 先以 `BOOTSTRAPPING` 持久化同一局的主体 identity，再按 identity 幂等建立所需 Profile、当前局唯一的 root MCP allowlist 和私有 Gateway child，最后才在一个事务里授权 binding 和排入 `ORIENT` Wake。初始 `ORIENT` 必须通过 World MCP 留下 committed `update_plan`；否则 Run 保持同一 identity 并进入 `FAILED`，不会伪装成 memory-only 的合法 no-op。
 
 ### 推进
 
@@ -62,7 +62,17 @@ Scheduler 只寻找已经存在的下一件事：移动抵达、消息抵达、�
 
 ### 封存
 
-用户主动封存，或危局达到最大模拟日/需要进入大规模交战裁定时，Run 不再允许继续推进并应被封存。封存撤销 Agent binding，之后只能读 Replay、Archive 和 History。
+用户主动封存，或危局达到最大模拟日/需要进入大规模交战裁定时，Run 不再允许继续推进并应被封存。一次 seal 事务同时写入 `RUN_SEALED`、封存 Life State、撤销所有 Agent binding，并取消尚未开始的 Wake；之后只能读 Replay、Archive 和 History。
+
+Profile、root MCP 条目和 Gateway child 是执行资源，不是历史的一部分。seal 之后的物理清理可重试：先停止可证明归属的 child，再移除本局 MCP/env 条目，最后删除带 marker 的 Profile。`CLEANUP_PENDING` 与空失败码表示已收束；有失败码时，下一次 `chronicle start` 或新开局前只重试这次清理。旧资源永远不会加入新局 allowlist，sealed Run 也不能被重入。
+
+### 运行资源与重启
+
+`runtime_phase` 不是新的产品概念，而是 ACTIVE Run 恢复资源时的最小持久化线索。它只使用 `BOOTSTRAPPING`、`READY`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP_PENDING` 六个值；历史 status 仍是 `ACTIVE`/`SEALED`。
+
+`chronicle start` 在启动页面服务时检查 active Run。它只会恢复同一 Run：已存在的 Profile 必须带有相同 Run/Actor/epoch marker，root MCP allowlist 和 Profile 工具配置也必须仍然完整；已存在 binding/Wake 必须与该 identity 完全一致。每个 Agent Wake 使用稳定的 `chronicle-<wake_id>` Session 标识；World 操作的持久化幂等键由 Host 根据 wake、工具和调用槽计算。重启遇到 `RUNNING`/`STAGED` Wake 时不会猜测外部调用是否完成，也不会直接重排；该 Wake 进入受控失败，用户只能封存这一局。
+
+GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项目私有 child：owner record 不含密钥，并与 Hermes `gateway.pid`、PID 启动时间、私有 Home 和当前 root 配置指纹交叉核验。缺失、PID 复用、指纹不符或未知端口都 fail closed；Chronicle 不会停止、复用或覆盖未知进程。
 
 ## Perspective 与隐私
 
@@ -91,7 +101,7 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Commitment、Resource、Authority |
 | 模型判断与工具调用 | 路线、消息送达、权限、世界效果和 Ledger |
 
-Watch 在 Run 创建时建立三个 Agent Profile；Takeover 建立李自成和多尔衮两个 Profile，吴三桂由 Human lifetime 承担。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding。
+Watch 在 live Run 建立后运行三个 Agent Profile；Takeover 运行李自成和多尔衮两个 Profile，吴三桂由 Human lifetime 承担。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
 
 每次 Agent Wake 使用 fresh Session。普通 Wake 不得改变 durable Memory；只有 `REFLECTION` Wake 可以写入长期经验，也可以选择 `NO_CHANGE`。Plan、Belief、Commitment 和未送达消息属于 Chronicle Life State，不写进 Memory。Reflection 的 native Memory、Life State、Ledger 事件和 lineage version 必须作为同一个 SQLite moment 提交，失败时恢复 native 文件。
 
@@ -103,7 +113,7 @@ Takeover 的吴三桂没有 Hermes Actor Profile。Interpreter 只把用户文�
 
 V2 的正式路径是 `Canon → Entry → Human Seat → Branch/Worldline → Debrief`；V3 改为 `Crisis Checkpoint → Run → 多主体推进 → Seal → Replay`。V2 的 Source Pack、Ledger、Snapshot、Perspective 边界、Profile 管理、Memory guard、旧表和旧 API 继续保留给迁移、History 和回归，但不再是首页入口。
 
-schema v7 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`。只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 Worldline 才会写入 `LEGACY_V2_SEALED`；ACTIVE Canon 或已经封存的旧行不会被重复包装。V2 细节见 [V2 归档](archive/v2/V2_MIGRATION.md)。
+schema v8 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`。v8 添加 `runtime_phase` 和无密钥失败码；旧 active live Run 进入 `RECONCILING`，旧 sealed live Run 进入可重试清理。只有 `kind='BRANCH'` 且 `status='ACTIVE'` 的旧 Worldline 才会写入 `LEGACY_V2_SEALED`；ACTIVE Canon 或已经封存的旧行不会被重复包装。V2 细节见 [V2 归档](archive/v2/V2_MIGRATION.md)。
 
 ## 不要把证据混在一起
 

@@ -106,7 +106,7 @@ def test_live_orient_without_world_operation_fails_closed(app_config):
         engine.advance_one(run_id)
 
 
-def test_live_watch_and_takeover_materialize_only_agent_controlled_profiles(
+def test_live_run_persists_bootstrap_identity_before_materializing_profiles(
     app_config, tmp_path, monkeypatch
 ):
     calls: list[tuple[str, set[str]]] = []
@@ -130,14 +130,12 @@ def test_live_watch_and_takeover_materialize_only_agent_controlled_profiles(
     takeover_config = replace(app_config, database_path=tmp_path / "takeover.db")
     takeover = CrisisRunEngine(takeover_config).create(RunMode.TAKEOVER, runtime_mode="live")
 
-    assert calls[0][1] == {"li-zicheng", "wu-sangui", "dorgon"}
-    assert calls[1][1] == {"li-zicheng", "dorgon"}
+    assert calls == []
     assert watch["run"]["runtime_mode"] == "live"
+    assert watch["run"]["runtime_phase"] == "BOOTSTRAPPING"
     assert takeover["run"]["controller_map"]["wu-sangui"] == "HUMAN"
-    assert all(
-        binding["token_hash"] and "world-token" not in str(binding)
-        for binding in CrisisRunEngine(watch_config).db.agent_bindings(watch["run"]["id"])
-    )
+    assert CrisisRunEngine(watch_config).db.agent_bindings(watch["run"]["id"]) == []
+    assert CrisisRunEngine(takeover_config).db.crisis_wakes(takeover["run"]["id"]) == []
 
 
 def test_world_tools_bind_identity_outside_tool_arguments_and_recover_in_one_wake(app_config):

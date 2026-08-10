@@ -11,6 +11,8 @@ import yaml
 from chronicle.db import content_hash
 from chronicle.hermes import (
     actor_protocol_prompt,
+    cleanup_crisis_runtime,
+    load_crisis_profile_records,
     materialize_crisis_profiles,
     parse_actor_response,
     remove_crisis_profiles,
@@ -140,9 +142,277 @@ def test_eager_crisis_profiles_are_owned_and_world_tool_only(
         encoding="utf-8"
     )
 
+    marker["genesis_hash"] = "mismatched-genesis"
+    (profile_home / "chronicle-genesis.json").write_text(
+        json.dumps(marker), encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="does not belong"):
+        materialize_crisis_profiles(
+            app_config,
+            "run-12345678abcdefgh",
+            [
+                {
+                    "id": "li-zicheng",
+                    "role_charter": {
+                        "who": "危局中的李自成",
+                        "responsibility": ["维持秩序"],
+                        "authority": ["作出有限行动"],
+                        "tensions": ["等待与行动"],
+                    },
+                    "genesis_hash": "genesis-hash-test",
+                    "initial_memory_snapshot": {
+                        "memory_text": "",
+                        "memory_hash": content_hash(""),
+                    },
+                }
+            ],
+            crisis_id="before-shanhaiguan",
+            runtime_epoch="hermes-epoch-test",
+        )
+
     remove_crisis_profiles(
         app_config,
         "run-12345678abcdefgh",
         [record["profile"]],
     )
     assert not profile_home.exists()
+
+
+def test_crisis_profile_materialization_is_idempotent_and_replaces_the_root_allowlist(
+    app_config, monkeypatch
+):
+    app_config.hermes_home.mkdir(parents=True)
+    installs: list[str] = []
+
+    def fake_install(config, args, timeout=30):
+        profile = args[args.index("--name") + 1]
+        installs.append(profile)
+        shutil.copytree(
+            config.root / "hermes" / "chronicle-actor",
+            config.hermes_home / "profiles" / profile,
+        )
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("chronicle.hermes._run_cli", fake_install)
+
+    def actor() -> dict[str, object]:
+        return {
+            "id": "li-zicheng",
+            "role_charter": {
+                "who": "危局中的李自成",
+                "responsibility": ["维持秩序"],
+                "authority": ["作出有限行动"],
+                "tensions": ["等待与行动"],
+            },
+            "genesis_hash": "genesis-hash-test",
+            "initial_memory_snapshot": {
+                "memory_text": "",
+                "memory_hash": content_hash(""),
+            },
+        }
+
+    first = materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )["li-zicheng"]
+    repeated = materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )["li-zicheng"]
+
+    assert installs == [first["profile"]]
+    assert repeated["profile"] == first["profile"]
+    assert repeated["world_token"] == first["world_token"]
+
+    (app_config.hermes_home / "profiles" / first["profile"] / "chronicle-genesis.json").unlink()
+    pending = app_config.runtime_dir / "profile-pending" / f"{first['profile']}.json"
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text(
+        json.dumps(
+            {
+                "profile": first["profile"],
+                "actor_id": "li-zicheng",
+                "run_id": "run-12345678abcdefgh",
+                "crisis_id": "before-shanhaiguan",
+                "runtime_epoch": "epoch-first",
+                "ownership_marker": first["ownership_marker"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recovered = materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )["li-zicheng"]
+    assert installs == [first["profile"], first["profile"]]
+    assert recovered["profile"] == first["profile"]
+    assert (app_config.hermes_home / "profiles" / first["profile"] / "chronicle-genesis.json").exists()
+
+    gateway_path = app_config.hermes_home / "config.yaml"
+    gateway_values = yaml.safe_load(gateway_path.read_text(encoding="utf-8"))
+    gateway_values["mcp_servers"] = {}
+    gateway_path.write_text(yaml.safe_dump(gateway_values), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Gateway MCP allowlist"):
+        load_crisis_profile_records(
+            app_config,
+            "run-12345678abcdefgh",
+            [actor()],
+            crisis_id="before-shanhaiguan",
+            runtime_epoch="epoch-first",
+        )
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+
+    profile_config_path = app_config.hermes_home / "profiles" / first["profile"] / "config.yaml"
+    profile_values = yaml.safe_load(profile_config_path.read_text(encoding="utf-8"))
+    profile_values["mcp_servers"] = {}
+    profile_config_path.write_text(yaml.safe_dump(profile_values), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete Profile tool configuration"):
+        load_crisis_profile_records(
+            app_config,
+            "run-12345678abcdefgh",
+            [actor()],
+            crisis_id="before-shanhaiguan",
+            runtime_epoch="epoch-first",
+        )
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+
+    profile_values = yaml.safe_load(profile_config_path.read_text(encoding="utf-8"))
+    profile_values["mcp_servers"][first["world_server_name"]]["command"] = "/tmp/UNKNOWN"
+    profile_config_path.write_text(yaml.safe_dump(profile_values), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete Profile tool configuration"):
+        load_crisis_profile_records(
+            app_config,
+            "run-12345678abcdefgh",
+            [actor()],
+            crisis_id="before-shanhaiguan",
+            runtime_epoch="epoch-first",
+        )
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+
+    profile_env_path = app_config.hermes_home / "profiles" / first["profile"] / ".env"
+    profile_env = profile_env_path.read_text(encoding="utf-8").replace(
+        f"CHRONICLE_DATABASE_URL=sqlite:///{app_config.database_path}",
+        "CHRONICLE_DATABASE_URL=sqlite:///WRONG",
+    )
+    profile_env_path.write_text(profile_env, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete Profile tool configuration"):
+        load_crisis_profile_records(
+            app_config,
+            "run-12345678abcdefgh",
+            [actor()],
+            crisis_id="before-shanhaiguan",
+            runtime_epoch="epoch-first",
+        )
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+
+    second = materialize_crisis_profiles(
+        app_config,
+        "run-87654321ijklmnop",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-second",
+    )["li-zicheng"]
+    gateway_config = yaml.safe_load(
+        (app_config.hermes_home / "config.yaml").read_text(encoding="utf-8")
+    )
+    gateway_env = (app_config.hermes_home / ".env").read_text(encoding="utf-8")
+
+    assert set(gateway_config["mcp_servers"]) == {second["world_server_name"]}
+    assert first["world_token"] not in gateway_env
+    assert second["world_token"] in gateway_env
+    assert (app_config.hermes_home / "profiles" / first["profile"]).exists()
+
+    cleanup_crisis_runtime(
+        app_config,
+        "run-87654321ijklmnop",
+        [second["profile"]],
+    )
+
+    assert not (app_config.hermes_home / "profiles" / second["profile"]).exists()
+    assert (app_config.hermes_home / "profiles" / first["profile"]).exists()
+    assert yaml.safe_load((app_config.hermes_home / "config.yaml").read_text(encoding="utf-8"))["mcp_servers"] == {}
+
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+    marker_path = app_config.hermes_home / "profiles" / first["profile"] / "chronicle-genesis.json"
+    marker_path.unlink()
+    pending_path = app_config.runtime_dir / "profile-pending" / f"{first['profile']}.json"
+    pending_path.parent.mkdir(parents=True, exist_ok=True)
+    pending_path.write_text(
+        json.dumps(
+            {
+                "profile": first["profile"],
+                "actor_id": "li-zicheng",
+                "run_id": "run-12345678abcdefgh",
+                "ownership_marker": first["ownership_marker"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    cleanup_crisis_runtime(
+        app_config,
+        "run-12345678abcdefgh",
+        [first["profile"]],
+        server_names=[first["world_server_name"]],
+    )
+    assert not (app_config.hermes_home / "profiles" / first["profile"]).exists()
+
+    materialize_crisis_profiles(
+        app_config,
+        "run-12345678abcdefgh",
+        [actor()],
+        crisis_id="before-shanhaiguan",
+        runtime_epoch="epoch-first",
+    )
+    shutil.rmtree(app_config.hermes_home / "profiles" / first["profile"])
+    cleanup_crisis_runtime(
+        app_config,
+        "run-12345678abcdefgh",
+        [first["profile"]],
+        server_names=[first["world_server_name"]],
+    )
+    cleaned_config = yaml.safe_load(
+        (app_config.hermes_home / "config.yaml").read_text(encoding="utf-8")
+    )
+    assert cleaned_config["mcp_servers"] == {}
+    assert first["world_token"] not in (app_config.hermes_home / ".env").read_text(
+        encoding="utf-8"
+    )

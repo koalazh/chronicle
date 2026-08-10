@@ -42,21 +42,27 @@ uv run ruff check .
 node --check web/app.js
 ```
 
-### 启动页面
+### 启动正式体验
 
 ```bash
-uv run chronicle serve
+uv run chronicle start
 ```
 
-打开 <http://127.0.0.1:8711>。Chronicle 只绑定本机回环地址，当前没有登录层，不要把它暴露到局域网或公网。
+打开 <http://127.0.0.1:8711>。`start` 是正式入口：它启动 Chronicle，并在启动时核对或恢复尚未封存的一局。Chronicle 只绑定本机回环地址，当前没有登录层，不要把它暴露到局域网或公网。
+
+`uv run chronicle serve` 保留给前端和 API 开发；它不承担正式入口的启动时恢复职责。
 
 首次使用，在“设置”填写模型服务地址、API Key、模型和接口类型，点击“保存并核对”。原始 Key 只写入被忽略的 `.chronicle/runtime.env`，接口不会把它返回给浏览器。
 
 正式页面只创建 live Run。模型服务未配置、Provider 不可用或 Hermes 前置条件未满足时，入口会说明下一步并停止；不会静默改成 fixture。
 
-### 真实 Hermes 的顺序
+### 创建、重启与封存
 
-真实运行使用项目私有 `.chronicle/hermes-home`。顺序是：停止旧的项目私有 Gateway，在页面创建 Watch 或 Takeover，启动 Gateway，运行 `uv run chronicle doctor` 确认 `READY`，再回到页面点击“继续”。`READY` 只表示运行前置条件满足；真实业务是否完成，要看同一局中的 Profile、fresh Session、World MCP、Life State、后续 Wake、消息送达和封存结果是否能够关联起来。完整命令见 [运维与验收](docs/OPERATIONS.md)，现场记录见 [验收记录](docs/ACCEPTANCE.md)。
+在页面创建 Watch 或 Takeover 后，Chronicle 会为这一局建立所需主体，启动项目私有运行资源，并完成第一轮可验证的定向行动。页面会以卷页状态说明“正在建立”“正在恢复”或“尚未准备好”；用户不需要再打开第二个终端，也不需要手动运行 Gateway。
+
+重启 Chronicle 时，仍使用 `uv run chronicle start`。系统只会恢复同一局及其可证明属于本项目的本地资源；遇到无法确认归属的服务，会停止这一局而不会接管或终止别的项目。封存后，历史立即可回看；旧主体会被撤销并清理，下一次“再开一局”总是新的经历，不会重用旧 Profile 或会话。
+
+`uv run chronicle doctor` 是诊断命令，不是正常使用的必经步骤。它可以帮助排查配置和隔离问题，但也不能单独证明一次真实历史推进已经完成。完整边界见 [运维与验收](docs/OPERATIONS.md)，历史现场记录见 [验收记录](docs/ACCEPTANCE.md)。
 
 ## 文档导航
 

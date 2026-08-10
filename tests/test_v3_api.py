@@ -5,7 +5,8 @@ from dataclasses import replace
 from fastapi.testclient import TestClient
 
 from chronicle.app import create_app
-from chronicle.crisis_runtime import CrisisRunEngine, RunMode
+from chronicle.crisis_runtime import CrisisRunEngine, FixtureActorDriver, RunMode
+from chronicle.live_runtime import LiveRuntimeManager
 
 
 def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_config):
@@ -90,7 +91,7 @@ def test_historical_api_keeps_actor_future_anchors_reference_only(app_config):
     )
 
 
-def test_live_run_stages_orient_until_gateway_has_reloaded_profiles(
+def test_live_run_bootstraps_without_a_manual_gateway_restart(
     app_config, monkeypatch
 ):
     configured = replace(
@@ -99,36 +100,114 @@ def test_live_run_stages_orient_until_gateway_has_reloaded_profiles(
         llm_api_key="provider-key",
         llm_model="demo-model",
     )
-    def fake_materialize(_config, run_id, actors, **_identity):
-        return {
-            actor["id"]: {
-                "profile": f"chronicle-{run_id[-8:]}-{actor['id']}",
-                "profile_key": f"key-{actor['id']}",
-                "world_token": f"token-{actor['id']}",
-                "ownership_marker": f"marker-{actor['id']}",
-                "world_server_name": f"world-{actor['id']}",
-            }
-            for actor in actors
-        }
+    class Gateway:
+        def ensure(self, _run_id, _epoch):
+            return {}
 
-    monkeypatch.setattr("chronicle.hermes.materialize_crisis_profiles", fake_materialize)
-    client = TestClient(create_app(configured))
+        def stop(self, _run_id, _epoch):
+            return None
+
+    records: dict[str, dict[str, dict[str, str]]] = {}
+
+    def fake_materialize(_config, run_id, actors, **_identity):
+        return records.setdefault(
+            run_id,
+            {
+                actor["id"]: {
+                    "profile": actor["profile"],
+                    "profile_key": f"key-{actor['id']}",
+                    "world_token": f"token-{actor['id']}",
+                    "ownership_marker": actor["ownership_marker"],
+                    "world_server_name": actor["world_server_name"],
+                }
+                for actor in actors
+            },
+        )
+
+    monkeypatch.setattr("chronicle.live_runtime.materialize_crisis_profiles", fake_materialize)
+    runtime = LiveRuntimeManager(
+        configured,
+        controller=Gateway(),
+        engine_factory=lambda active: CrisisRunEngine(active, actor_driver=FixtureActorDriver()),
+    )
+    client = TestClient(create_app(configured, live_runtime=runtime))
 
     created = client.post("/api/runs", json={"mode": "WATCH", "live": True})
     run_id = created.json()["run"]["id"]
     engine = CrisisRunEngine(configured)
 
     assert created.status_code == 200
-    assert created.json()["started"] is False
-    assert "重新启动" in created.json()["start_error"]
-    assert "Profile" not in created.json()["start_error"]
-    assert "Gateway" not in created.json()["start_error"]
-    assert len(engine.db.crisis_wakes(run_id, status="QUEUED", tick=0)) == 3
-    assert not engine.db.crisis_wakes(run_id, status="COMPLETED")
-    not_ready = client.post(f"/api/runs/{run_id}/continue")
-    assert not_ready.status_code == 409
-    assert "设置页" in not_ready.json()["detail"]["message"]
-    assert not engine.db.crisis_wakes(run_id, status="COMPLETED")
+    assert created.json()["started"] is True
+    assert created.json()["start_error"] == ""
+    assert created.json()["run"]["runtime_phase"] == "READY"
+    orient = [wake for wake in engine.db.crisis_wakes(run_id) if wake["wake_type"] == "ORIENT"]
+    assert len(orient) == 3
+    assert {wake["status"] for wake in orient} == {"COMPLETED"}
+    assert client.post(f"/api/runs/{run_id}/continue").status_code == 200
+
+
+def test_product_startup_reconciles_the_active_live_run(app_config, monkeypatch):
+    configured = replace(
+        app_config,
+        llm_base_url="https://provider.example/v1",
+        llm_api_key="provider-key",
+        llm_model="demo-model",
+    )
+
+    class Gateway:
+        def __init__(self):
+            self.ensured: list[tuple[str, str]] = []
+
+        def ensure(self, run_id, epoch):
+            self.ensured.append((run_id, epoch))
+            return {}
+
+        def stop(self, _run_id, _epoch):
+            return None
+
+    records: dict[str, dict[str, dict[str, str]]] = {}
+
+    def fake_materialize(_config, run_id, actors, **_identity):
+        return records.setdefault(
+            run_id,
+            {
+                actor["id"]: {
+                    "profile": actor["profile"],
+                    "profile_key": f"key-{actor['id']}",
+                    "world_token": f"token-{actor['id']}",
+                    "ownership_marker": actor["ownership_marker"],
+                    "world_server_name": actor["world_server_name"],
+                }
+                for actor in actors
+            },
+        )
+
+    def fake_load(_config, run_id, _actors, **_identity):
+        return records[run_id]
+
+    monkeypatch.setattr("chronicle.live_runtime.materialize_crisis_profiles", fake_materialize)
+    monkeypatch.setattr("chronicle.live_runtime.load_crisis_profile_records", fake_load)
+    gateway = Gateway()
+    runtime = LiveRuntimeManager(
+        configured,
+        controller=gateway,
+        engine_factory=lambda active: CrisisRunEngine(active, actor_driver=FixtureActorDriver()),
+    )
+    created = runtime.create(RunMode.WATCH)
+
+    with TestClient(
+        create_app(
+            configured,
+            live_runtime=runtime,
+            manage_live_runtime_on_startup=True,
+        )
+    ) as client:
+        active = client.get("/api/runs/active").json()["run"]
+
+    assert active["id"] == created["id"]
+    assert active["runtime_phase"] == "READY"
+    assert len(gateway.ensured) == 2
+    assert len(CrisisRunEngine(configured).db.crisis_wakes(created["id"], tick=0)) == 3
 
 
 def test_product_run_fails_closed_without_setup_or_explicit_live(app_config):
@@ -153,16 +232,17 @@ def test_live_run_creation_failure_uses_product_language(app_config, monkeypatch
     def fail_materialize(*_args, **_kwargs):
         raise FileNotFoundError("hermes executable missing")
 
-    monkeypatch.setattr("chronicle.hermes.materialize_crisis_profiles", fail_materialize)
+    monkeypatch.setattr("chronicle.live_runtime.materialize_crisis_profiles", fail_materialize)
     response = TestClient(create_app(configured)).post(
         "/api/runs", json={"mode": "WATCH", "live": True}
     )
 
-    assert response.status_code == 400
-    detail = response.json()["detail"]
-    assert detail == "这一局未能建立，请确认设置页中的模型连接和本地主体服务后重试。"
-    assert all(term not in detail for term in ("Hermes", "Profile", "Wake", "Session"))
-    assert CrisisRunEngine(configured).db.active_run() is None
+    assert response.status_code == 200
+    run = response.json()["run"]
+    assert run["runtime_phase"] == "FAILED"
+    assert response.json()["start_error"] == "这一局尚未准备好；请在页面中重新准备。"
+    assert all(term not in response.json()["start_error"] for term in ("Hermes", "Profile", "Wake", "Session"))
+    assert CrisisRunEngine(configured).db.active_run()["id"] == run["id"]
 
 
 def test_dev_api_is_disabled_normally_and_redacts_active_takeover(app_config):

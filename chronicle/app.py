@@ -26,6 +26,7 @@ from .doctor import doctor
 from .hermes import HermesRuntimeError
 from .hermes import bootstrap as bootstrap_hermes
 from .host import BranchEngine, ChronicleHost
+from .live_runtime import LiveRuntimeManager
 from .models import BranchAction, WakeType
 from .runtime import WorldlineConflict, WorldlineError, WorldlineRuntime
 
@@ -147,7 +148,12 @@ def _provider_model_ids(response: Any) -> set[str]:
     return {str(item.get("id")) for item in entries if isinstance(item, dict) and item.get("id")}
 
 
-def create_app(config: AppConfig | None = None) -> FastAPI:
+def create_app(
+    config: AppConfig | None = None,
+    *,
+    live_runtime: LiveRuntimeManager | None = None,
+    manage_live_runtime_on_startup: bool = False,
+) -> FastAPI:
     base_config = config or load_config()
     if not is_loopback_host(base_config.host):
         raise ValueError("Chronicle only supports loopback host binding")
@@ -191,6 +197,35 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def crisis_engine() -> CrisisRunEngine:
         return CrisisRunEngine(current_config())
+
+    managed_runtime = live_runtime
+
+    def crisis_runtime(active: AppConfig) -> LiveRuntimeManager:
+        nonlocal managed_runtime
+        if managed_runtime is None or managed_runtime.config != active:
+            managed_runtime = LiveRuntimeManager(active)
+        return managed_runtime
+
+    def runtime_message(run: dict[str, Any]) -> str:
+        phase = str(run.get("runtime_phase") or "READY")
+        code = str(run.get("runtime_error_code") or "")
+        if phase == "READY":
+            return ""
+        if phase in {"BOOTSTRAPPING", "RECONCILING"}:
+            return "这一局正在建立或恢复，暂不能推进。"
+        if phase == "SEALING":
+            return "这一局正在封存，暂不能继续操作。"
+        if phase == "CLEANUP_PENDING":
+            return "卷册已经封存，正在收束本地主体。"
+        if code in {"runtime_owner_unknown", "runtime_port_occupied"}:
+            return "发现一个无法安全接管的本地服务；为避免影响其他项目，这一局尚未启动。"
+        return "这一局尚未准备好；请在页面中重新准备。"
+
+    if manage_live_runtime_on_startup:
+
+        @app.on_event("startup")
+        async def reconcile_live_runtime() -> None:
+            await asyncio.to_thread(crisis_runtime(current_config()).reconcile_active)
 
     def crisis_http_error(exc: CrisisRunError) -> HTTPException:
         if isinstance(exc, CrisisRunConflict):
@@ -268,22 +303,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         engine = CrisisRunEngine(active)
         try:
-            created = await asyncio.to_thread(
-                engine.create,
-                RunMode(request.mode),
-                runtime_mode="live" if request.live else "fixture",
-            )
-            start_error = (
-                "主体身份已建立；请重新启动本地主体服务，待设置页显示就绪后再继续这一局。"
-                if request.live
-                else ""
-            )
+            if request.live:
+                summary = await asyncio.to_thread(
+                    crisis_runtime(active).create, RunMode(request.mode)
+                )
+                return {
+                    "run": summary,
+                    "started": summary["runtime_phase"] == "READY",
+                    "start_error": runtime_message(summary),
+                }
+            created = await asyncio.to_thread(engine.create, RunMode(request.mode), runtime_mode="fixture")
             if not request.live:
                 await asyncio.to_thread(engine.advance_one, created["run"]["id"])
             return {
                 "run": engine.run_summary(created["run"]["id"]),
-                "started": not start_error,
-                "start_error": start_error,
+                "started": True,
+                "start_error": "",
             }
         except CrisisRunConflict as exc:
             raise HTTPException(
@@ -293,7 +328,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         except CrisisRunError as exc:
             raise HTTPException(
                 status_code=400,
-                detail="这一局未能建立，请确认设置页中的模型连接和本地主体服务后重试。",
+                detail="这一局未能建立，请确认设置页中的模型连接后重试。",
             ) from exc
 
     @app.get("/api/runs/active")
@@ -310,16 +345,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         engine = CrisisRunEngine(active)
         try:
             summary = engine.run_summary(run_id)
-            if summary["runtime_mode"] == "live":
-                readiness = await asyncio.to_thread(doctor, active)
-                if readiness["status"] != "READY":
-                    raise CrisisRunConflict(
-                        "主体服务尚未就绪；请在设置页确认就绪后再继续。"
-                    )
-            advanced = await asyncio.to_thread(engine.advance_one, run_id)
+            advanced = await asyncio.to_thread(
+                crisis_runtime(active).advance_one if summary["runtime_mode"] == "live" else engine.advance_one,
+                run_id,
+            )
             return {
                 "advanced": advanced,
-                "run": engine.run_summary(run_id),
+                "run": crisis_engine().run_summary(run_id),
             }
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
@@ -358,9 +390,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/api/runs/{run_id}/decision")
     async def decide(run_id: str, request: HumanDecisionRequest) -> dict[str, Any]:
-        engine = crisis_engine()
         try:
-            return await asyncio.to_thread(engine.submit_human_decision, run_id, request.text)
+            engine = crisis_engine()
+            summary = engine.run_summary(run_id)
+            return await asyncio.to_thread(
+                crisis_runtime(current_config()).submit_human_decision
+                if summary["runtime_mode"] == "live"
+                else engine.submit_human_decision,
+                run_id,
+                request.text,
+            )
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
 
@@ -368,7 +407,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def seal_run(run_id: str, request: SealRunRequest) -> dict[str, Any]:
         engine = crisis_engine()
         try:
-            return {"run": await asyncio.to_thread(engine.seal, run_id, request.reason)}
+            summary = engine.run_summary(run_id)
+            sealed = await asyncio.to_thread(
+                crisis_runtime(current_config()).seal
+                if summary["runtime_mode"] == "live"
+                else engine.seal,
+                run_id,
+                request.reason,
+            )
+            return {"run": sealed}
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
+    @app.post("/api/runs/{run_id}/runtime/retry")
+    async def retry_runtime(run_id: str) -> dict[str, Any]:
+        active = current_config()
+        try:
+            return {"run": await asyncio.to_thread(crisis_runtime(active).retry, run_id)}
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
 

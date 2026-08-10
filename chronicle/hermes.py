@@ -105,7 +105,7 @@ class HermesClient:
             return 0, {"error": str(exc)}
 
     def create_fresh_session(self, profile: str, key: str, wake_id: str) -> str | None:
-        session_id = f"chronicle-{wake_id}-{uuid.uuid4().hex[:8]}"
+        session_id = f"chronicle-{wake_id}"
         try:
             response = httpx.post(
                 self._url(profile, "/api/sessions"),
@@ -457,6 +457,78 @@ def _sync_crisis_soul(profile_home: Path, role_charter: dict[str, Any]) -> None:
     path.write_text(common.rstrip() + "\n" + charter, encoding="utf-8")
 
 
+def _crisis_pending_profile_path(config: AppConfig, profile: str) -> Path:
+    return config.runtime_dir / "profile-pending" / f"{profile}.json"
+
+
+def _write_json_atomic(path: Path, values: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(values, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _pending_profile_matches(
+    path: Path,
+    *,
+    profile: str,
+    actor_id: str,
+    run_id: str,
+    crisis_id: str,
+    runtime_epoch: str,
+    ownership_marker: str,
+) -> bool:
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(values, dict) and values == {
+        "profile": profile,
+        "actor_id": actor_id,
+        "run_id": run_id,
+        "crisis_id": crisis_id,
+        "runtime_epoch": runtime_epoch,
+        "ownership_marker": ownership_marker,
+    }
+
+
+def _owned_pending_profile(
+    config: AppConfig,
+    profile: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """Return a pending-install record only when it proves this Run owns it."""
+
+    path = _crisis_pending_profile_path(config, profile)
+    if path.is_symlink():
+        return None
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(values, dict):
+        return None
+    actor_id = str(values.get("actor_id", ""))
+    if (
+        values.get("profile") != profile
+        or values.get("run_id") != run_id
+        or not actor_id
+        or profile != _crisis_profile_name(run_id, actor_id)
+        or values.get("ownership_marker")
+        != stable_profile_marker(run_id, actor_id, profile)
+    ):
+        return None
+    return values
+
+
 def materialize_crisis_profiles(
     config: AppConfig,
     run_id: str,
@@ -465,7 +537,7 @@ def materialize_crisis_profiles(
     crisis_id: str,
     runtime_epoch: str,
 ) -> dict[str, dict[str, Any]]:
-    """Eagerly create all Agent-controlled V3 Profiles before the Run starts."""
+    """Create or verify the exact Run-scoped Profiles needed by one live Run."""
 
     distribution = config.root / ACTOR_DISTRIBUTION
     records: dict[str, dict[str, Any]] = {}
@@ -475,22 +547,109 @@ def materialize_crisis_profiles(
             actor_id = str(actor["id"])
             profile = _crisis_profile_name(run_id, actor_id)
             world_server_name = _crisis_world_server_name(run_id, actor_id)
+            if actor.get("profile", profile) != profile or actor.get(
+                "world_server_name", world_server_name
+            ) != world_server_name:
+                raise RuntimeError(f"crisis Profile identity is inconsistent for {actor_id}")
             profile_home = config.hermes_home / "profiles" / profile
             marker = profile_home / "chronicle-genesis.json"
+            expected_marker = stable_profile_marker(run_id, actor_id, profile)
+            pending = _crisis_pending_profile_path(config, profile)
+            marker_values: dict[str, Any] | None = None
             if profile_home.exists():
-                raise RuntimeError(f"{profile} already exists; refusing to reuse another Run Profile")
-            result = _run_cli(
-                config,
-                ["profile", "install", str(distribution), "--name", profile, "-y"],
-                timeout=90,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"Hermes crisis Profile install failed for {profile}: {result.stderr.strip()}"
+                if profile_home.is_symlink():
+                    raise RuntimeError(f"cannot verify crisis Profile {profile}")
+                try:
+                    parsed_marker = json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(parsed_marker, dict):
+                        marker_values = parsed_marker
+                except (OSError, ValueError):
+                    marker_values = None
+                marker_mismatch = marker_values is not None and (
+                    marker_values.get("profile") != profile
+                    or marker_values.get("actor_id") != actor_id
+                    or marker_values.get("crisis_id") != crisis_id
+                    or marker_values.get("run_id") != run_id
+                    or marker_values.get("worldline_id") != run_id
+                    or marker_values.get("genesis_hash") != str(actor["genesis_hash"])
+                    or marker_values.get("initial_memory_snapshot")
+                    != dict(actor["initial_memory_snapshot"])
+                    or marker_values.get("runtime_epoch") != runtime_epoch
+                    or marker_values.get("ownership_marker") != expected_marker
+                    or marker_values.get("toolsets") != ["memory", world_server_name]
                 )
-            installed.append(profile_home)
-            profile_key = generate_secret(32)
-            world_token = generate_secret(40)
+                if marker_mismatch and not _pending_profile_matches(
+                    pending,
+                    profile=profile,
+                    actor_id=actor_id,
+                    run_id=run_id,
+                    crisis_id=crisis_id,
+                    runtime_epoch=runtime_epoch,
+                    ownership_marker=expected_marker,
+                ):
+                    raise RuntimeError(f"{profile} does not belong to this Chronicle Run")
+                if marker_mismatch:
+                    marker_values = None
+                if marker_values is None:
+                    if not _pending_profile_matches(
+                        pending,
+                        profile=profile,
+                        actor_id=actor_id,
+                        run_id=run_id,
+                        crisis_id=crisis_id,
+                        runtime_epoch=runtime_epoch,
+                        ownership_marker=expected_marker,
+                    ):
+                        raise RuntimeError(f"cannot verify crisis Profile {profile}")
+                    if profile_home.is_symlink() or not profile_home.is_dir():
+                        raise RuntimeError(f"cannot repair crisis Profile {profile}")
+                    shutil.rmtree(profile_home)
+            if not profile_home.exists():
+                _write_json_atomic(
+                    pending,
+                    {
+                        "profile": profile,
+                        "actor_id": actor_id,
+                        "run_id": run_id,
+                        "crisis_id": crisis_id,
+                        "runtime_epoch": runtime_epoch,
+                        "ownership_marker": expected_marker,
+                    },
+                )
+                result = _run_cli(
+                    config,
+                    ["profile", "install", str(distribution), "--name", profile, "-y"],
+                    timeout=90,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Hermes crisis Profile install failed for {profile}: {result.stderr.strip()}"
+                )
+                installed.append(profile_home)
+                profile_key = generate_secret(32)
+                world_token = generate_secret(40)
+                ownership_marker = stable_profile_marker(run_id, actor_id, profile)
+                _write_json_atomic(
+                    marker,
+                    {
+                        "profile": profile,
+                        "actor_id": actor_id,
+                        "crisis_id": crisis_id,
+                        "run_id": run_id,
+                        "worldline_id": run_id,
+                        "genesis_hash": str(actor["genesis_hash"]),
+                        "initial_memory_snapshot": dict(actor["initial_memory_snapshot"]),
+                        "runtime_epoch": runtime_epoch,
+                        "ownership_marker": ownership_marker,
+                        "distribution": "chronicle-actor",
+                        "toolsets": ["memory", world_server_name],
+                    },
+                )
+            else:
+                profile_env = _read_env_file(profile_home / ".env")
+                profile_key = profile_env.get("API_SERVER_KEY", "") or generate_secret(32)
+                world_token = profile_env.get("CHRONICLE_WORLD_TOKEN", "") or generate_secret(40)
+                ownership_marker = expected_marker
             _sync_profile_env(
                 profile_home,
                 profile_key,
@@ -511,28 +670,7 @@ def materialize_crisis_profiles(
             memory_path = profile_home / "memories" / "MEMORY.md"
             memory_path.parent.mkdir(parents=True, exist_ok=True)
             memory_path.touch(exist_ok=True)
-            ownership_marker = stable_profile_marker(run_id, actor_id, profile)
-            marker.write_text(
-                json.dumps(
-                    {
-                        "profile": profile,
-                        "actor_id": actor_id,
-                        "crisis_id": crisis_id,
-                        "run_id": run_id,
-                        "worldline_id": run_id,
-                        "genesis_hash": str(actor["genesis_hash"]),
-                        "initial_memory_snapshot": dict(actor["initial_memory_snapshot"]),
-                        "runtime_epoch": runtime_epoch,
-                        "ownership_marker": ownership_marker,
-                        "distribution": "chronicle-actor",
-                        "toolsets": ["memory", world_server_name],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            pending.unlink(missing_ok=True)
             records[actor_id] = {
                 "profile": profile,
                 "profile_key": profile_key,
@@ -560,6 +698,133 @@ def materialize_crisis_profiles(
     return records
 
 
+def load_crisis_profile_records(
+    config: AppConfig,
+    run_id: str,
+    actors: list[dict[str, Any]],
+    *,
+    crisis_id: str,
+    runtime_epoch: str,
+) -> dict[str, dict[str, Any]]:
+    """Read an already-materialized Run without changing Gateway configuration."""
+
+    records: dict[str, dict[str, Any]] = {}
+    for actor in actors:
+        actor_id = str(actor["id"])
+        profile = _crisis_profile_name(run_id, actor_id)
+        world_server_name = _crisis_world_server_name(run_id, actor_id)
+        if actor.get("profile", profile) != profile or actor.get(
+            "world_server_name", world_server_name
+        ) != world_server_name:
+            raise RuntimeError(f"crisis Profile identity is inconsistent for {actor_id}")
+        profile_home = config.hermes_home / "profiles" / profile
+        marker = profile_home / "chronicle-genesis.json"
+        try:
+            values = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"cannot verify crisis Profile {profile}") from exc
+        ownership_marker = stable_profile_marker(run_id, actor_id, profile)
+        if (
+            values.get("profile") != profile
+            or values.get("actor_id") != actor_id
+            or values.get("crisis_id") != crisis_id
+            or values.get("run_id") != run_id
+            or values.get("worldline_id") != run_id
+            or values.get("genesis_hash") != str(actor["genesis_hash"])
+            or values.get("initial_memory_snapshot") != dict(actor["initial_memory_snapshot"])
+            or values.get("runtime_epoch") != runtime_epoch
+            or values.get("ownership_marker") != ownership_marker
+            or values.get("toolsets") != ["memory", world_server_name]
+        ):
+            raise RuntimeError(f"{profile} does not belong to this Chronicle Run")
+        env = _read_env_file(profile_home / ".env")
+        profile_key = env.get("API_SERVER_KEY", "")
+        world_token = env.get("CHRONICLE_WORLD_TOKEN", "")
+        if not profile_key or not world_token:
+            raise RuntimeError(f"{profile} is missing its private runtime credentials")
+        records[actor_id] = {
+            "profile": profile,
+            "profile_key": profile_key,
+            "world_token": world_token,
+            "ownership_marker": ownership_marker,
+            "world_server_name": world_server_name,
+        }
+    _verify_crisis_runtime_configuration(config, records)
+    return records
+
+
+def _verify_crisis_runtime_configuration(
+    config: AppConfig,
+    records: dict[str, dict[str, Any]],
+) -> None:
+    """Verify the current Run's Profile files and root MCP allowlist without repairing them."""
+
+    expected_servers = {str(record["world_server_name"]) for record in records.values()}
+    config_path = config.hermes_home / "config.yaml"
+    values = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = values or {}
+    servers = values.get("mcp_servers", {})
+    managed_servers = {
+        str(name) for name in servers if str(name).startswith("chronicle-world-")
+    } if isinstance(servers, dict) else set()
+    if managed_servers != expected_servers:
+        raise RuntimeError("current crisis Gateway MCP allowlist is incomplete")
+    root_env = _read_env_file(config.hermes_home / ".env")
+    database_url = f"sqlite:///{config.database_path}"
+    expected_command = str(Path(sys.executable).absolute())
+    for record in records.values():
+        profile = str(record["profile"])
+        server_name = str(record["world_server_name"])
+        suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
+        server = servers.get(server_name)
+        expected_server = {
+            "command": expected_command,
+            "args": ["-m", "chronicle.world_mcp"],
+            "env": {
+                "CHRONICLE_DATABASE_URL": f"${{{suffix}_DATABASE_URL}}",
+                "CHRONICLE_WORLD_TOKEN": f"${{{suffix}_TOKEN}}",
+            },
+            "timeout": 30,
+            "connect_timeout": 30,
+        }
+        if server != expected_server:
+            raise RuntimeError(f"{profile} has an incomplete World MCP configuration")
+        if (
+            root_env.get(f"{suffix}_TOKEN") != str(record["world_token"])
+            or root_env.get(f"{suffix}_DATABASE_URL") != database_url
+        ):
+            raise RuntimeError(f"{profile} is missing its root World MCP credentials")
+        profile_home = config.hermes_home / "profiles" / profile
+        profile_config_path = profile_home / "config.yaml"
+        profile_values = (
+            yaml.safe_load(profile_config_path.read_text(encoding="utf-8"))
+            if profile_config_path.exists()
+            else {}
+        ) or {}
+        profile_toolsets = profile_values.get("platform_toolsets", {}).get("api_server", [])
+        profile_servers = profile_values.get("mcp_servers", {})
+        profile_server = profile_servers.get(server_name) if isinstance(profile_servers, dict) else None
+        expected_profile_server = {
+            "command": expected_command,
+            "args": ["-m", "chronicle.world_mcp"],
+            "env": {
+                "CHRONICLE_DATABASE_URL": "${CHRONICLE_DATABASE_URL}",
+                "CHRONICLE_WORLD_TOKEN": "${CHRONICLE_WORLD_TOKEN}",
+            },
+            "timeout": 30,
+            "connect_timeout": 30,
+        }
+        profile_env = _read_env_file(profile_home / ".env")
+        if (
+            profile_toolsets != ["memory", server_name]
+            or set(profile_servers) != {server_name}
+            or profile_server != expected_profile_server
+            or profile_env.get("CHRONICLE_DATABASE_URL") != database_url
+            or profile_env.get("CHRONICLE_WORLD_TOKEN") != str(record["world_token"])
+        ):
+            raise RuntimeError(f"{profile} has an incomplete Profile tool configuration")
+
+
 def _sync_gateway_crisis_mcp(
     config: AppConfig,
     records: dict[str, dict[str, Any]],
@@ -571,6 +836,12 @@ def _sync_gateway_crisis_mcp(
     values = values or {}
     servers = values.setdefault("mcp_servers", {})
     root_env = _read_env_file(config.hermes_home / ".env")
+    managed_servers = [name for name in servers if str(name).startswith("chronicle-world-")]
+    for server_name in managed_servers:
+        servers.pop(server_name, None)
+        suffix = re.sub(r"[^A-Z0-9_]", "_", str(server_name).upper())
+        root_env.pop(f"{suffix}_TOKEN", None)
+        root_env.pop(f"{suffix}_DATABASE_URL", None)
     for record in records.values():
         server_name = str(record["world_server_name"])
         suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
@@ -604,17 +875,122 @@ def remove_crisis_profiles(config: AppConfig, run_id: str, profiles: list[str]) 
     """Compensate only Profiles whose marker proves ownership by an uncommitted Run."""
 
     for profile in profiles:
+        pending = _crisis_pending_profile_path(config, profile)
+        pending_values = _owned_pending_profile(config, profile, run_id)
         profile_home = config.hermes_home / "profiles" / profile
         marker = profile_home / "chronicle-genesis.json"
         if not profile_home.exists():
+            if pending_values is not None:
+                pending.unlink(missing_ok=True)
             continue
+        if profile_home.is_symlink() or not profile_home.is_dir():
+            raise RuntimeError(f"cannot verify crisis Profile {profile}")
         try:
             values = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise RuntimeError(f"cannot verify crisis Profile {profile}") from exc
+            if pending_values is None:
+                raise RuntimeError(f"cannot verify crisis Profile {profile}") from exc
+            shutil.rmtree(profile_home)
+            pending.unlink(missing_ok=True)
+            continue
+        if not isinstance(values, dict):
+            if pending_values is None:
+                raise RuntimeError(f"cannot verify crisis Profile {profile}")
+            shutil.rmtree(profile_home)
+            pending.unlink(missing_ok=True)
+            continue
         if values.get("worldline_id") != run_id or values.get("profile") != profile:
-            raise RuntimeError(f"refusing to remove unrelated Hermes Profile {profile}")
+            if pending_values is None:
+                raise RuntimeError(f"refusing to remove unrelated Hermes Profile {profile}")
+            shutil.rmtree(profile_home)
+            pending.unlink(missing_ok=True)
+            continue
         shutil.rmtree(profile_home)
+        pending.unlink(missing_ok=True)
+
+
+def cleanup_crisis_runtime(
+    config: AppConfig,
+    run_id: str,
+    profiles: list[str],
+    *,
+    server_names: list[str] | None = None,
+) -> None:
+    """Remove only this sealed Run's managed root MCP entries and verified Profiles."""
+
+    managed_servers = {
+        str(name)
+        for name in (server_names or [])
+        if str(name).startswith("chronicle-world-")
+    }
+    for profile in profiles:
+        profile_home = config.hermes_home / "profiles" / profile
+        marker = profile_home / "chronicle-genesis.json"
+        pending_values = _owned_pending_profile(config, profile, run_id)
+        if not profile_home.exists():
+            if pending_values is not None:
+                managed_servers.add(
+                    _crisis_world_server_name(run_id, str(pending_values["actor_id"]))
+                )
+            continue
+        if profile_home.is_symlink() or not profile_home.is_dir():
+            raise RuntimeError(f"cannot verify crisis Profile {profile}")
+        try:
+            values = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            if pending_values is None:
+                raise RuntimeError(f"cannot verify crisis Profile {profile}") from exc
+            managed_servers.add(
+                _crisis_world_server_name(run_id, str(pending_values["actor_id"]))
+            )
+            continue
+        if not isinstance(values, dict):
+            if pending_values is None:
+                raise RuntimeError(f"cannot verify crisis Profile {profile}")
+            managed_servers.add(
+                _crisis_world_server_name(run_id, str(pending_values["actor_id"]))
+            )
+            continue
+        if values.get("worldline_id") != run_id or values.get("profile") != profile:
+            if pending_values is None:
+                raise RuntimeError(f"refusing to clean unrelated Hermes Profile {profile}")
+            managed_servers.add(
+                _crisis_world_server_name(run_id, str(pending_values["actor_id"]))
+            )
+            continue
+        tools = values.get("toolsets", [])
+        managed_servers.update(
+            str(name) for name in tools if str(name).startswith("chronicle-world-")
+        )
+    _remove_gateway_crisis_mcp(config, sorted(managed_servers))
+    remove_crisis_profiles(config, run_id, profiles)
+
+
+def _remove_gateway_crisis_mcp(config: AppConfig, server_names: list[str]) -> None:
+    config_path = config.hermes_home / "config.yaml"
+    values = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = values or {}
+    servers = values.get("mcp_servers", {})
+    if not isinstance(servers, dict):
+        raise RuntimeError("gateway MCP configuration is invalid")
+    root_env = _read_env_file(config.hermes_home / ".env")
+    changed = False
+    for server_name in server_names:
+        if server_name in servers:
+            servers.pop(server_name)
+            changed = True
+        suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
+        changed = root_env.pop(f"{suffix}_TOKEN", None) is not None or changed
+        changed = root_env.pop(f"{suffix}_DATABASE_URL", None) is not None or changed
+    if not changed:
+        return
+    values["mcp_servers"] = servers
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.safe_dump(values, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    _write_profile_env(config.hermes_home, root_env)
 
 
 def profile_memory_path(config: AppConfig, profile: str) -> Path:

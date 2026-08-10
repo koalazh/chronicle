@@ -65,6 +65,7 @@ def update_plan(
     idempotency_key: str,
     rationale: str = "",
     belief_updates: list[dict[str, str]] | None = None,
+    reconsider_when: list[str] | None = None,
 ) -> dict[str, Any]:
     """Replace the private current plan and optionally revise a few private beliefs."""
 
@@ -73,21 +74,22 @@ def update_plan(
         steps,
         rationale=rationale,
         belief_updates=belief_updates,
+        reconsider_when=reconsider_when,
         idempotency_key=idempotency_key,
     )
 
 
 @mcp.tool()
-def schedule_followup(
+def schedule_revisit(
     after_days: int,
-    purpose: str,
+    reason: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """Create a private simulated-time commitment that will cause a future Wake."""
+    """Create a private simulated-time Revisit that will cause a future Wake."""
 
-    return _world().schedule_followup(
+    return _world().schedule_revisit(
         after_days,
-        purpose,
+        reason,
         idempotency_key=idempotency_key,
     )
 

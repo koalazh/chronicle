@@ -4,6 +4,7 @@ import copy
 import difflib
 import json
 import sqlite3
+import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -51,7 +52,7 @@ class CrisisWakeType(StrEnum):
     ORIENT = "ORIENT"
     MESSAGE = "MESSAGE"
     OBSERVATION = "OBSERVATION"
-    COMMITMENT_DUE = "COMMITMENT_DUE"
+    REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
 
 
@@ -106,13 +107,7 @@ class FixtureActorDriver:
                 rationale="先建立可修正计划，不把未到达的消息当作事实。",
                 idempotency_key=f"{wake['id']}:orient-plan",
             )
-            followup_days = {"li-zicheng": 2, "wu-sangui": 2, "dorgon": 4}[actor_id]
-            world.schedule_followup(
-                followup_days,
-                "若无新消息，重新检查当前等待是否仍合理",
-                idempotency_key=f"{wake['id']}:orient-followup",
-            )
-            return ActorTurnResult("已形成可修正的初始计划，并安排未来复查。")
+            return ActorTurnResult("已形成可修正的初始计划。")
 
         if wake_type == CrisisWakeType.MESSAGE.value:
             message = perspective.get("trigger", {})
@@ -162,14 +157,9 @@ class FixtureActorDriver:
                     rationale="关外回信改变了可选项，但仍未构成必须接受的结论。",
                     idempotency_key=f"{wake['id']}:dorgon-reply-plan",
                 )
-                world.schedule_followup(
-                    2,
-                    "比较两方后续行动与书面承诺是否一致",
-                    idempotency_key=f"{wake['id']}:compare-followup",
-                )
             return ActorTurnResult("已按收到的信修正判断；没有替世界声明对方真实意图。")
 
-        if wake_type == CrisisWakeType.COMMITMENT_DUE.value:
+        if wake_type == CrisisWakeType.REVISIT_DUE.value:
             return ActorTurnResult(f"第 {tick} 日复查后，暂不追加行动。")
         return ActorTurnResult("没有足够的新触发，保持当前计划。")
 
@@ -321,7 +311,7 @@ class HermesActorDriver:
         )
         orient_rule = (
             "这是 ORIENT：你必须用 update_plan 登记当前准备如何处理危局；内容由你决定。"
-            "若计划包含等待，应再用 schedule_followup 把重新判断的模拟日数登记下来。"
+            "可以有计划而不安排 Revisit；直到真的有新信息再醒来也完全合法。"
             if wake["wake_type"] == CrisisWakeType.ORIENT.value
             else "只在本次触发确实改变判断时更新计划；没有新行动是合法结果。"
         )
@@ -331,13 +321,13 @@ class HermesActorDriver:
                 "content": (
                     "你是 Chronicle 危局中的长期历史主体，不是旁白、史官或游戏主持。"
                     "只依据本次私有视野判断；不要使用后世知识。世界事实只能通过 chronicle-world 工具改变。"
-                    "你可以更新自己的计划和少量信念、安排未来复查、通信或请求有限行动。"
+                    "你可以更新自己的计划和少量信念、安排未来 Revisit、通信或请求有限行动。"
                     "工具拒绝不是 Wake 失败：可在同一 Agent Loop 中修正参数或选择不行动。"
-                    "调用参数：update_plan(objective, steps, rationale, belief_updates, idempotency_key)；"
-                    "schedule_followup(after_days, purpose, idempotency_key)；"
+                    "调用参数：update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)；"
+                    "schedule_revisit(after_days, reason, idempotency_key)；"
                     "communicate(recipient, content, idempotency_key)；"
-                    "act(action, description, target, idempotency_key)，其中 prepare/hold 的 target "
-                    "必须是私有视野 resources 中的键或自己的当前位置，move 的 target 必须是走廊地点 id。"
+                    "act(action, description, target, idempotency_key) 的可用 target 已在私有视野 "
+                    "available_operations 中列出。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
                     "不要声称工具尚未确认的结果。最终只用简体中文简短说明你如何处置本次触发。"
                     + orient_rule
@@ -356,7 +346,7 @@ class HermesActorDriver:
                             "communicate",
                             "act",
                             "update_plan",
-                            "schedule_followup",
+                            "schedule_revisit",
                         ],
                         "tool_budget": 8,
                     },
@@ -554,7 +544,6 @@ class CrisisRunEngine:
                     "authority": list(actor.world_authority),
                     "role_charter": actor.role_charter.model_dump(mode="json"),
                     "plan": [],
-                    "commitments": [],
                     "revisits": [],
                     "resources": dict(actor.resources),
                     "last_perspective": perspective,
@@ -831,11 +820,11 @@ class CrisisRunEngine:
                     {"visibility": [human_actor_id]},
                     seat_id=human_actor_id,
                 )
-                commitments = list(lifetime["commitments"])
-                fulfilled_events = self._resolve_human_commitments(
+                revisits = list(lifetime["revisits"])
+                fulfilled_events = self._resolve_human_revisits(
                     run_id,
                     tick,
-                    commitments,
+                    revisits,
                     event["id"],
                     human_actor_id,
                 )
@@ -846,8 +835,8 @@ class CrisisRunEngine:
                     lifetime_updates=[
                         {
                             "seat": human_actor_id,
-                            "commitments_json": json.dumps(
-                                commitments, ensure_ascii=False, sort_keys=True
+                            "revisits_json": json.dumps(
+                                revisits, ensure_ascii=False, sort_keys=True
                             ),
                         }
                     ],
@@ -947,8 +936,8 @@ class CrisisRunEngine:
             return world.act(**values)
         if tool == "update_plan":
             return world.update_plan(**values)
-        if tool == "schedule_followup":
-            return world.schedule_followup(**values)
+        if tool == "schedule_revisit":
+            return world.schedule_revisit(**values)
         raise CrisisRunError(f"unsupported decision operation: {tool}")
 
     def _commit_human_wake(
@@ -967,7 +956,7 @@ class CrisisRunEngine:
         state = {
             "plan": list(lifetime["plan"]),
             "beliefs": dict(lifetime["beliefs"]),
-            "commitments": list(lifetime["commitments"]),
+            "revisits": list(lifetime["revisits"]),
         }
         decision_event = self._event(
             run_id,
@@ -983,10 +972,10 @@ class CrisisRunEngine:
         )
         events: list[dict[str, Any]] = [decision_event]
         events.extend(
-            self._resolve_human_commitments(
+            self._resolve_human_revisits(
                 run_id,
                 tick,
-                state["commitments"],
+                state["revisits"],
                 decision_event["id"],
                 actor_id,
             )
@@ -1040,7 +1029,7 @@ class CrisisRunEngine:
             projection,
             beliefs=state["beliefs"],
             plan=state["plan"],
-            commitments=state["commitments"],
+            revisits=state["revisits"],
         )
         self.db.commit_worldline_moment(
             run_id,
@@ -1051,8 +1040,8 @@ class CrisisRunEngine:
                     "seat": actor_id,
                     "belief_json": json.dumps(state["beliefs"], ensure_ascii=False, sort_keys=True),
                     "plan_json": json.dumps(state["plan"], ensure_ascii=False, sort_keys=True),
-                    "commitments_json": json.dumps(
-                        state["commitments"], ensure_ascii=False, sort_keys=True
+                    "revisits_json": json.dumps(
+                        state["revisits"], ensure_ascii=False, sort_keys=True
                     ),
                     "last_perspective_json": json.dumps(
                         perspective, ensure_ascii=False, sort_keys=True
@@ -1071,29 +1060,29 @@ class CrisisRunEngine:
             self._queue_wake(**item)
         return events
 
-    def _resolve_human_commitments(
+    def _resolve_human_revisits(
         self,
         run_id: str,
         tick: int,
-        commitments: list[dict[str, Any]],
+        revisits: list[dict[str, Any]],
         decision_event_id: str,
         actor_id: str,
     ) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        for commitment in commitments:
-            if commitment["status"] != "DUE":
+        for revisit in revisits:
+            if revisit["status"] != "DUE":
                 continue
-            commitment["status"] = "FULFILLED"
+            revisit["status"] = "FULFILLED"
             parents = [decision_event_id]
-            if commitment.get("event_id"):
-                parents.insert(0, commitment["event_id"])
+            if revisit.get("due_event_id") or revisit.get("event_id"):
+                parents.insert(0, revisit.get("due_event_id") or revisit["event_id"])
             events.append(
                 self._event(
                     run_id,
                     tick,
-                    "COMMITMENT_FULFILLED",
+                    "REVISIT_FULFILLED",
                     {
-                        "commitment_id": commitment["id"],
+                        "revisit_id": revisit["id"],
                         "visibility": [actor_id],
                     },
                     seat_id=actor_id,
@@ -1101,6 +1090,16 @@ class CrisisRunEngine:
                 )
             )
         return events
+
+    @staticmethod
+    def _mark_revisits_due(revisits: list[dict[str, Any]], tick: int) -> list[dict[str, Any]]:
+        due: list[dict[str, Any]] = []
+        for revisit in revisits:
+            if revisit["status"] != "PENDING" or int(revisit["due_tick"]) != tick:
+                continue
+            revisit["status"] = "DUE"
+            due.append(revisit)
+        return due
 
     def advance_one(self, run_id: str, *, allow_runtime_bootstrap: bool = False) -> bool:
         run = self._activate_run_pack(run_id)
@@ -1156,21 +1155,32 @@ class CrisisRunEngine:
             lifetime = self.db.worldline_lifetime(run_id, actor_id)
             if lifetime is None:
                 raise CrisisRunError("Human life state is missing")
-            commitments = list(lifetime["commitments"])
-            for commitment in commitments:
-                if commitment["status"] == "PENDING" and int(commitment["due_tick"]) == tick:
-                    commitment["status"] = "DUE"
+            revisits = list(lifetime["revisits"])
+            due_revisits = self._mark_revisits_due(revisits, tick)
+            for revisit in due_revisits:
+                due_event = self._event(
+                    run_id,
+                    tick,
+                    "REVISIT_DUE",
+                    {"revisit_id": revisit["id"], "visibility": [actor_id]},
+                    seat_id=actor_id,
+                    causal_parent_ids=[revisit["event_id"]]
+                    if revisit.get("event_id")
+                    else [],
+                )
+                revisit["due_event_id"] = due_event["id"]
+                events.append(due_event)
             perspective = self._perspective_from(
                 run_id,
                 actor_id,
                 projection,
-                commitments=commitments,
+                revisits=revisits,
             )
             updates.append(
                 {
                     "seat": actor_id,
-                    "commitments_json": json.dumps(
-                        commitments, ensure_ascii=False, sort_keys=True
+                    "revisits_json": json.dumps(
+                        revisits, ensure_ascii=False, sort_keys=True
                     ),
                     "last_perspective_json": json.dumps(
                         perspective, ensure_ascii=False, sort_keys=True
@@ -1382,8 +1392,27 @@ class CrisisRunEngine:
     ) -> None:
         projection["tick"] = tick
         frozen: dict[str, dict[str, Any]] = {}
+        frozen_revisits: dict[str, list[dict[str, Any]]] = {}
+        actors_with_due_revisits = {
+            str(wake["actor_id"])
+            for wake in wakes
+            if wake["wake_type"] == CrisisWakeType.REVISIT_DUE.value
+        }
+        for actor_id in {str(wake["actor_id"]) for wake in wakes}:
+            lifetime = self.db.worldline_lifetime(run_id, actor_id)
+            if lifetime is None:
+                raise CrisisRunError("actor life state is missing")
+            revisits = list(lifetime["revisits"])
+            if actor_id in actors_with_due_revisits:
+                self._mark_revisits_due(revisits, tick)
+            frozen_revisits[actor_id] = revisits
         for wake in wakes:
-            perspective = self._perspective_from(run_id, wake["actor_id"], projection)
+            perspective = self._perspective_from(
+                run_id,
+                wake["actor_id"],
+                projection,
+                revisits=frozen_revisits[str(wake["actor_id"])],
+            )
             perspective["trigger"] = self._trigger_for(wake)
             frozen[wake["id"]] = perspective
 
@@ -1427,7 +1456,7 @@ class CrisisRunEngine:
                 {
                     "plan": list(lifetime["plan"]),
                     "beliefs": dict(lifetime["beliefs"]),
-                    "commitments": list(lifetime["commitments"]),
+                    "revisits": list(lifetime["revisits"]),
                     "memory_text": str(lifetime["memory_text"]),
                     "memory_hash": str(lifetime["memory_hash"]),
                     "wake_count": int(lifetime["wake_count"]),
@@ -1471,22 +1500,22 @@ class CrisisRunEngine:
                             "wake_id": wake["id"],
                         }
                     )
-            if wake["wake_type"] == CrisisWakeType.COMMITMENT_DUE.value:
-                for commitment in state["commitments"]:
-                    if int(commitment["due_tick"]) == tick and commitment["status"] == "PENDING":
-                        commitment["status"] = "FULFILLED"
-                        events.append(
-                            self._event(
-                                run_id,
-                                tick,
-                                "COMMITMENT_FULFILLED",
-                                {"wake_id": wake["id"], "commitment_id": commitment["id"]},
-                                seat_id=wake["actor_id"],
-                                causal_parent_ids=[commitment["event_id"]]
-                                if commitment.get("event_id")
-                                else [],
-                            )
-                        )
+            revisit_due_events: dict[str, str] = {}
+            if wake["wake_type"] == CrisisWakeType.REVISIT_DUE.value:
+                for revisit in self._mark_revisits_due(state["revisits"], tick):
+                    due_event = self._event(
+                        run_id,
+                        tick,
+                        "REVISIT_DUE",
+                        {"wake_id": wake["id"], "revisit_id": revisit["id"]},
+                        seat_id=wake["actor_id"],
+                        causal_parent_ids=[revisit["event_id"]]
+                        if revisit.get("event_id")
+                        else [],
+                    )
+                    events.append(due_event)
+                    revisit["due_event_id"] = due_event["id"]
+                    revisit_due_events[revisit["id"]] = due_event["id"]
             operations = self.db.crisis_wake_operations(wake["id"])
             accepted = sorted(
                 (operation for operation in operations if operation["status"] == "PROPOSED"),
@@ -1550,6 +1579,20 @@ class CrisisRunEngine:
                     queued_wakes,
                     causal_parent_id=causal_parent_id,
                 )
+            for revisit in state["revisits"]:
+                if revisit["id"] not in revisit_due_events:
+                    continue
+                revisit["status"] = "FULFILLED"
+                events.append(
+                    self._event(
+                        run_id,
+                        tick,
+                        "REVISIT_FULFILLED",
+                        {"wake_id": wake["id"], "revisit_id": revisit["id"]},
+                        seat_id=wake["actor_id"],
+                        causal_parent_ids=[revisit_due_events[revisit["id"]]],
+                    )
+                )
             fingerprint = stable_hash(
                 {
                     "summary": results[wake["id"]].summary,
@@ -1589,15 +1632,15 @@ class CrisisRunEngine:
                 projection,
                 beliefs=state["beliefs"],
                 plan=state["plan"],
-                commitments=state["commitments"],
+                revisits=state["revisits"],
             )
             lifetime_updates.append(
                 {
                     "seat": actor_id,
                     "belief_json": json.dumps(state["beliefs"], ensure_ascii=False, sort_keys=True),
                     "plan_json": json.dumps(state["plan"], ensure_ascii=False, sort_keys=True),
-                    "commitments_json": json.dumps(
-                        state["commitments"], ensure_ascii=False, sort_keys=True
+                    "revisits_json": json.dumps(
+                        state["revisits"], ensure_ascii=False, sort_keys=True
                     ),
                     "last_perspective_json": json.dumps(
                         perspective, ensure_ascii=False, sort_keys=True
@@ -1756,17 +1799,32 @@ class CrisisRunEngine:
         result = operation["result"]
         tool_name = operation["tool_name"]
         if tool_name == "update_plan":
-            previous_objective = state["plan"][0]["objective"] if state["plan"] else ""
-            state["plan"] = [
-                {
-                    "version": result["plan_version"],
-                    "objective": payload["objective"],
-                    "steps": payload["steps"],
-                    "rationale": payload["rationale"],
-                    "updated_tick": tick,
-                }
-            ]
-            plan_event = self._event(
+            current_plan = state["plan"][0] if state["plan"] else None
+            if self._same_material_plan(current_plan, payload):
+                plan_event = self._event(
+                    run_id,
+                    tick,
+                    "PLAN_REAFFIRMED",
+                    {
+                        "wake_id": wake["id"],
+                        "plan": current_plan,
+                        "visibility": [actor_id],
+                    },
+                    seat_id=actor_id,
+                    causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                )
+            else:
+                state["plan"] = [
+                    {
+                        "version": result["plan_version"],
+                        "objective": payload["objective"],
+                        "steps": payload["steps"],
+                        "rationale": payload["rationale"],
+                        "reconsider_when": payload.get("reconsider_when", []),
+                        "updated_tick": tick,
+                    }
+                ]
+                plan_event = self._event(
                     run_id,
                     tick,
                     "PLAN_UPDATED",
@@ -1775,30 +1833,6 @@ class CrisisRunEngine:
                     causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
                 )
             events.append(plan_event)
-            reflection_tick = tick + 1
-            if (
-                wake["wake_type"]
-                in {CrisisWakeType.MESSAGE.value, CrisisWakeType.OBSERVATION.value}
-                and previous_objective
-                and previous_objective != payload["objective"]
-                and reflection_tick
-                < int(self.pack.crisis.simulation_boundary.maximum_tick)
-                and not any(
-                    item["actor_id"] == actor_id
-                    and item["wake_type"] == CrisisWakeType.REFLECTION
-                    and item["tick"] == reflection_tick
-                    for item in queued_wakes
-                )
-            ):
-                queued_wakes.append(
-                    {
-                        "run_id": run_id,
-                        "actor_id": actor_id,
-                        "wake_type": CrisisWakeType.REFLECTION,
-                        "tick": reflection_tick,
-                        "trigger_event_id": plan_event["id"],
-                    }
-                )
             for belief in payload.get("belief_updates", []):
                 state["beliefs"][belief["subject"]] = {
                     "assessment": belief["assessment"],
@@ -1822,30 +1856,32 @@ class CrisisRunEngine:
                         causal_parent_ids=[plan_event["id"]],
                     )
                 )
-        elif tool_name == "schedule_followup":
-            commitment = {
-                "id": result["commitment_id"],
-                "purpose": payload["purpose"],
+            return plan_event["id"]
+        elif tool_name == "schedule_revisit":
+            revisit = {
+                "id": result["revisit_id"],
+                "actor_id": actor_id,
+                "reason": payload["reason"],
                 "created_tick": tick,
                 "due_tick": result["due_tick"],
                 "status": "PENDING",
             }
-            state["commitments"].append(commitment)
+            state["revisits"].append(revisit)
             event = self._event(
                 run_id,
                 tick,
-                "COMMITMENT_SCHEDULED",
-                {"wake_id": wake["id"], "commitment": commitment, "visibility": [actor_id]},
+                "REVISIT_SCHEDULED",
+                {"wake_id": wake["id"], "revisit": revisit, "visibility": [actor_id]},
                 seat_id=actor_id,
                 causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
             )
-            commitment["event_id"] = event["id"]
+            revisit["event_id"] = event["id"]
             events.append(event)
             queued_wakes.append(
                 {
                     "run_id": run_id,
                     "actor_id": actor_id,
-                    "wake_type": CrisisWakeType.COMMITMENT_DUE,
+                    "wake_type": CrisisWakeType.REVISIT_DUE,
                     "tick": int(result["due_tick"]),
                     "trigger_event_id": event["id"],
                 }
@@ -1907,7 +1943,32 @@ class CrisisRunEngine:
                 movement["start_event_id"] = action_event["id"]
             events.append(action_event)
             return action_event["id"]
-        return plan_event["id"]
+        return causal_parent_id
+
+    @staticmethod
+    def _same_material_plan(current: dict[str, Any] | None, candidate: dict[str, Any]) -> bool:
+        if current is None:
+            return False
+        return (
+            CrisisRunEngine._plan_text_key(current.get("objective", ""))
+            == CrisisRunEngine._plan_text_key(candidate.get("objective", ""))
+            and CrisisRunEngine._plan_texts_key(current.get("steps", []))
+            == CrisisRunEngine._plan_texts_key(candidate.get("steps", []))
+            and CrisisRunEngine._plan_texts_key(current.get("reconsider_when", []))
+            == CrisisRunEngine._plan_texts_key(candidate.get("reconsider_when", []))
+        )
+
+    @staticmethod
+    def _plan_texts_key(values: list[Any]) -> tuple[str, ...]:
+        return tuple(CrisisRunEngine._plan_text_key(value) for value in values)
+
+    @staticmethod
+    def _plan_text_key(value: Any) -> str:
+        return "".join(
+            character
+            for character in unicodedata.normalize("NFKC", str(value)).casefold()
+            if not character.isspace() and not unicodedata.category(character).startswith("P")
+        )
 
     def _perspective_from(
         self,
@@ -1918,12 +1979,13 @@ class CrisisRunEngine:
         knowledge: list[Any] | None = None,
         beliefs: dict[str, Any] | None = None,
         plan: list[Any] | None = None,
-        commitments: list[Any] | None = None,
+        revisits: list[Any] | None = None,
     ) -> dict[str, Any]:
         lifetime = self.db.worldline_lifetime(run_id, actor_id)
         if lifetime is None:
             raise CrisisRunError("actor life state is missing")
         known = list(lifetime["knowledge"] if knowledge is None else knowledge)
+        current_revisits = list(lifetime["revisits"] if revisits is None else revisits)
         return {
             "run_id": run_id,
             "actor_id": actor_id,
@@ -1932,11 +1994,72 @@ class CrisisRunEngine:
             "knowledge": known,
             "beliefs": dict(lifetime["beliefs"] if beliefs is None else beliefs),
             "plan": list(lifetime["plan"] if plan is None else plan),
-            "commitments": list(
-                lifetime["commitments"] if commitments is None else commitments
-            ),
+            "revisits": current_revisits,
             "resources": dict(lifetime["resources"]),
             "authority": list(lifetime["authority"]),
+            **self._affordance_manifest(actor_id, projection, current_revisits),
+        }
+
+    def _affordance_manifest(
+        self,
+        actor_id: str,
+        projection: dict[str, Any],
+        revisits: list[Any],
+    ) -> dict[str, Any]:
+        actor = self.pack.actor_by_id[actor_id]
+        location_id = str(projection["positions"][actor_id])
+        location = self.pack.location_by_id[location_id]
+        contactable_actors = [
+            {"id": candidate.id, "display_name": candidate.display_name}
+            for candidate in self.pack.crisis.actors
+            if candidate.id != actor_id
+            and self.world.route_days(location_id, projection["positions"][candidate.id]) is not None
+        ]
+        own_assets = [
+            {"id": asset_id, "state": value}
+            for asset_id, value in sorted(actor.resources.items())
+        ]
+        action_targets = own_assets + [{"id": location_id, "state": "CURRENT_POSITION"}]
+        available_operations: list[dict[str, Any]] = []
+        for action in ("hold", "prepare"):
+            if action in actor.world_authority:
+                available_operations.append(
+                    {
+                        "id": action,
+                        "targets": action_targets,
+                    }
+                )
+        if "move" in actor.world_authority:
+            destinations = [
+                {
+                    "id": candidate.id,
+                    "display_name": candidate.display_name,
+                    "travel_days": travel_days,
+                }
+                for candidate in self.pack.crisis.corridor
+                if (travel_days := self.world.route_days(location_id, candidate.id))
+                and int(projection["tick"]) + travel_days
+                < int(self.pack.crisis.simulation_boundary.maximum_tick)
+            ]
+            if destinations:
+                available_operations.append({"id": "move", "targets": destinations})
+        constraints = [{"kind": "authority", "description": "只能使用当前职权内的行动。"}]
+        if self.pack.crisis.routes:
+            constraints.append(
+                {"kind": "travel_time", "description": "通信与移动需要沿已知路线等待。"}
+            )
+        return {
+            "contactable_actors": contactable_actors,
+            "known_entities": [
+                {"id": location.id, "type": "PLACE", "display_name": location.display_name}
+            ],
+            "own_assets": own_assets,
+            "available_operations": available_operations,
+            "active_investigations": [],
+            "active_offers": [],
+            "active_agreements": [],
+            "current_revisits": revisits,
+            "meaningful_world_constraints": constraints,
         }
 
     def actor_perspective(self, run_id: str, actor_id: str) -> dict[str, Any]:
@@ -2107,8 +2230,17 @@ class CrisisRunEngine:
             "knowledge": perspective["knowledge"],
             "beliefs": perspective["beliefs"],
             "plan": perspective["plan"],
-            "commitments": perspective["commitments"],
+            "revisits": perspective["revisits"],
             "resources": perspective["resources"],
+            "contactable_actors": perspective["contactable_actors"],
+            "known_entities": perspective["known_entities"],
+            "own_assets": perspective["own_assets"],
+            "available_operations": perspective["available_operations"],
+            "active_investigations": perspective["active_investigations"],
+            "active_offers": perspective["active_offers"],
+            "active_agreements": perspective["active_agreements"],
+            "current_revisits": perspective["current_revisits"],
+            "meaningful_world_constraints": perspective["meaningful_world_constraints"],
             "known_situation": known_situation,
             "outgoing_messages": [
                 message
@@ -2176,6 +2308,9 @@ class CrisisRunEngine:
             "MESSAGE_DELIVERED": "一封信抵达收信人",
             "PLAN_UPDATED": "有人修正了自己的打算",
             "BELIEF_UPDATED": "有人重新判断一项不确定之事",
+            "REVISIT_SCHEDULED": "有人决定稍后重新判断",
+            "REVISIT_DUE": "一次重新判断已经到期",
+            "REVISIT_FULFILLED": "一次重新判断已经发生",
             "COMMITMENT_SCHEDULED": "有人决定稍后再作判断",
             "COMMITMENT_FULFILLED": "一次约定的复查已经发生",
             "MOVEMENT_STARTED": "一支队伍开始移动",

@@ -40,9 +40,9 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 | Truth / Projection | 模拟日、位置、路线、消息、移动和世界效果 | Host 的确定性提交路径 |
 | Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
 | Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
-| Plan / Commitment | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_followup` 提出 |
+| Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
 
-Knowledge 不是 Truth 的副本，Belief 不是史实定论，Plan/Commitment 也不是聊天记录。事件发生、消息发出、消息抵达分别记录；只有抵达后，消息才进入收件人的 Knowledge。
+Knowledge 不是 Truth 的副本，Belief 不是史实定论，Plan/Revisit 也不是聊天记录。事件发生、消息发出、消息抵达分别记录；只有抵达后，消息才进入收件人的 Knowledge。
 
 ## Run 生命周期
 
@@ -54,7 +54,9 @@ Watch 的 controller map 是三位 Agent；Takeover 是李自成 Agent、吴三�
 
 ### 推进
 
-Scheduler 只寻找已经存在的下一件事：移动抵达、消息抵达、观察、Commitment 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+Scheduler 只寻找已经存在的下一件事：移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+
+`ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
 一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、移动和观察排入未来时刻。
 
@@ -76,7 +78,7 @@ GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项
 
 ## Perspective 与隐私
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Commitment、Resource、Authority 和当前可用的 World tools。
+Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用行动和 target、自己拥有的 asset、当前 Revisit、已知实体与可见世界约束；尚未实现的 Investigation、Offer 和 Agreement 在此阶段以空集合显式表示。
 
 人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
 
@@ -88,8 +90,8 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | --- | --- | --- |
 | `communicate(recipient, content, idempotency_key)` | 给另一主体发送一封信 | 收件人、内容、路线和抵达日 |
 | `act(action, description, target, idempotency_key)` | `hold`、`prepare` 或 `move` | authority、目标资源/位置、路线、资源、边界和现实前提 |
-| `update_plan(objective, steps, rationale, belief_updates, idempotency_key)` | 更新目标、步骤和必要的 Belief | 内容完整性、信念格式和幂等键 |
-| `schedule_followup(after_days, purpose, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、目的、边界和幂等键 |
+| `update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)` | 更新目标、方法、重新判断条件和必要的 Belief | 内容完整性、信念格式、语义 no-op 和幂等键 |
+| `schedule_revisit(after_days, reason, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、原因、边界和幂等键 |
 
 工具参数不接受 actor、run 或 wake 身份。Agent 身份来自 Profile 私有 token，Human 身份来自当前控制者。调用先落为 `PROPOSED` 或 `REJECTED`，Wake 成功时才与 Ledger、Projection、Life State 一起提交；重复幂等键返回第一次结果，超过 8 次被拒绝。
 
@@ -98,12 +100,12 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | Hermes 负责 | Chronicle 负责 |
 | --- | --- |
 | Profile、模型请求、Agent loop、fresh Session | Run、模拟时间、停止边界、Perspective |
-| Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Commitment、Resource、Authority |
+| Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Revisit、Resource、Authority |
 | 模型判断与工具调用 | 路线、消息送达、权限、世界效果和 Ledger |
 
 Watch 在 live Run 建立后运行三个 Agent Profile；Takeover 运行李自成和多尔衮两个 Profile，吴三桂由 Human lifetime 承担。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
 
-每次 Agent Wake 使用 fresh Session。普通 Wake 不得改变 durable Memory；只有 `REFLECTION` Wake 可以写入长期经验，也可以选择 `NO_CHANGE`。Plan、Belief、Commitment 和未送达消息属于 Chronicle Life State，不写进 Memory。Reflection 的 native Memory、Life State、Ledger 事件和 lineage version 必须作为同一个 SQLite moment 提交，失败时恢复 native 文件。
+每次 Agent Wake 使用 fresh Session。普通 Wake 不得改变 durable Memory；只有 `REFLECTION` Wake 可以写入长期经验，也可以选择 `NO_CHANGE`。Plan、Belief、Revisit 和未送达消息属于 Chronicle Life State，不写进 Memory。Reflection 的 native Memory、Life State、Ledger 事件和 lineage version 必须作为同一个 SQLite moment 提交，失败时恢复 native 文件。
 
 ## Human Decision Interpreter
 

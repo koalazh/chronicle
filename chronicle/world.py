@@ -280,6 +280,7 @@ class WorldAffordanceSession:
         *,
         rationale: str = "",
         belief_updates: list[dict[str, str]] | None = None,
+        reconsider_when: list[str] | None = None,
         idempotency_key: str,
     ) -> dict[str, Any]:
         beliefs = belief_updates or []
@@ -288,6 +289,7 @@ class WorldAffordanceSession:
             "steps": [step.strip() for step in steps if step.strip()],
             "rationale": rationale.strip(),
             "belief_updates": beliefs,
+            "reconsider_when": [item.strip() for item in reconsider_when or [] if item.strip()],
         }
         if "update_plan" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
@@ -305,30 +307,30 @@ class WorldAffordanceSession:
             result = {"status": "accepted", "plan_version": f"plan-{uuid.uuid4().hex[:12]}"}
         return self._stage("update_plan", payload, result, idempotency_key=idempotency_key)
 
-    def schedule_followup(
+    def schedule_revisit(
         self,
         after_days: int,
-        purpose: str,
+        reason: str,
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        payload = {"after_days": after_days, "purpose": purpose.strip()}
+        payload = {"after_days": after_days, "reason": reason.strip()}
         tick, _ = self._tick_and_projection()
         due_tick = tick + after_days
         boundary = self.service.pack.crisis.simulation_boundary.maximum_tick
-        if "schedule_followup" not in self._actor().world_authority:
+        if "schedule_revisit" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
-        elif after_days <= 0 or not payload["purpose"]:
-            result = {"status": "rejected", "code": "invalid_followup"}
+        elif after_days <= 0 or not payload["reason"]:
+            result = {"status": "rejected", "code": "invalid_revisit"}
         elif due_tick >= boundary:
             result = {"status": "rejected", "code": "crosses_simulation_boundary"}
         else:
             result = {
                 "status": "accepted",
-                "commitment_id": f"commitment-{uuid.uuid4().hex[:16]}",
+                "revisit_id": f"revisit-{uuid.uuid4().hex[:16]}",
                 "due_tick": due_tick,
             }
-        return self._stage("schedule_followup", payload, result, idempotency_key=idempotency_key)
+        return self._stage("schedule_revisit", payload, result, idempotency_key=idempotency_key)
 
 
 def world_tool_signatures() -> dict[str, inspect.Signature]:
@@ -336,5 +338,5 @@ def world_tool_signatures() -> dict[str, inspect.Signature]:
 
     return {
         name: inspect.signature(getattr(WorldAffordanceSession, name))
-        for name in ("communicate", "act", "update_plan", "schedule_followup")
+        for name in ("communicate", "act", "update_plan", "schedule_revisit")
     }

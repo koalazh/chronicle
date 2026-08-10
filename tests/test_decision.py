@@ -33,8 +33,8 @@ def test_model_decision_interpreter_returns_multiple_semantic_operations(
                 "arguments": {"recipient": "dorgon", "content": "请说明出兵条件。"},
             },
             {
-                "tool": "schedule_followup",
-                "arguments": {"after_days": 2, "purpose": "比较回信与实际动向"},
+                "tool": "schedule_revisit",
+                "arguments": {"after_days": 2, "reason": "比较回信与实际动向"},
             },
         ],
     }
@@ -56,7 +56,7 @@ def test_model_decision_interpreter_returns_multiple_semantic_operations(
 
     assert [operation.tool for operation in result.operations] == [
         "communicate",
-        "schedule_followup",
+        "schedule_revisit",
     ]
     assert request["url"] == "https://provider.example/v1/chat/completions"
     assert request["trust_env"] is False
@@ -138,7 +138,7 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
         event
         for event in result["events"][decision_index + 1 :]
         if event["seat_id"] == "wu-sangui"
-        and event["event_type"] in {"PLAN_UPDATED", "MESSAGE_DISPATCHED", "COMMITMENT_SCHEDULED"}
+        and event["event_type"] in {"PLAN_UPDATED", "MESSAGE_DISPATCHED", "REVISIT_SCHEDULED"}
     ]
     assert human_effects[0]["causal_parent_ids"] == [decision_event["id"]]
     assert all(
@@ -147,9 +147,37 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
     )
     lifetime = engine.db.worldline_lifetime(run_id, "wu-sangui")
     assert lifetime["plan"][0]["objective"].startswith("向关外")
-    assert any(commitment["status"] == "DUE" for commitment in lifetime["commitments"])
+    assert any(
+        revisit["actor_id"] == "wu-sangui"
+        and revisit["reason"] == "两日后重新比较两方回应"
+        and revisit["status"] == "DUE"
+        for revisit in lifetime["revisits"]
+    )
+    revisit_id = next(revisit["id"] for revisit in lifetime["revisits"])
     silence = engine.submit_human_decision(run_id, "")
     assert silence["silence"] is True
+    events = engine.db.worldline_events(run_id)
+    scheduled = next(
+        event
+        for event in events
+        if event["event_type"] == "REVISIT_SCHEDULED"
+        and event["payload"]["revisit"]["id"] == revisit_id
+    )
+    due = next(
+        event
+        for event in events
+        if event["event_type"] == "REVISIT_DUE"
+        and event["payload"]["revisit_id"] == revisit_id
+    )
+    fulfilled = next(
+        event
+        for event in events
+        if event["event_type"] == "REVISIT_FULFILLED"
+        and event["payload"]["revisit_id"] == revisit_id
+    )
+    silence_event = next(event for event in events if event["event_type"] == "HUMAN_SILENCE")
+    assert due["causal_parent_ids"] == [scheduled["id"]]
+    assert fulfilled["causal_parent_ids"] == [due["id"], silence_event["id"]]
 
 
 def test_product_perspective_keeps_human_operation_outcomes(app_config):
@@ -292,15 +320,18 @@ def test_human_desk_persists_known_state_outbox_decisions_and_resolves_due_matte
     )
     engine.run_until_idle(run_id)
     due = engine.product_perspective(run_id, "wu-sangui")
-    assert any(commitment["status"] == "DUE" for commitment in due["commitments"])
+    assert any(revisit["status"] == "DUE" for revisit in due["revisits"])
+    assert CrisisRunEngine(app_config).product_perspective(run_id, "wu-sangui")[
+        "current_revisits"
+    ] == due["revisits"]
     assert due["decisions"][-1]["summary"]
 
     silence = engine.submit_human_decision(run_id, "")
     resolved = engine.product_perspective(run_id, "wu-sangui")
 
-    assert any(commitment["status"] == "FULFILLED" for commitment in resolved["commitments"])
+    assert any(revisit["status"] == "FULFILLED" for revisit in resolved["revisits"])
     assert resolved["decisions"][-1]["summary"] == "暂不追加命令，继续观察。"
-    assert any(event["event_type"] == "COMMITMENT_FULFILLED" for event in silence["events"])
+    assert any(event["event_type"] == "REVISIT_FULFILLED" for event in silence["events"])
 
 
 def test_invalid_later_human_operation_leaves_no_partial_world_commit(app_config):

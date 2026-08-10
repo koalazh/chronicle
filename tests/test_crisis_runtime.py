@@ -19,7 +19,7 @@ from chronicle.hermes import HermesRuntimeError
 from chronicle.world import WorldAccessError, token_hash, world_tool_signatures
 
 
-def test_watch_fixture_lives_autonomously_for_seven_simulated_days(app_config):
+def test_watch_fixture_lives_without_forced_revisits_or_reflections(app_config):
     engine = CrisisRunEngine(app_config)
     created = engine.create(RunMode.WATCH)
     run_id = created["run"]["id"]
@@ -33,12 +33,11 @@ def test_watch_fixture_lives_autonomously_for_seven_simulated_days(app_config):
     assert {wake["actor_id"] for wake in orient} == {"li-zicheng", "wu-sangui", "dorgon"}
     assert all(wake["status"] == "COMPLETED" and wake["source"] == "fixture" for wake in wakes)
     assert len({wake["hermes_session_id"] for wake in wakes}) == len(wakes)
-    assert result["run"]["current_tick"] == 7
-    assert any(event["event_type"] == "COMMITMENT_SCHEDULED" for event in events)
-    assert any(wake["wake_type"] == "COMMITMENT_DUE" for wake in wakes)
-    assert any(wake["wake_type"] == "REFLECTION" for wake in wakes)
+    assert result["run"]["current_tick"] == 5
+    assert not any(event["event_type"] == "REVISIT_SCHEDULED" for event in events)
+    assert not any(wake["wake_type"] == "REVISIT_DUE" for wake in wakes)
+    assert not any(wake["wake_type"] == "REFLECTION" for wake in wakes)
     assert any(event["event_type"] == "MESSAGE_DELIVERED" for event in events)
-    assert any(event["event_type"] == "WAKE_NOOP" for event in events)
     assert any(
         event["event_type"] == "ACTOR_WAKE_COMPLETED"
         and event["payload"]["repetition_count"] >= 1
@@ -62,9 +61,7 @@ def test_watch_fixture_lives_autonomously_for_seven_simulated_days(app_config):
     assert not any(str(item).startswith("c00") for item in li_view["knowledge"])
     assert li_view["plan"]
     assert all(
-        commitment["status"] == "FULFILLED"
-        for lifetime in engine.db.worldline_lifetimes(run_id)
-        for commitment in lifetime["commitments"]
+        lifetime["revisits"] == [] for lifetime in engine.db.worldline_lifetimes(run_id)
     )
     assert engine.db.worldline_lifetime(run_id, "dorgon")["beliefs"]["shanhai-request"]
     assert engine.db.agent_bindings(run_id)
@@ -122,6 +119,37 @@ def test_takeover_rejects_an_actor_outside_the_playable_cast(app_config):
         engine.create(RunMode.WATCH, human_actor_id="li-zicheng")
 
 
+def test_private_perspective_exposes_a_grounded_affordance_manifest(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    perspective = engine.actor_perspective(run_id, "wu-sangui")
+
+    assert {item["id"] for item in perspective["contactable_actors"]} == {
+        "li-zicheng",
+        "dorgon",
+    }
+    assert perspective["known_entities"] == [
+        {"id": "shanhaiguan", "type": "PLACE", "display_name": "山海关"}
+    ]
+    assert {item["id"] for item in perspective["own_assets"]} == {
+        "pass_control",
+        "field_force",
+        "couriers",
+    }
+    assert {item["id"] for item in perspective["available_operations"]} == {
+        "hold",
+        "prepare",
+        "move",
+    }
+    assert perspective["active_investigations"] == []
+    assert perspective["active_offers"] == []
+    assert perspective["active_agreements"] == []
+    assert perspective["current_revisits"] == []
+    assert perspective["meaningful_world_constraints"]
+    assert "commitments" not in perspective
+
+
 def test_human_controller_path_has_no_historical_actor_id():
     human_controller_source = "\n".join(
         inspect.getsource(method)
@@ -130,13 +158,83 @@ def test_human_controller_path_has_no_historical_actor_id():
             CrisisRunEngine.human_decision_state,
             CrisisRunEngine.submit_human_decision,
             CrisisRunEngine._commit_human_wake,
-            CrisisRunEngine._resolve_human_commitments,
+            CrisisRunEngine._resolve_human_revisits,
             CrisisRunEngine._human_decision_operation_results,
             CrisisRunEngine._human_actor_id,
         )
     )
 
     assert "wu-sangui" not in human_controller_source
+
+
+def test_reaffirmed_plan_stays_private_and_does_not_schedule_reflection(app_config):
+    class ReaffirmingDriver:
+        source = "fixture"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id == "li-zicheng" and wake["wake_type"] in {"ORIENT", "MESSAGE"}:
+                world.update_plan(
+                    "守住东部选择。" if wake["wake_type"] == "MESSAGE" else "守住东部选择",
+                    ["等待来使回音"],
+                    rationale="文字不同，但当前方向没有改变。",
+                    reconsider_when=["收到可验证来信"],
+                    idempotency_key=f"{wake['id']}:same-plan",
+                )
+            return ActorTurnResult("保持当前判断。")
+
+    engine = CrisisRunEngine(app_config, actor_driver=ReaffirmingDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    assert engine.advance_one(run_id) is True
+    engine._queue_wake(run_id, "li-zicheng", "MESSAGE", 1)
+    engine.run_until_idle(run_id)
+
+    events = engine.db.worldline_events(run_id)
+    plans = [
+        event
+        for event in events
+        if event["seat_id"] == "li-zicheng" and event["event_type"] == "PLAN_UPDATED"
+    ]
+    reaffirmed = [
+        event
+        for event in events
+        if event["seat_id"] == "li-zicheng" and event["event_type"] == "PLAN_REAFFIRMED"
+    ]
+    assert len(plans) == 1
+    assert len(reaffirmed) == 1
+    assert not any(wake["wake_type"] == "REFLECTION" for wake in engine.db.crisis_wakes(run_id))
+    engine.seal(run_id, "test")
+    assert reaffirmed[0]["id"] not in {item["id"] for item in engine.replay(run_id)["items"]}
+
+
+def test_same_tick_revisit_is_visible_to_every_frozen_actor_perspective(app_config):
+    class RevisitAwareDriver:
+        source = "fixture"
+
+        def __init__(self):
+            self.statuses = {}
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id != "li-zicheng":
+                return ActorTurnResult("保持当前判断。")
+            if wake["wake_type"] == "ORIENT":
+                world.schedule_revisit(
+                    1,
+                    "明日复查",
+                    idempotency_key=f"{wake['id']}:revisit",
+                )
+            else:
+                self.statuses[wake["wake_type"]] = perspective["current_revisits"][0]["status"]
+            return ActorTurnResult("保持当前判断。")
+
+    driver = RevisitAwareDriver()
+    engine = CrisisRunEngine(app_config, actor_driver=driver)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    assert engine.advance_one(run_id) is True
+    engine._queue_wake(run_id, "li-zicheng", "MESSAGE", 1)
+    engine.run_until_idle(run_id)
+
+    assert driver.statuses == {"MESSAGE": "DUE", "REVISIT_DUE": "DUE"}
 
 
 def test_live_orient_without_world_operation_fails_closed(app_config):
@@ -205,15 +303,15 @@ def test_world_tools_bind_identity_outside_tool_arguments_and_recover_in_one_wak
         )
 
     world = engine.world.session_for_token(li_wake["id"], token)
-    rejected = world.schedule_followup(
+    rejected = world.schedule_revisit(
         0,
         "现在立刻再次唤醒",
-        idempotency_key="invalid-followup",
+        idempotency_key="invalid-revisit",
     )
-    recovered = world.schedule_followup(
+    recovered = world.schedule_revisit(
         2,
         "两日后复查",
-        idempotency_key="valid-followup",
+        idempotency_key="valid-revisit",
     )
     first = world.communicate(
         "wu-sangui",
@@ -226,7 +324,7 @@ def test_world_tools_bind_identity_outside_tool_arguments_and_recover_in_one_wak
         idempotency_key="same-message",
     )
 
-    assert rejected == {"status": "rejected", "code": "invalid_followup"}
+    assert rejected == {"status": "rejected", "code": "invalid_revisit"}
     assert recovered["status"] == "accepted" and recovered["due_tick"] == 2
     assert first == repeated
     assert len(engine.db.crisis_wake_operations(li_wake["id"])) == 3

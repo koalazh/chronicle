@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import yaml
 
-from chronicle.crisis_runtime import CrisisRunEngine, RunMode
+from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 from chronicle.doctor import doctor
 from chronicle.hermes import PROFILE_NAMES, HermesProbeResult
 
@@ -182,7 +182,7 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
         lambda _config, _server: (
             "act",
             "communicate",
-            "schedule_followup",
+            "schedule_revisit",
             "update_plan",
         ),
     )
@@ -258,16 +258,28 @@ def test_doctor_rejects_scheduler_ledger_and_memory_lineage_corruption(app_confi
     assert checks["memory_lineage"]["ok"] is False
 
 
-def test_doctor_rejects_missing_wake_for_pending_commitment(app_config):
-    engine = CrisisRunEngine(app_config)
+def test_doctor_rejects_missing_wake_for_pending_revisit(app_config):
+    class RevisitDriver:
+        source = "fixture"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id == "li-zicheng" and wake["wake_type"] == "ORIENT":
+                world.schedule_revisit(
+                    2,
+                    "两日后复查",
+                    idempotency_key="li-revisit",
+                )
+            return ActorTurnResult("完成当前判断。")
+
+    engine = CrisisRunEngine(app_config, actor_driver=RevisitDriver())
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     assert engine.advance_one(run_id) is True
     due_wakes = [
         wake
         for wake in engine.db.crisis_wakes(run_id, status="QUEUED")
-        if wake["wake_type"] == "COMMITMENT_DUE"
+        if wake["wake_type"] == "REVISIT_DUE"
     ]
-    assert len(due_wakes) == 3
+    assert len(due_wakes) == 1
 
     with engine.db.transaction() as connection:
         connection.execute("DELETE FROM crisis_wakes WHERE id = ?", (due_wakes[0]["id"],))
@@ -275,5 +287,5 @@ def test_doctor_rejects_missing_wake_for_pending_commitment(app_config):
     checks = {item["name"]: item for item in doctor(app_config)["checks"]}
 
     assert checks["wake_scheduler_integrity"]["ok"] is False
-    assert "commitments=3" in checks["wake_scheduler_integrity"]["detail"]
-    assert "commitment_wakes=2" in checks["wake_scheduler_integrity"]["detail"]
+    assert "revisits=1" in checks["wake_scheduler_integrity"]["detail"]
+    assert "revisit_wakes=0" in checks["wake_scheduler_integrity"]["detail"]

@@ -61,7 +61,7 @@ actors:
       political_control: fragile
       field_force: available-but-dispersed
       courier_network: active
-    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
 
   - id: wu-sangui
     display_name: 吴三桂
@@ -79,7 +79,7 @@ actors:
       pass_control: contested-but-held
       field_force: cohesive-limited
       couriers: scarce
-    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
 
   - id: dorgon
     display_name: 多尔衮
@@ -97,7 +97,7 @@ actors:
       command: expeditionary-army
       mobility: high
       artillery: following-column
-    world_authority: [communicate, update_plan, schedule_followup, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
 
 playable_actor_ids: [wu-sangui, li-zicheng, dorgon]
 

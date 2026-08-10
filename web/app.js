@@ -410,13 +410,13 @@ function actorLens() {
   if (!state.perspective || state.perspective.actor.id !== state.lens) return loadingBlock();
   const view = state.perspective;
   const plan = view.plan[0];
-  const commitments = view.commitments.length
-    ? view.commitments
+  const revisits = view.revisits.length
+    ? view.revisits
         .map(
-          (item) => `<li><span>${item.status === "PENDING" ? `第 ${item.due_tick} 日` : item.status === "DUE" ? "等待处置" : "已复查"}</span>${escapeHtml(item.purpose)}</li>`,
+          (item) => `<li><span>${item.status === "PENDING" ? `第 ${item.due_tick} 日` : item.status === "DUE" ? "等待处置" : "已复查"}</span>${escapeHtml(item.reason)}</li>`,
         )
         .join("")
-    : "<li class=\"empty\">尚未给未来的自己留下约定。</li>";
+    : "<li class=\"empty\">尚未安排未来复查。</li>";
   const knowledge = view.knowledge
     .slice(-5)
     .map((item) => `<li>${escapeHtml(typeof item === "string" ? item : item.content || item.observation || "一项已知情况")}</li>`)
@@ -440,7 +440,7 @@ function actorLens() {
       </article>
       <article>
         <span class="column-label">留给未来</span>
-        <ul>${commitments}</ul>
+        <ul>${revisits}</ul>
       </article>
     </div>
   </section>`;
@@ -459,10 +459,10 @@ function deskPage() {
   const knownSituation = (view?.known_situation || [])
     .map((item) => `<li>${escapeHtml(item.text)}</li>`)
     .join("");
-  const unresolved = (view?.commitments || [])
+  const unresolved = (view?.revisits || [])
     .filter((item) => ["PENDING", "DUE"].includes(item.status))
     .map(
-      (item) => `<article class="matter-sheet ${item.status === "DUE" ? "due" : ""}"><span>${item.status === "DUE" ? "现在需要处置" : `第 ${item.due_tick} 日重新判断`}</span><p>${escapeHtml(item.purpose)}</p></article>`,
+      (item) => `<article class="matter-sheet ${item.status === "DUE" ? "due" : ""}"><span>${item.status === "DUE" ? "现在需要处置" : `第 ${item.due_tick} 日重新判断`}</span><p>${escapeHtml(item.reason)}</p></article>`,
     )
     .join("");
   const decisions = (view?.decisions || [])
@@ -477,10 +477,10 @@ function deskPage() {
       (item) => `<li><span>${item.source === "checkpoint" ? "场景起始信" : "本局决定"} · ${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorDisplayName(item.recipient))}</span>${escapeHtml(item.content)}</li>`,
     )
     .join("");
-  const resolved = (view?.commitments || [])
+  const resolved = (view?.revisits || [])
     .filter((item) => item.status === "FULFILLED")
     .slice(-3)
-    .map((item) => `<li><span>已经处理</span>${escapeHtml(item.purpose)}</li>`)
+    .map((item) => `<li><span>已经处理</span>${escapeHtml(item.reason)}</li>`)
     .join("");
   const committedDecision = (view?.decisions || [])
     .slice()

@@ -13,7 +13,7 @@ from .db import ChronicleDB, stable_hash
 from .hermes import PROFILE_NAMES, cli_version, probe, probe_mcp_tools, read_profile_memory
 from .scenario import ScenarioPack
 
-WORLD_TOOLS = ("act", "communicate", "schedule_followup", "update_plan")
+WORLD_TOOLS = ("act", "communicate", "schedule_revisit", "update_plan")
 
 
 def doctor(config: AppConfig) -> dict[str, Any]:
@@ -72,33 +72,33 @@ def doctor(config: AppConfig) -> dict[str, Any]:
             if wake["status"] == "COMPLETED"
             and controllers.get(str(wake["actor_id"])) == "AGENT"
         )
-        expected_commitment_wakes: dict[tuple[str, int, str], str] = {}
+        expected_revisit_wakes: dict[tuple[str, int, str], str] = {}
         for lifetime in lifetimes:
-            for commitment in lifetime["commitments"]:
-                expected_commitment_wakes[
+            for revisit in lifetime["revisits"]:
+                expected_revisit_wakes[
                     (
                         str(lifetime["seat"]),
-                        int(commitment["due_tick"]),
-                        str(commitment.get("event_id", "")),
+                        int(revisit["due_tick"]),
+                        str(revisit.get("event_id", "")),
                     )
-                ] = str(commitment["status"])
-        actual_commitment_wakes: dict[tuple[str, int, str], list[str]] = {}
+                ] = str(revisit["status"])
+        actual_revisit_wakes: dict[tuple[str, int, str], list[str]] = {}
         for wake in wakes:
-            if wake["wake_type"] != "COMMITMENT_DUE":
+            if wake["wake_type"] != "REVISIT_DUE":
                 continue
             key = (
                 str(wake["actor_id"]),
                 int(wake["tick"]),
                 str(wake["trigger_event_id"]),
             )
-            actual_commitment_wakes.setdefault(key, []).append(str(wake["status"]))
-        commitment_wakes_ok = (
-            set(expected_commitment_wakes) == set(actual_commitment_wakes)
-            and all(len(statuses) == 1 for statuses in actual_commitment_wakes.values())
+            actual_revisit_wakes.setdefault(key, []).append(str(wake["status"]))
+        revisit_wakes_ok = (
+            set(expected_revisit_wakes) == set(actual_revisit_wakes)
+            and all(len(statuses) == 1 for statuses in actual_revisit_wakes.values())
             and all(
-                actual_commitment_wakes[key][0]
-                == ("QUEUED" if commitment_status == "PENDING" else "COMPLETED")
-                for key, commitment_status in expected_commitment_wakes.items()
+                actual_revisit_wakes[key][0]
+                == ("QUEUED" if revisit_status == "PENDING" else "COMPLETED")
+                for key, revisit_status in expected_revisit_wakes.items()
             )
         )
         scheduler_ok = (
@@ -114,14 +114,14 @@ def doctor(config: AppConfig) -> dict[str, Any]:
             )
             and agent_sessions_present
             and len(completed_sessions) == len(set(completed_sessions))
-            and commitment_wakes_ok
+            and revisit_wakes_ok
         )
         add(
             "wake_scheduler_integrity",
             scheduler_ok,
             f"wakes={len(wakes)}, completed_sessions={len(completed_sessions)}, "
-            f"commitments={len(expected_commitment_wakes)}, "
-            f"commitment_wakes={sum(len(items) for items in actual_commitment_wakes.values())}, "
+            f"revisits={len(expected_revisit_wakes)}, "
+            f"revisit_wakes={sum(len(items) for items in actual_revisit_wakes.values())}, "
             f"unfinished={unfinished_statuses or 'none'}",
         )
         last_sequence = int(events[-1]["sequence"]) if events else 0

@@ -67,7 +67,7 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
                 "    communicate                         Send a message\n"
                 "    act                                 Request an action\n"
                 "    update_plan                         Update a plan\n"
-                "    schedule_followup                   Schedule a wake\n"
+                "    schedule_revisit                    Schedule a revisit\n"
             ),
             stderr="",
             returncode=0,
@@ -77,7 +77,7 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
     assert probe_mcp_tools(app_config, "chronicle-world") == (
         "act",
         "communicate",
-        "schedule_followup",
+        "schedule_revisit",
         "update_plan",
     )
 

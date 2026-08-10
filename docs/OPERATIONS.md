@@ -76,13 +76,13 @@ CHRONICLE_DATABASE_URL=sqlite:////absolute/copy.db uv run chronicle doctor
 
 fixture 只在 `CHRONICLE_DEV=1` 的开发/自动化环境开放，只替代模型输出，不替代 scheduler、WorldService、Ledger、Life State 或权限校验。
 
-最小 smoke 应覆盖：创建 `WATCH` fixture Run；连续调用 `/api/runs/{id}/continue`，确认无 trigger 不 Wake、未来 Commitment 会到期、信件会抵达；切换三位主体 perspective，确认未送达信息不泄漏；创建 fixture Takeover，确认活动期间 `/world` 和其他主体 perspective 返回 403；提交多动作决定和空文本沉默；seal 后读取 Replay、Archive 和 History。
+最小 smoke 应覆盖：创建 `WATCH` fixture Run；连续调用 `/api/runs/{id}/continue`，确认无 trigger 不 Wake、显式创建的未来 Revisit 会到期、信件会抵达；切换三位主体 perspective，确认未送达信息不泄漏；创建 fixture Takeover，确认活动期间 `/world` 和其他主体 perspective 返回 403；提交多动作决定和空文本沉默；seal 后读取 Replay、Archive 和 History。
 
 fixture 通过只能写成“确定性合同通过”，不能写成“真实 Hermes 已通过”。
 
 ## 7. 真实业务验收
 
-真实验收使用隔离的临时 SQLite，不覆盖用户数据。必须在同一 live Watch Run 中关联三条 identity binding、三个 Agent Profile、`ORIENT` 与后续 Wake 的 fresh Session、真实 World MCP 请求及其 operation/Ledger 记录、Plan/Commitment/Memory lineage、消息 transit 与 delivery、拒绝后修正或合法 no-op、cross-profile key/perspective isolation，以及 seal 后的 binding revocation 和 Replay/Archive。
+真实验收使用隔离的临时 SQLite，不覆盖用户数据。必须在同一 live Watch Run 中关联三条 identity binding、三个 Agent Profile、`ORIENT` 与后续 Wake 的 fresh Session、真实 World MCP 请求及其 operation/Ledger 记录、Plan/Revisit/Memory lineage、消息 transit 与 delivery、拒绝后修正或合法 no-op、cross-profile key/perspective isolation，以及 seal 后的 binding revocation 和 Replay/Archive。
 
 健康探针、Doctor、fixture、截图和一段模型最终文本都不能替代这条关联链。安全报告只记录 Run ID、Profile 名、Session 是否独立、工具名、事件类型、tick、状态和计数，不记录 token、API Key 或完整模型正文。
 

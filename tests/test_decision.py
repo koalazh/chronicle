@@ -63,6 +63,50 @@ def test_model_decision_interpreter_returns_multiple_semantic_operations(
     assert "private-provider-key" not in json.dumps(request["json"], ensure_ascii=False)
 
 
+def test_model_decision_interpreter_includes_canonical_recipient_catalog(
+    app_config, monkeypatch
+):
+    configured = replace(
+        app_config,
+        llm_base_url="https://provider.example/v1",
+        llm_api_key="private-provider-key",
+        llm_model="decision-model",
+    )
+    request: dict[str, object] = {}
+
+    def fake_post(url, **kwargs):
+        request.update({"url": url, **kwargs})
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"summary": "已登记。", "operations": []},
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr("chronicle.decision.httpx.post", fake_post)
+    ModelDecisionInterpreter(
+        configured,
+        recipient_catalog=(
+            {"id": "li-zicheng", "display_name": "李自成"},
+            {"id": "dorgon", "display_name": "多尔衮"},
+        ),
+    ).interpret("分别致信两方。", {"actor_id": "wu-sangui"})
+
+    system_prompt = request["json"]["messages"][0]["content"]
+    assert "li-zicheng" in system_prompt
+    assert "dorgon" in system_prompt
+    assert "不得使用显示名或别名" in system_prompt
+
+
 def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
@@ -108,6 +152,47 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
     assert silence["silence"] is True
 
 
+def test_product_perspective_keeps_human_operation_outcomes(app_config):
+    class PartialInterpreter:
+        source = "fixture"
+
+        def interpret(self, text, perspective):
+            return InterpretedDecision(
+                summary="分别致信两方。",
+                operations=[
+                    DecisionOperation(
+                        tool="communicate",
+                        arguments={"recipient": "dorgon", "content": "给多尔衮的信"},
+                    ),
+                    DecisionOperation(
+                        tool="communicate",
+                        arguments={"recipient": "duoergun", "content": "给别名收件人的信"},
+                    ),
+                ],
+            )
+
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+    engine.submit_human_decision(run_id, "分别致信两方。", interpreter=PartialInterpreter())
+
+    decision = engine.product_perspective(run_id, "wu-sangui")["decisions"][-1]
+    assert decision["summary"] == "分别致信两方。"
+    assert decision["operation_results"] == [
+        {
+            "tool": "communicate",
+            "status": "COMMITTED",
+            "recipient": "多尔衮",
+            "arrival_tick": 2,
+        },
+        {
+            "tool": "communicate",
+            "status": "REJECTED",
+            "recipient": "未识别收件人",
+            "reason": "收件人无法识别",
+        },
+    ]
+
+
 def test_human_decision_conflicts_expose_machine_state(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
@@ -142,6 +227,7 @@ def test_human_silence_is_the_same_single_decision_slot(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
 
+    assert engine.run_summary(run_id)["can_continue"] is True
     silence = engine.submit_human_decision(run_id, "")
 
     assert silence["silence"] is True
@@ -153,6 +239,15 @@ def test_human_silence_is_the_same_single_decision_slot(app_config):
     with pytest.raises(CrisisRunConflict) as duplicate:
         engine.submit_human_decision(run_id, "同一日不应再写第二笔")
     assert duplicate.value.code == "decision_already_exists"
+
+
+def test_run_summary_marks_sealed_run_as_not_continuable(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+
+    assert engine.run_summary(run_id)["can_continue"] is True
+    engine.seal(run_id)
+    assert engine.run_summary(run_id)["can_continue"] is False
 
 
 def test_repeated_human_decision_same_tick_is_a_controlled_conflict(app_config):

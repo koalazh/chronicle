@@ -75,12 +75,27 @@ class ModelDecisionInterpreter:
 
     source = "model"
 
-    def __init__(self, config: AppConfig):
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        recipient_catalog: tuple[dict[str, str], ...] = (),
+    ):
         self.config = config
+        self.recipient_catalog = recipient_catalog
 
     def interpret(self, text: str, perspective: dict[str, Any]) -> InterpretedDecision:
         if not self.config.llm_configured:
             raise DecisionInterpretationError("Provider is not configured")
+        recipient_rule = (
+            "communicate 的 recipient 必须使用以下 canonical actor ID，不得使用显示名或别名："
+            + "；".join(
+                f"{item['id']}（{item['display_name']}）" for item in self.recipient_catalog
+            )
+            + "。"
+            if self.recipient_catalog
+            else "communicate 的 recipient 必须使用 canonical actor ID，不得使用显示名或别名。"
+        )
         messages = [
             {
                 "role": "system",
@@ -90,7 +105,8 @@ class ModelDecisionInterpreter:
                     "只可使用 communicate、act、update_plan、schedule_followup。"
                     "不得伪造 actor_id/run_id/wake_id，不得加入用户没有表达的不可逆选择。"
                     "返回严格 JSON：{summary:string,operations:[{tool:string,arguments:object}]}。"
-                    "communicate 参数 recipient/content；act 参数 action/description/target；"
+                    f"communicate 参数 recipient/content；{recipient_rule}"
+                    "act 参数 action/description/target；"
                     "prepare/hold 的 target 只能使用 private_perspective.resources 中的键或当前位置；"
                     "update_plan 参数 objective/steps/rationale/belief_updates；"
                     "schedule_followup 参数 after_days/purpose。"

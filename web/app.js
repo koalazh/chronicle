@@ -37,6 +37,31 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function decisionOutcomeMarkup(decision) {
+  return (decision.operation_results || [])
+    .map((operation) => {
+      if (operation.status === "COMMITTED" && operation.tool === "communicate") {
+        const arrival = operation.arrival_tick == null ? "" : `，预计第 ${operation.arrival_tick} 日抵达`;
+        return `<small class="decision-outcome committed">已发出致${escapeHtml(operation.recipient)}${arrival}</small>`;
+      }
+      if (operation.status === "REJECTED") {
+        const recipient = operation.recipient ? `（致${escapeHtml(operation.recipient)}）` : "";
+        return `<small class="decision-outcome rejected">未执行${recipient}：${escapeHtml(operation.reason || "这项请求未执行")}</small>`;
+      }
+      return "";
+    })
+    .join("");
+}
+
+function decisionResultNotice(result) {
+  const rejected = (result?.operations || []).filter((operation) => operation.status === "REJECTED");
+  if (!rejected.length) return "";
+  const committed = (result?.operations || []).filter((operation) => operation.status === "COMMITTED").length;
+  return committed
+    ? `决定已入卷，但有 ${rejected.length} 项请求未执行；书案已标出。`
+    : "决定已入卷，但没有请求真正执行；书案已标出。";
+}
+
 async function api(path, options = {}) {
   const { timeoutMs = 180000, ...requestOptions } = options;
   const controller = new AbortController();
@@ -434,12 +459,14 @@ function deskPage() {
     .join("");
   const decisions = (view?.decisions || [])
     .slice(-5)
-    .map((item) => `<li><span>第 ${item.tick} 日</span>${escapeHtml(item.summary)}</li>`)
+    .map(
+      (item) => `<li><span>第 ${item.tick} 日</span>${escapeHtml(item.summary)}${decisionOutcomeMarkup(item)}</li>`,
+    )
     .join("");
   const outgoing = (view?.outgoing_messages || [])
     .slice(-5)
     .map(
-      (item) => `<li><span>${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorNames[item.recipient])}</span>${escapeHtml(item.content)}</li>`,
+      (item) => `<li><span>${item.source === "checkpoint" ? "场景起始信" : "本局决定"} · ${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorNames[item.recipient])}</span>${escapeHtml(item.content)}</li>`,
     )
     .join("");
   const resolved = (view?.commitments || [])
@@ -475,15 +502,25 @@ function deskPage() {
     : decisionState === "FAILED"
       ? "这一笔处理失败；请先核对这一局的状态。"
       : "结果尚未确认，先保留这一页。";
+  const canContinue = state.active.can_continue !== false;
+  const continueCopy = canContinue
+    ? "这一日已入卷；可以继续推进下一件有意义的事。"
+    : "当前没有可推进事件，可以封存这一局。";
   const decisionDesk = decisionLocked
     ? `<div class="pending-folio ${decisionSlotCommitted() ? "settled" : ""}" role="status" aria-live="polite" aria-busy="${state.activity || runtimePending() ? "true" : "false"}">
         <span class="activity-stamp" aria-hidden="true">卷</span>
-        <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? "<small>当前没有新的触发；可以封存这一局。</small>" : ""}</div>
+        <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? `<small>${continueCopy}</small>` : ""}</div>
       </div>`
     : `<label for="decision">命令、回信或等待的理由</label>
         <textarea id="decision" rows="8" placeholder="例如：先向关外追问通行与指挥条件，两日后若仍无北京的可靠答复，再重新比较。">${escapeHtml(state.draftDecision)}</textarea>
         <button class="primary wide" data-action="submit-decision">送入这段历史</button>
         <button class="quiet wide" data-action="silence">暂不追加命令，继续</button>`;
+  const deskContinue = decisionSlotCommitted()
+    ? `<footer class="continue-bar desk-continue">
+        <div><span>下一件有意义的事</span><small>送达、约定到期或主体的新行动</small></div>
+        <button class="primary" data-action="continue-run" ${runMutationLocked() || !canContinue ? "disabled" : ""}>${canContinue ? "继续推进" : "暂无可推进事件"}</button>
+      </footer>`
+    : "";
   return chrome(`
     ${runHeader("吴三桂的书案", "你只能看见抵达山海关的消息；北京与辽西仍会在视野之外行动。")}
     <section class="desk-layout">
@@ -512,6 +549,7 @@ function deskPage() {
         <h2>${decisionSlotCommitted() ? "这一日已入卷" : "写下一项决定"}</h2>
         <p>可以在一句话里同时写信、准备行动并约定何时重新判断。世界只接受你有权做的部分。</p>
         ${decisionDesk}
+        ${deskContinue}
       </aside>
     </section>
   `);
@@ -759,21 +797,29 @@ async function startRun(mode) {
   go(mode === "WATCH" ? "watch" : "desk");
 }
 
-async function continueRun(seq = state.activity?.seq) {
+async function continueRun(seq = state.activity?.seq, resultNotice = "") {
+  const previousTick = Number(state.active.current_tick);
   const result = await api(`/api/runs/${state.active.id}/continue`, { method: "POST", body: "{}" });
   state.active = result.run;
   const committed = result.run?.human_decision;
+  const currentTick = Number(result.run?.current_tick);
+  const tickChanged = currentTick > previousTick;
   if (
     result.advanced ||
     (committed?.state === "COMMITTED" && Number(committed.tick) === Number(result.run.current_tick))
   ) {
     state.draftDecision = "";
   }
-  state.notice = result.advanced
+  state.notice = result.advanced && tickChanged
     ? "时间向前走到了下一个有意义的时刻。"
-    : committed?.state === "COMMITTED" && Number(committed.tick) === Number(result.run.current_tick)
-      ? "这一日已经入卷；当前没有新的触发，可以封存这一局。"
-      : "此刻没有新的触发；可以封存这一局。";
+    : result.advanced
+      ? "这一刻已经处理，可以继续核对下一件事。"
+      : result.run?.can_continue !== false
+        ? "这一日已经入卷；还有事件可以继续推进。"
+        : committed?.state === "COMMITTED" && Number(committed.tick) === Number(result.run.current_tick)
+          ? "这一日已经入卷；当前没有可推进事件，可以封存这一局。"
+          : "当前没有可推进事件，可以封存这一局。";
+  if (resultNotice) state.notice = resultNotice;
   await loadRunView();
   if (seq && currentActivity(seq)) state.activity.tick = state.active.current_tick;
 }
@@ -853,7 +899,7 @@ async function submitDecision(silence = false, capturedText = "", seq) {
   }
   state.notice = result.silence ? "你选择沉默，世界仍会继续。" : result.summary;
   setActivityPhase(seq, "advancing");
-  await continueRun(seq);
+  await continueRun(seq, decisionResultNotice(result));
 }
 
 async function reconcileDecision(seq, runId, tick) {

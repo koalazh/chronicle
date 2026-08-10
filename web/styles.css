@@ -166,6 +166,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .desk-record-columns ul { margin: 0; padding: 0; list-style: none; }
 .desk-record-columns li { padding: 12px 0; border-top: 1px solid var(--line-soft); color: var(--ink-soft); font-family: var(--serif); font-size: 12px; line-height: 1.7; }
 .desk-record-columns li span { display: block; color: var(--red); font-family: var(--sans); font-size: 9px; letter-spacing: .08em; }
+.decision-outcome { display: block; margin-top: 4px; font-family: var(--sans); font-size: 10px; line-height: 1.6; }
+.decision-outcome.committed { color: var(--blue); }
+.decision-outcome.rejected { color: var(--red); }
+.decision-desk .desk-continue { max-width: none; margin-left: 0; margin-right: 0; }
 .decision-desk { padding: 45px 0 40px 45px; background: rgba(255,255,255,.16); }
 .decision-desk h2 { margin: 0 0 15px; font-family: var(--serif); font-size: 34px; font-weight: 500; }
 .decision-desk > p:not(.kicker) { color: var(--ink-soft); line-height: 1.8; font-size: 12px; }

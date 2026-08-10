@@ -114,7 +114,12 @@ def test_frontend_uses_a_scroll_activity_state_and_keeps_decisions_locked():
         'error.code === "decision_failed" && error.state === "FAILED"',
         "history.replaceState",
         "setActivityPhase(seq, \"advancing\")",
+        "can_continue",
+        "desk-continue",
+        "operation_results",
+        "场景起始信",
     ):
         assert required in source
 
     assert "当前模拟日已经提交过决定" not in source
+    assert "当前没有新的触发；可以封存这一局。" not in source

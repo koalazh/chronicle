@@ -832,7 +832,17 @@ class CrisisRunEngine:
         except sqlite3.IntegrityError as exc:
             raise self._human_decision_conflict(run_id, tick) from exc
         selected = interpreter or (
-            ModelDecisionInterpreter(self.config)
+            ModelDecisionInterpreter(
+                self.config,
+                recipient_catalog=tuple(
+                    {
+                        "id": actor.id,
+                        "display_name": actor.display_name,
+                    }
+                    for actor in self.pack.crisis.actors
+                    if actor.id != "wu-sangui"
+                ),
+            )
             if run["runtime_mode"] == "live"
             else FixtureDecisionInterpreter()
         )
@@ -1882,12 +1892,19 @@ class CrisisRunEngine:
         if run is None or run["kind"] != "CRISIS":
             raise CrisisRunError("Run not found")
         controllers = json.loads(run["controller_map_json"])
+        maximum_tick = json.loads(run["simulation_boundary_json"])["maximum_tick"]
+        next_tick = self._next_tick(run_id)
         return {
             "id": run_id,
             "mode": "TAKEOVER" if "HUMAN" in controllers.values() else "WATCH",
             "status": run["status"],
             "current_tick": int(run["current_tick"]),
-            "maximum_tick": json.loads(run["simulation_boundary_json"])["maximum_tick"],
+            "maximum_tick": maximum_tick,
+            "can_continue": (
+                run["status"] == "ACTIVE"
+                and next_tick is not None
+                and next_tick < maximum_tick
+            ),
             "runtime_mode": run["runtime_mode"],
             "runtime_phase": run.get("runtime_phase", "READY"),
             "runtime_error_code": run.get("runtime_error_code", ""),
@@ -1929,6 +1946,37 @@ class CrisisRunEngine:
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
+    def _human_decision_operation_results(self, run_id: str, tick: int) -> list[dict[str, Any]]:
+        wake = next(
+            (
+                item
+                for item in self.db.crisis_wakes(run_id, tick=tick)
+                if item["actor_id"] == "wu-sangui"
+                and item["wake_type"] == "DECISION"
+            ),
+            None,
+        )
+        if wake is None:
+            return []
+        results: list[dict[str, Any]] = []
+        for operation in self.db.crisis_wake_operations(wake["id"]):
+            result = {
+                "tool": operation["tool_name"],
+                "status": operation["status"],
+            }
+            if operation["tool_name"] == "communicate":
+                recipient = str(operation["payload"].get("recipient") or "")
+                actor = self.pack.actor_by_id.get(recipient)
+                result["recipient"] = actor.display_name if actor else "未识别收件人"
+                if operation["status"] == "COMMITTED":
+                    result["arrival_tick"] = operation["result"].get("arrival_tick")
+                elif operation["result"].get("code") == "invalid_recipient":
+                    result["reason"] = "收件人无法识别"
+                else:
+                    result["reason"] = "这项请求未执行"
+            results.append(result)
+        return results
+
     def product_perspective(self, run_id: str, actor_id: str) -> dict[str, Any]:
         if actor_id not in self.pack.actor_by_id:
             raise CrisisRunError("Actor not found")
@@ -1965,11 +2013,18 @@ class CrisisRunEngine:
                     {
                         "tick": int(event["tick"]),
                         "summary": str(event["payload"]["summary"]),
+                        "operation_results": self._human_decision_operation_results(
+                            run_id, int(event["tick"])
+                        ),
                     }
                 )
             elif event["event_type"] == "HUMAN_SILENCE":
                 decisions.append(
-                    {"tick": int(event["tick"]), "summary": "暂不追加命令，继续观察。"}
+                    {
+                        "tick": int(event["tick"]),
+                        "summary": "暂不追加命令，继续观察。",
+                        "operation_results": [],
+                    }
                 )
         return {
             "actor": {"id": actor.id, "display_name": actor.display_name},

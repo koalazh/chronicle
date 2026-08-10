@@ -40,7 +40,7 @@ V3 创建 live Run 时会立即创建该局所需的 Run-scoped Profiles，并�
 1. 找到并停止旧的项目私有 Gateway；未知或全局进程不要直接终止；
 2. 在页面创建 live Watch 或 Takeover；
 3. 使用项目私有 Hermes Home 启动 Gateway，使它加载本局 Profile/MCP 注册；
-4. 运行 `uv run chronicle doctor`，确认状态为 `READY`；
+4. 运行 `uv run chronicle doctor`，确认状态为 `READY`，并确认 root Gateway probe 没有 401；
 5. 回到页面点击“继续”。
 
 命令示例：
@@ -54,9 +54,9 @@ V3 不需要先运行旧 `bootstrap` 才能创建危局主体；`bootstrap` 只�
 
 ## 4. READY 到底证明什么
 
-对当前 live Run，`READY` 至少检查：Source、Scenario、Crisis Pack 和 schema v7 可加载；Snapshot tick/hash 与 Ledger cursor 对齐；每个 Agent binding 都对应存在的 Profile；Profile identity、Run/Actor marker、唯一 token hash、Memory lineage 与 Life State 对齐；没有 RUNNING/STAGED/FAILED Wake；已完成 Wake 的 Session 非空且唯一；Gateway health、Profile route、cross-profile key isolation 和四工具 MCP discovery 通过；Commitment 与 `COMMITMENT_DUE` Wake 一一对应。
+对当前 live Run，`READY` 至少检查：Source、Scenario、Crisis Pack 和 schema v7 可加载；Snapshot tick/hash 与 Ledger cursor 对齐；每个 Agent binding 都对应存在的 Profile；Profile identity、Run/Actor marker、唯一 token hash、Memory lineage 与 Life State 对齐；没有 RUNNING/STAGED/FAILED Wake；已完成 Wake 的 Session 非空且唯一；Gateway health、root/API probe、Profile route、cross-profile key isolation 和四工具 MCP server discovery 通过；Commitment 与 `COMMITMENT_DUE` Wake 一一对应。第一次 live Agent `ORIENT` 完成后，还必须有已提交的 World operation，作为 Gateway 实际暴露 World MCP 的证据。
 
-`/v1/toolsets` 只报告 builtin `memory`，不能代替 `hermes mcp test`。READY 是能力与隔离前置条件，不证明任何一次 Agent Wake 已经完成，也不证明消息已经送达或 Run 已正确封存。
+`/v1/toolsets` 只报告 builtin `memory`，不能代替 `hermes mcp test`；但 `hermes mcp test` 只证明独立 MCP server 能启动和发现工具，也不能单独证明 Gateway Profile 已加载它。READY 是能力与隔离前置条件；第一次 ORIENT 的 World operation 失败时，Run 会停止推进，不会把缺少工具伪装成合法 no-op。它仍不证明消息已经送达或 Run 已正确封存。
 
 ## 5. 数据迁移
 

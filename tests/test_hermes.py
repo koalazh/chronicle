@@ -116,6 +116,7 @@ def test_probe_collects_profile_routes_toolsets_and_key_isolation(monkeypatch, a
     assert result.profile_toolsets == {profile: ("memory",) for profile in PROFILE_NAMES.values()}
     assert result.valid_profile_status == 200
     assert result.cross_profile_status == 401
+    assert result.errors == ()
 
 
 def test_live_wake_does_not_fallback_to_fixture_on_session_failure(host, app_config, monkeypatch):

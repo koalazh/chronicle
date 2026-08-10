@@ -54,9 +54,15 @@ def test_takeover_api_enforces_perspective_lock_and_accepts_multi_action_silence
         f"/api/runs/{run_id}/decision",
         json={"text": "向关外说明条件，并在两日后重新比较。"},
     )
+    duplicate = client.post(
+        f"/api/runs/{run_id}/decision",
+        json={"text": "同一模拟日再次提交。"},
+    )
     silence = client.post(f"/api/runs/{run_id}/decision", json={"text": ""})
 
     assert decision.status_code == 200
+    assert duplicate.status_code == 409
+    assert "当前模拟日已经提交过决定" in duplicate.json()["detail"]
     assert len(decision.json()["operations"]) == 3
     assert silence.json()["silence"] is True
     assert client.post(f"/api/runs/{run_id}/seal", json={}).status_code == 200

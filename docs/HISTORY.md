@@ -24,7 +24,7 @@ History 通过 `/api/history` 提供来源、断言、证据状态、争议和�
 
 ## Checkpoint 之后
 
-后来主体行动统一标为 `REFERENCE_ONLY`：可以在 History 和封存后的回看中帮助用户比较“后来发生过什么”，但不进入 scheduler、Agent prompt 或 Human perspective 作为行动命令。与主体当前选择无关的外生事实才可能标为 `EXOGENOUS`；需要检查前提的未来锚点可使用 `CONDITIONAL_ANCHOR`，但第一场危局不把主体未来行动写成强制脚本。
+后来主体行动统一标为 `REFERENCE_ONLY`：可以在 History 页面帮助用户比较“后来发生过什么”，但当前封存后的 Run Replay 只回放已经持久化的分支，不注入这些锚点。它们也不进入 scheduler、Agent prompt 或 Human perspective 作为行动命令。与主体当前选择无关的外生事实才可能标为 `EXOGENOUS`；需要检查前提的未来锚点可使用 `CONDITIONAL_ANCHOR`，但第一场危局不把主体未来行动写成强制脚本。
 
 ## Perspective 边界
 

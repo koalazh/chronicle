@@ -45,6 +45,7 @@ class HermesProbeResult:
     def ready_for(self, profile: str) -> bool:
         return (
             self.health
+            and not self.errors
             and profile in self.profiles
             and self.profile_status.get(profile) == 200
             and self.profile_toolsets.get(profile) == ("memory",)
@@ -54,6 +55,7 @@ class HermesProbeResult:
         required = profiles or list(self.profile_status)
         return (
             bool(required)
+            and not self.errors
             and all(self.ready_for(profile) for profile in required)
             and self.valid_profile_status == 200
             and self.cross_profile_status in {401, 403}
@@ -539,7 +541,11 @@ def materialize_crisis_profiles(
                 "world_server_name": world_server_name,
             }
         if records:
-            _write_gateway_env(config.hermes_home, next(iter(records.values()))["profile_key"])
+            existing_gateway_key = _read_env_file(config.hermes_home / ".env").get("API_SERVER_KEY", "")
+            _write_gateway_env(
+                config.hermes_home,
+                existing_gateway_key or next(iter(records.values()))["profile_key"],
+            )
             _sync_gateway_crisis_mcp(config, records)
     except Exception as exc:
         for profile_home in reversed(installed):

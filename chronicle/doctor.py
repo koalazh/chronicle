@@ -263,6 +263,13 @@ def doctor(config: AppConfig) -> dict[str, Any]:
     api_probe = probe(config, profiles) if hermes_ok and profiles_ok else None
     if api_probe:
         add("shared_api_listener", api_probe.health, "health reachable" if api_probe.health else "not reachable")
+        add(
+            "gateway_api_probe",
+            not api_probe.errors,
+            "root and Profile probes passed"
+            if not api_probe.errors
+            else "; ".join(api_probe.errors),
+        )
         profile_list = profiles
         routing_ok = all(api_probe.profile_status.get(profile) == 200 for profile in profile_list) and all(
             profile in api_probe.profiles for profile in profile_list
@@ -310,7 +317,33 @@ def doctor(config: AppConfig) -> dict[str, Any]:
                 "world_mcp_discovery",
                 len(discovered) == len(profile_list)
                 and all(tools == WORLD_TOOLS for tools in discovered.values()),
-                str({profile: list(tools) for profile, tools in discovered.items()}),
+                "standalone MCP server: "
+                + str({profile: list(tools) for profile, tools in discovered.items()})
+                + "; this does not prove Gateway Profile execution",
+            )
+            completed_orients = [
+                wake
+                for wake in db.crisis_wakes(run_id, status="COMPLETED")
+                if wake["wake_type"] == "ORIENT"
+                and controllers.get(str(wake["actor_id"])) == "AGENT"
+            ]
+            world_execution_ok = not completed_orients or all(
+                any(
+                    operation["tool_name"] in WORLD_TOOLS
+                    and operation["status"] == "COMMITTED"
+                    for operation in db.crisis_wake_operations(wake["id"])
+                )
+                for wake in completed_orients
+            )
+            add(
+                "world_mcp_execution",
+                world_execution_ok,
+                "deferred until the first live Agent ORIENT"
+                if not completed_orients
+                else "completed live ORIENTs have committed World operations"
+                if world_execution_ok
+                else "a completed live ORIENT has no committed World operation",
+                required=bool(completed_orients),
             )
     else:
         add("shared_api_listener", False, "probe skipped until Chronicle profiles are bootstrapped")
@@ -320,6 +353,7 @@ def doctor(config: AppConfig) -> dict[str, Any]:
         if live_v3:
             add("world_mcp_configuration", False, "probe skipped until V3 Profiles are available")
             add("world_mcp_discovery", False, "live MCP discovery unavailable")
+            add("world_mcp_execution", False, "live Gateway execution evidence unavailable")
     add("memory_evolution", "curator" not in config_text.casefold(), "automatic curator path is not in actor distribution")
     ready = all(item["ok"] for item in checks if item["required"])
     return {

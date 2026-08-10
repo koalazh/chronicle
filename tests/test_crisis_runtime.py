@@ -92,6 +92,20 @@ def test_takeover_uses_same_engine_but_only_agent_actors_orient(app_config):
         engine.create(RunMode.WATCH)
 
 
+def test_live_orient_without_world_operation_fails_closed(app_config):
+    class SilentHermesDriver:
+        source = "hermes"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            return ActorTurnResult(summary="没有调用世界工具。", session_id=f"session-{actor_id}")
+
+    engine = CrisisRunEngine(app_config, actor_driver=SilentHermesDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    with pytest.raises(CrisisRunError, match="actor wake failed"):
+        engine.advance_one(run_id)
+
+
 def test_live_watch_and_takeover_materialize_only_agent_controlled_profiles(
     app_config, tmp_path, monkeypatch
 ):

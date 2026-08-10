@@ -74,6 +74,11 @@ async def test_world_mcp_exposes_only_identity_free_crisis_tools():
 def test_eager_crisis_profiles_are_owned_and_world_tool_only(
     app_config, monkeypatch
 ):
+    app_config.hermes_home.mkdir(parents=True)
+    (app_config.hermes_home / ".env").write_text(
+        "API_SERVER_KEY=stable-gateway-key\n", encoding="utf-8"
+    )
+
     def fake_install(config, args, timeout=30):
         profile = args[args.index("--name") + 1]
         shutil.copytree(
@@ -110,6 +115,7 @@ def test_eager_crisis_profiles_are_owned_and_world_tool_only(
     config = yaml.safe_load((profile_home / "config.yaml").read_text(encoding="utf-8"))
     marker = json.loads((profile_home / "chronicle-genesis.json").read_text(encoding="utf-8"))
     profile_env = (profile_home / ".env").read_text(encoding="utf-8")
+    gateway_env = (app_config.hermes_home / ".env").read_text(encoding="utf-8")
 
     world_server = record["world_server_name"]
     assert config["platform_toolsets"]["api_server"] == ["memory", world_server]
@@ -117,6 +123,7 @@ def test_eager_crisis_profiles_are_owned_and_world_tool_only(
     assert set(config["mcp_servers"]) == {world_server}
     assert config["mcp_servers"][world_server]["env"]["CHRONICLE_WORLD_TOKEN"] == "${CHRONICLE_WORLD_TOKEN}"
     assert marker["worldline_id"] == "run-12345678abcdefgh"
+    assert "API_SERVER_KEY=stable-gateway-key" in gateway_env
     assert marker["crisis_id"] == "before-shanhaiguan"
     assert marker["genesis_hash"] == "genesis-hash-test"
     assert marker["initial_memory_snapshot"]["memory_hash"] == content_hash("")

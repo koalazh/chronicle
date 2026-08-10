@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import difflib
 import json
+import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ class CrisisRunError(ValueError):
 
 
 class CrisisRunConflict(CrisisRunError):
-    """Only one playable Run can be active."""
+    """A Run state conflicts with the requested mutation."""
 
 
 class RunMode(StrEnum):
@@ -638,23 +639,38 @@ class CrisisRunEngine:
             return {"silence": True, "events": [event, *fulfilled_events], "operations": []}
 
         tick = int(run["current_tick"])
+        existing_decision = next(
+            (
+                wake
+                for wake in self.db.crisis_wakes(run_id, tick=tick)
+                if wake["actor_id"] == "wu-sangui"
+                and wake["wake_type"] == "DECISION"
+                and wake["trigger_event_id"] == ""
+            ),
+            None,
+        )
+        if existing_decision is not None:
+            raise CrisisRunConflict("当前模拟日已经提交过决定，请先继续推进。")
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
         projection = copy.deepcopy(snapshot["projection"])
         perspective = self._perspective_from(run_id, "wu-sangui", projection)
-        wake = self.db.create_crisis_wake(
-            {
-                "worldline_id": run_id,
-                "actor_id": "wu-sangui",
-                "wake_type": "DECISION",
-                "tick": tick,
-                "status": "RUNNING",
-                "source": "human",
-                "hermes_session_id": f"human-{uuid.uuid4().hex[:12]}",
-                "frozen_perspective": perspective,
-            }
-        )
+        try:
+            wake = self.db.create_crisis_wake(
+                {
+                    "worldline_id": run_id,
+                    "actor_id": "wu-sangui",
+                    "wake_type": "DECISION",
+                    "tick": tick,
+                    "status": "RUNNING",
+                    "source": "human",
+                    "hermes_session_id": f"human-{uuid.uuid4().hex[:12]}",
+                    "frozen_perspective": perspective,
+                }
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CrisisRunConflict("当前模拟日已经提交过决定，请先继续推进。") from exc
         selected = interpreter or (
             ModelDecisionInterpreter(self.config)
             if run["runtime_mode"] == "live"
@@ -1425,6 +1441,18 @@ class CrisisRunEngine:
                 results[wake["id"]] = self.actor_driver.run_wake(
                     wake["actor_id"], active_wake, perspective, world
                 )
+                if (
+                    self.actor_driver.source == "hermes"
+                    and wake["wake_type"] == CrisisWakeType.ORIENT.value
+                    and not any(
+                        operation["tool_name"] == "update_plan"
+                        and operation["status"] in {"PROPOSED", "COMMITTED"}
+                        for operation in self.db.crisis_wake_operations(wake["id"])
+                    )
+                ):
+                    raise CrisisRunError(
+                        "live ORIENT did not produce a World MCP update_plan operation"
+                    )
                 if results[wake["id"]].session_id:
                     self.db.update_crisis_wake(
                         wake["id"], hermes_session_id=results[wake["id"]].session_id

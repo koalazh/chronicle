@@ -75,3 +75,16 @@ def test_product_start_is_live_only_and_fail_closed_in_the_ui():
     start_run = source[source.index("async function startRun"):source.index("async function continueRun")]
     assert 'state.config = await api("/api/config")' in start_run
     assert start_run.index('state.config = await api("/api/config")') < start_run.index("loadRunView()")
+
+
+def test_frontend_surfaces_boot_failure_instead_of_staying_on_placeholder():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    render = source[source.index("function render"):source.index("async function refreshActive")]
+
+    assert "观测台暂时打不开" in render
+    assert "state.error" in render
+    assert 'data-action="retry-boot"' in render
+
+    boot = source[source.index("async function boot"):]
+    assert "const bootTimeoutMs = 15_000" in boot
+    assert 'api("/api/config", { timeoutMs: bootTimeoutMs })' in boot

@@ -34,13 +34,14 @@ function escapeHtml(value = "") {
 }
 
 async function api(path, options = {}) {
+  const { timeoutMs = 180000, ...requestOptions } = options;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
-      ...options,
+      ...requestOptions,
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      headers: { "Content-Type": "application/json", ...(requestOptions.headers || {}) },
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || `请求失败（${response.status}）`);
@@ -460,7 +461,10 @@ function loadingBlock() {
 
 function render() {
   if (!state.crisis || !state.config) {
-    root.innerHTML = '<div class="boot-state"><span>甲申</span><p>正在打开这段时间</p></div>';
+    const bootMessage = state.error
+      ? `<p>观测台暂时打不开</p><small>${escapeHtml(state.error)}</small><button class="secondary" data-action="retry-boot">重新打开</button>`
+      : "<p>正在打开这段时间</p>";
+    root.innerHTML = `<div class="boot-state${state.error ? " boot-error" : ""}"><span>甲申</span>${bootMessage}</div>`;
     return;
   }
   const pages = {
@@ -476,8 +480,8 @@ function render() {
   root.innerHTML = (pages[state.page] || homePage)();
 }
 
-async function refreshActive() {
-  const payload = await api("/api/runs/active");
+async function refreshActive(timeoutMs = 180000) {
+  const payload = await api("/api/runs/active", { timeoutMs });
   state.active = payload.run;
 }
 
@@ -592,6 +596,7 @@ root.addEventListener("click", (event) => {
   const capturedDecision = document.querySelector("#decision")?.value || "";
   const actions = {
     "go-home": () => go("home"),
+    "retry-boot": () => boot(),
     "start-watch": () => runAction(() => startRun("WATCH")),
     "start-takeover": () => runAction(() => startRun("TAKEOVER")),
     "open-active": () => go(state.active.mode === "WATCH" ? "watch" : "desk"),
@@ -624,10 +629,16 @@ window.addEventListener("hashchange", () => {
 });
 
 async function boot() {
+  state.error = "";
   route();
+  render();
   try {
-    [state.config, state.crisis] = await Promise.all([api("/api/config"), api("/api/crisis")]);
-    await refreshActive();
+    const bootTimeoutMs = 15_000;
+    [state.config, state.crisis] = await Promise.all([
+      api("/api/config", { timeoutMs: bootTimeoutMs }),
+      api("/api/crisis", { timeoutMs: bootTimeoutMs }),
+    ]);
+    await refreshActive(bootTimeoutMs);
     if (state.active && !location.hash) state.page = state.active.mode === "WATCH" ? "watch" : "desk";
     await loadPageData();
   } catch (error) {

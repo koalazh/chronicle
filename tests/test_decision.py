@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from chronicle.crisis_runtime import CrisisRunEngine, RunMode
+from chronicle.crisis_runtime import CrisisRunConflict, CrisisRunEngine, RunMode
 from chronicle.decision import (
     DecisionOperation,
     FixtureDecisionInterpreter,
@@ -106,6 +106,31 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
     lifetime = engine.db.worldline_lifetime(run_id, "wu-sangui")
     assert lifetime["plan"][0]["objective"].startswith("向关外")
     assert any(commitment["status"] == "DUE" for commitment in lifetime["commitments"])
+
+
+def test_repeated_human_decision_same_tick_is_a_controlled_conflict(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+
+    engine.submit_human_decision(
+        run_id,
+        "向关外说明条件，并在两日后重新比较。",
+        interpreter=FixtureDecisionInterpreter(),
+    )
+
+    with pytest.raises(CrisisRunConflict, match="当前模拟日已经提交过决定"):
+        engine.submit_human_decision(
+            run_id,
+            "再次提交同一模拟日的决定。",
+            interpreter=FixtureDecisionInterpreter(),
+        )
+
+    decisions = [
+        wake
+        for wake in engine.db.crisis_wakes(run_id, tick=0)
+        if wake["actor_id"] == "wu-sangui" and wake["wake_type"] == "DECISION"
+    ]
+    assert len(decisions) == 1
 
 
 def test_human_desk_persists_known_state_outbox_decisions_and_resolves_due_matters(

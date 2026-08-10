@@ -14,6 +14,10 @@ const state = {
   replayLens: "then",
   replayActor: "wu-sangui",
   busy: false,
+  activity: null,
+  operationSeq: 0,
+  viewSeq: 0,
+  draftDecision: "",
   notice: "",
   error: "",
 };
@@ -44,7 +48,14 @@ async function api(path, options = {}) {
       headers: { "Content-Type": "application/json", ...(requestOptions.headers || {}) },
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || `请求失败（${response.status}）`);
+    if (!response.ok) {
+      const detail = payload.detail;
+      const message = typeof detail === "object" && detail !== null ? detail.message : detail;
+      const error = new Error(message || `请求失败（${response.status}）`);
+      error.status = response.status;
+      if (typeof detail === "object" && detail !== null) Object.assign(error, detail);
+      throw error;
+    }
     return payload;
   } finally {
     clearTimeout(timeout);
@@ -71,20 +82,89 @@ function runtimeLabel() {
   return "模型已配置；主体服务尚待启动";
 }
 
+function interactionLocked() {
+  return state.busy || Boolean(state.activity);
+}
+
+function activityText(activity = state.activity) {
+  if (!activity) return null;
+  const copy = {
+    decision: {
+      submitting: ["决定已收，正在入卷", "书案暂不接受第二笔落笔。"],
+      advancing: ["历史正在向前展开", "正在寻找下一个有意义的时刻。"],
+      reconciling: ["正在核对这一笔是否已经入卷", "结果尚未确认，先保留这一页。"],
+      failed: ["这一笔需要核对", "暂不重新落笔，先确认这一局的状态。"],
+    },
+    continue: {
+      advancing: ["历史正在向前展开", "正在寻找下一个有意义的时刻。"],
+      reconciling: ["正在核对推进结果", "这一页还没有得到确定回音。"],
+    },
+    seal: {
+      sealing: ["正在封存这一卷", "把已经发生的事收进可回看的卷册。"],
+      reconciling: ["正在核对封存结果", "封存请求的结果尚未确认。"],
+    },
+  };
+  return copy[activity.kind]?.[activity.phase] || ["正在处理这一页", "请稍候，暂不能再次落笔。"];
+}
+
+function activityBanner() {
+  const activity = state.activity;
+  if (!activity) return "";
+  const [title, description] = activityText(activity);
+  const pending = activity.pendingText || "";
+  const reconcileAction = ["reconciling", "failed"].includes(activity.phase)
+    ? `<button class="quiet activity-reconcile" data-action="reconcile-run">核对这一页</button>`
+    : "";
+  return `<section class="activity-banner ${escapeHtml(activity.phase)}" role="status" aria-live="polite" aria-busy="true">
+    <span class="activity-stamp" aria-hidden="true">卷</span>
+    <div class="activity-copy"><span class="column-label">正在进行</span><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div>
+    ${pending ? `<p class="pending-folio-text">${escapeHtml(pending)}</p>` : ""}
+    ${reconcileAction}
+  </section>`;
+}
+
+function decisionSlotCommitted() {
+  return decisionSlotState() === "COMMITTED";
+}
+
+function decisionSlotState() {
+  const decision = state.active?.human_decision;
+  return decision && Number(decision.tick) === Number(state.active.current_tick)
+    ? decision.state
+    : "NONE";
+}
+
+function syncDecisionActivity() {
+  if (state.activity || state.active?.mode !== "TAKEOVER") return;
+  const decisionState = decisionSlotState();
+  if (!["RUNNING", "FAILED"].includes(decisionState)) return;
+  state.activity = {
+    kind: "decision",
+    phase: decisionState === "FAILED" ? "failed" : "reconciling",
+    pendingText: "",
+    seq: ++state.operationSeq,
+    runId: state.active.id,
+    tick: state.active.current_tick,
+  };
+  state.busy = true;
+}
+
 function chrome(content, { compact = false } = {}) {
+  const locked = interactionLocked();
+  const disabled = locked ? "disabled" : "";
   return `
     <header class="topbar">
-      <button class="brand" data-action="go-home" aria-label="回到甲申首页">
+      <button class="brand" data-action="go-home" aria-label="回到甲申首页" ${disabled}>
         <span class="brand-seal">甲</span><span>Chronicle · 甲申</span>
       </button>
       <nav class="main-nav" aria-label="主导航">
-        <button data-page="home" ${state.page === "home" ? 'aria-current="page"' : ""}>首页</button>
-        <button data-page="history" ${state.page === "history" ? 'aria-current="page"' : ""}>史实背景</button>
-        <button data-page="archive" ${state.page === "archive" ? 'aria-current="page"' : ""}>封存卷册</button>
+        <button data-page="home" ${state.page === "home" ? 'aria-current="page"' : ""} ${disabled}>首页</button>
+        <button data-page="history" ${state.page === "history" ? 'aria-current="page"' : ""} ${disabled}>史实背景</button>
+        <button data-page="archive" ${state.page === "archive" ? 'aria-current="page"' : ""} ${disabled}>封存卷册</button>
       </nav>
-      <button class="setup-link" data-page="setup">设置</button>
+      <button class="setup-link" data-page="setup" ${disabled}>设置</button>
     </header>
-    <main class="${compact ? "main compact" : "main"}">${content}</main>
+    <main class="${compact ? "main compact" : "main"}">${state.activity && !["watch", "desk"].includes(state.page) ? activityBanner() : ""}${content}</main>
     <div class="notice-stack" aria-live="polite">
       ${state.notice ? `<p class="notice">${escapeHtml(state.notice)}</p>` : ""}
       ${state.error ? `<p class="notice error">${escapeHtml(state.error)}</p>` : ""}
@@ -184,6 +264,7 @@ function corridorMarkup(corridor, actors, messages, options = {}) {
 
 function runHeader(title, lede) {
   const run = state.active;
+  const locked = interactionLocked();
   return `<header class="run-header">
     <div>
       <p class="kicker">山海关之前 · 第 ${run.current_tick} 日</p>
@@ -192,9 +273,9 @@ function runHeader(title, lede) {
     </div>
     <div class="run-actions">
       <span class="day-count">${run.current_tick}<small> / ${run.maximum_tick} 日</small></span>
-      <button class="quiet" data-action="seal-run">封存这一局</button>
+      <button class="quiet" data-action="seal-run" ${locked ? "disabled" : ""}>封存这一局</button>
     </div>
-  </header>`;
+  </header>${activityBanner()}`;
 }
 
 function watchPage() {
@@ -206,7 +287,7 @@ function watchPage() {
     ["dorgon", "多尔衮"],
   ]
     .map(
-      ([id, label]) => `<button data-lens="${id}" ${state.lens === id ? 'aria-current="true"' : ""}>${label}</button>`,
+      ([id, label]) => `<button data-lens="${id}" ${state.lens === id ? 'aria-current="true"' : ""} ${interactionLocked() ? "disabled" : ""}>${label}</button>`,
     )
     .join("");
   const body = state.lens === "world" ? worldLens() : actorLens();
@@ -216,7 +297,7 @@ function watchPage() {
     ${body}
     <footer class="continue-bar">
       <div><span>下一个有意义的时刻</span><small>送达、约定到期或主体的新行动</small></div>
-      <button class="primary" data-action="continue-run" ${state.busy || (state.active.runtime_mode === "live" && !state.config.hermes_ready) ? "disabled" : ""}>继续</button>
+      <button class="primary" data-action="continue-run" ${interactionLocked() || (state.active.runtime_mode === "live" && !state.config.hermes_ready) ? "disabled" : ""}>继续</button>
     </footer>
   `);
 }
@@ -325,6 +406,34 @@ function deskPage() {
       location: view?.location || "shanhaiguan",
     },
   ];
+  const committedDecision = (view?.decisions || [])
+    .slice()
+    .reverse()
+    .find((item) => Number(item.tick) === Number(state.active.current_tick));
+  const decisionState = decisionSlotState();
+  const decisionLocked = interactionLocked() || decisionState !== "NONE";
+  const busyCopy = activityText() || ["正在处理这一页", "请稍候，暂不能再次落笔。"];
+  const decisionCopy = state.activity?.pendingText || "";
+  const settledCopy = committedDecision?.summary || "这一日已经入卷。";
+  const summaryTitle = decisionState === "COMMITTED"
+    ? "这一日已经入卷"
+    : decisionState === "FAILED"
+      ? "这一笔需要核对"
+      : "正在核对这一笔";
+  const summaryCopy = decisionState === "COMMITTED"
+    ? settledCopy
+    : decisionState === "FAILED"
+      ? "这一笔处理失败；请先核对这一局的状态。"
+      : "结果尚未确认，先保留这一页。";
+  const decisionDesk = decisionLocked
+    ? `<div class="pending-folio ${decisionSlotCommitted() ? "settled" : ""}" role="status" aria-live="polite" aria-busy="${state.activity ? "true" : "false"}">
+        <span class="activity-stamp" aria-hidden="true">卷</span>
+        <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? "<small>当前没有新的触发；可以封存这一局。</small>" : ""}</div>
+      </div>`
+    : `<label for="decision">命令、回信或等待的理由</label>
+        <textarea id="decision" rows="8" placeholder="例如：先向关外追问通行与指挥条件，两日后若仍无北京的可靠答复，再重新比较。">${escapeHtml(state.draftDecision)}</textarea>
+        <button class="primary wide" data-action="submit-decision" ${state.active.runtime_mode === "live" && !state.config.hermes_ready ? "disabled" : ""}>送入这段历史</button>
+        <button class="quiet wide" data-action="silence" ${state.active.runtime_mode === "live" && !state.config.hermes_ready ? "disabled" : ""}>暂不追加命令，继续</button>`;
   return chrome(`
     ${runHeader("吴三桂的书案", "你只能看见抵达山海关的消息；北京与辽西仍会在视野之外行动。")}
     <section class="desk-layout">
@@ -350,12 +459,9 @@ function deskPage() {
       </div>
       <aside class="decision-desk">
         <p class="kicker">你要如何处置</p>
-        <h2>写下一项决定</h2>
+        <h2>${decisionSlotCommitted() ? "这一日已入卷" : "写下一项决定"}</h2>
         <p>可以在一句话里同时写信、准备行动并约定何时重新判断。世界只接受你有权做的部分。</p>
-        <label for="decision">命令、回信或等待的理由</label>
-        <textarea id="decision" rows="8" placeholder="例如：先向关外追问通行与指挥条件，两日后若仍无北京的可靠答复，再重新比较。"></textarea>
-        <button class="primary wide" data-action="submit-decision" ${state.busy || (state.active.runtime_mode === "live" && !state.config.hermes_ready) ? "disabled" : ""}>送入这段历史</button>
-        <button class="quiet wide" data-action="silence" ${state.busy || (state.active.runtime_mode === "live" && !state.config.hermes_ready) ? "disabled" : ""}>暂不追加命令，继续</button>
+        ${decisionDesk}
       </aside>
     </section>
   `);
@@ -483,20 +589,32 @@ function render() {
 async function refreshActive(timeoutMs = 180000) {
   const payload = await api("/api/runs/active", { timeoutMs });
   state.active = payload.run;
+  syncDecisionActivity();
 }
 
 async function loadRunView() {
-  if (!state.active) return;
-  if (state.active.mode === "WATCH") {
-    if (state.lens === "world") {
-      state.world = await api(`/api/runs/${state.active.id}/world`);
-      state.perspective = null;
+  const run = state.active;
+  if (!run) return;
+  const runId = run.id;
+  const lens = state.lens;
+  const page = state.page;
+  const viewSeq = ++state.viewSeq;
+  let world = null;
+  let perspective = null;
+  if (run.mode === "WATCH") {
+    if (lens === "world") {
+      world = await api(`/api/runs/${runId}/world`);
     } else {
-      state.perspective = await api(`/api/runs/${state.active.id}/perspective/${state.lens}`);
+      perspective = await api(`/api/runs/${runId}/perspective/${lens}`);
     }
   } else {
-    state.perspective = await api(`/api/runs/${state.active.id}/perspective/wu-sangui`);
+    perspective = await api(`/api/runs/${runId}/perspective/wu-sangui`);
   }
+  if (viewSeq !== state.viewSeq || state.active?.id !== runId || state.lens !== lens || state.page !== page) {
+    return;
+  }
+  state.world = world;
+  state.perspective = perspective;
 }
 
 async function loadPageData() {
@@ -506,17 +624,66 @@ async function loadPageData() {
   if (["watch", "desk"].includes(state.page)) await loadRunView();
 }
 
-async function runAction(action) {
+function currentActivity(seq) {
+  return state.activity?.seq === seq;
+}
+
+function setActivityPhase(seq, phase) {
+  if (!currentActivity(seq)) return;
+  state.activity.phase = phase;
+  state.busy = true;
+  render();
+}
+
+function finishActivity(seq) {
+  if (!currentActivity(seq)) return;
+  state.activity = null;
+  state.busy = false;
+}
+
+function unknownRequest(error) {
+  return error?.name === "AbortError" || !error?.status;
+}
+
+function errorText(error) {
+  return error?.message || "请求没有完成。";
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runAction(action, activity = null) {
+  if (interactionLocked()) return;
   state.error = "";
   state.notice = "";
   state.busy = true;
+  const seq = ++state.operationSeq;
+  if (activity) {
+    state.activity = {
+      ...activity,
+      seq,
+      runId: state.active?.id || "",
+      tick: state.active?.current_tick,
+    };
+  }
   render();
   try {
-    await action();
+    await action(seq);
   } catch (error) {
-    state.error = error.name === "AbortError" ? "请求等待过久，请重试。" : error.message;
+    if (activity && (unknownRequest(error) || error.status >= 500) && currentActivity(seq)) {
+      state.activity.phase = "reconciling";
+      state.error = "请求结果尚未确认；请先核对这一局的状态。";
+    } else {
+      state.error = error.name === "AbortError" ? "请求等待过久，请重试。" : errorText(error);
+      if (currentActivity(seq)) state.activity = null;
+    }
   } finally {
-    state.busy = false;
+    if (currentActivity(seq) && !["reconciling", "failed"].includes(state.activity.phase)) {
+      finishActivity(seq);
+    }
+    if (!state.activity) syncDecisionActivity();
+    state.busy = Boolean(state.activity);
     render();
   }
 }
@@ -531,14 +698,27 @@ async function startRun(mode) {
   state.lens = "world";
   if (result.start_error) state.notice = result.start_error;
   await loadRunView();
+  state.page = mode === "WATCH" ? "watch" : "desk";
   go(mode === "WATCH" ? "watch" : "desk");
 }
 
-async function continueRun() {
+async function continueRun(seq = state.activity?.seq) {
   const result = await api(`/api/runs/${state.active.id}/continue`, { method: "POST", body: "{}" });
   state.active = result.run;
-  state.notice = result.advanced ? "时间向前走到了下一个有意义的时刻。" : "此刻没有新的触发；可以封存这一局。";
+  const committed = result.run?.human_decision;
+  if (
+    result.advanced ||
+    (committed?.state === "COMMITTED" && Number(committed.tick) === Number(result.run.current_tick))
+  ) {
+    state.draftDecision = "";
+  }
+  state.notice = result.advanced
+    ? "时间向前走到了下一个有意义的时刻。"
+    : committed?.state === "COMMITTED" && Number(committed.tick) === Number(result.run.current_tick)
+      ? "这一日已经入卷；当前没有新的触发，可以封存这一局。"
+      : "此刻没有新的触发；可以封存这一局。";
   await loadRunView();
+  if (seq && currentActivity(seq)) state.activity.tick = state.active.current_tick;
 }
 
 async function sealRun() {
@@ -551,28 +731,130 @@ async function sealRun() {
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || "wu-sangui";
+  state.page = "replay";
   go("replay");
 }
 
-async function submitDecision(silence = false, capturedText = "") {
+async function submitDecision(silence = false, capturedText = "", seq) {
   const text = silence ? "" : capturedText.trim();
-  if (!silence && !text) throw new Error("请写下决定，或选择暂不追加命令。 ");
-  const result = await api(`/api/runs/${state.active.id}/decision`, {
-    method: "POST",
-    body: JSON.stringify({ text }),
-  });
+  if (!silence && !text) return;
+  const runId = state.active.id;
+  const tick = state.active.current_tick;
+  let result;
+  try {
+    result = await api(`/api/runs/${state.active.id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+  } catch (error) {
+    if (error.code === "decision_already_exists" && error.state === "COMMITTED") {
+      state.notice = "这一日已经入卷，正在向前推进。";
+      setActivityPhase(seq, "advancing");
+      await continueRun(seq);
+      return;
+    }
+    if (error.code === "decision_in_progress" && error.state === "RUNNING") {
+      await reconcileDecision(seq, runId, error.tick ?? tick);
+      return;
+    }
+    if (error.code === "decision_failed" && error.state === "FAILED") {
+      state.error = "这一笔处理失败；请先核对这一局的状态。";
+      setActivityPhase(seq, "failed");
+      return;
+    }
+    throw error;
+  }
   state.notice = result.silence ? "你选择沉默，世界仍会继续。" : result.summary;
-  await continueRun();
+  setActivityPhase(seq, "advancing");
+  await continueRun(seq);
+}
+
+async function reconcileDecision(seq, runId, tick) {
+  setActivityPhase(seq, "reconciling");
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const payload = await api("/api/runs/active", { timeoutMs: 15_000 });
+    if (!currentActivity(seq)) return;
+    if (!payload.run || payload.run.id !== runId) {
+      state.error = "这一局已经不在活动列表中，请打开封存卷册核对。";
+      return;
+    }
+    state.active = payload.run;
+    if (Number(payload.run.current_tick) !== Number(tick)) {
+      state.notice = "这一日已经被推进；先核对当前书案。";
+      state.draftDecision = "";
+      await loadRunView();
+      finishActivity(seq);
+      return;
+    }
+    const decision = payload.run.human_decision || {};
+    if (decision.state === "COMMITTED" && Number(decision.tick) === Number(tick)) {
+      setActivityPhase(seq, "advancing");
+      await continueRun(seq);
+      return;
+    }
+    if (decision.state === "FAILED") {
+      state.error = "这一笔处理失败；请先核对这一局的状态。";
+      setActivityPhase(seq, "failed");
+      return;
+    }
+    if (attempt < 3) await wait(1200);
+  }
+  state.notice = "仍未核对到确定结果；可以稍后再次核对这一页。";
+}
+
+async function reconcileActive() {
+  const activity = state.activity;
+  if (!activity || !["reconciling", "failed"].includes(activity.phase)) return;
+  const seq = activity.seq;
+  state.error = "";
+  setActivityPhase(seq, "reconciling");
+  try {
+    if (activity.kind === "decision") {
+      await reconcileDecision(seq, activity.runId, activity.tick);
+    } else if (activity.kind === "seal") {
+      await refreshActive(15_000);
+      if (!state.active) {
+        state.replay = await api(`/api/runs/${activity.runId}/replay`);
+        state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
+        state.replayActor = state.replay.run.human_actor || "wu-sangui";
+        state.page = "replay";
+        finishActivity(seq);
+      } else {
+        state.notice = "卷册仍在处理中；暂不重复封存。";
+      }
+    } else {
+      await refreshActive(15_000);
+      await loadRunView();
+      finishActivity(seq);
+    }
+  } catch (error) {
+    if (currentActivity(seq)) {
+      state.error = "仍未核对到确定结果，请稍后再次核对。";
+      state.activity.phase = "reconciling";
+    }
+  }
+  if (currentActivity(seq) && !["reconciling", "failed"].includes(state.activity.phase)) {
+    finishActivity(seq);
+  }
+  state.busy = Boolean(state.activity);
+  render();
 }
 
 async function openReplay(runId) {
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || "wu-sangui";
+  state.page = "replay";
   go("replay");
 }
 
 root.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-action]")?.dataset.action;
+  if (interactionLocked()) {
+    if (action === "reconcile-run") return reconcileActive();
+    event.preventDefault();
+    return;
+  }
   const page = event.target.closest("[data-page]")?.dataset.page;
   if (page) return go(page);
   const lens = event.target.closest("[data-lens]")?.dataset.lens;
@@ -592,7 +874,6 @@ root.addEventListener("click", (event) => {
   }
   const replayId = event.target.closest("[data-replay-id]")?.dataset.replayId;
   if (replayId) return runAction(() => openReplay(replayId));
-  const action = event.target.closest("[data-action]")?.dataset.action;
   const capturedDecision = document.querySelector("#decision")?.value || "";
   const actions = {
     "go-home": () => go("home"),
@@ -600,10 +881,23 @@ root.addEventListener("click", (event) => {
     "start-watch": () => runAction(() => startRun("WATCH")),
     "start-takeover": () => runAction(() => startRun("TAKEOVER")),
     "open-active": () => go(state.active.mode === "WATCH" ? "watch" : "desk"),
-    "continue-run": () => runAction(continueRun),
-    "seal-run": () => runAction(sealRun),
-    "submit-decision": () => runAction(() => submitDecision(false, capturedDecision)),
-    silence: () => runAction(() => submitDecision(true)),
+    "continue-run": () => runAction(continueRun, { kind: "continue", phase: "advancing" }),
+    "seal-run": () => runAction(sealRun, { kind: "seal", phase: "sealing" }),
+    "submit-decision": () => {
+      if (!capturedDecision.trim()) {
+        state.error = "请写下决定，或选择暂不追加命令。";
+        return render();
+      }
+      state.draftDecision = capturedDecision;
+      return runAction(
+        (seq) => submitDecision(false, capturedDecision, seq),
+        { kind: "decision", phase: "submitting", pendingText: capturedDecision.trim() },
+      );
+    },
+    silence: () => runAction(
+      (seq) => submitDecision(true, "", seq),
+      { kind: "decision", phase: "submitting", pendingText: "已选择不追加命令" },
+    ),
   };
   if (actions[action]) actions[action]();
 });
@@ -623,7 +917,18 @@ root.addEventListener("submit", (event) => {
   });
 });
 
+root.addEventListener("input", (event) => {
+  if (event.target.id === "decision" && !interactionLocked()) {
+    state.draftDecision = event.target.value;
+  }
+});
+
 window.addEventListener("hashchange", () => {
+  if (interactionLocked()) {
+    history.replaceState(null, "", `#/${state.page}`);
+    render();
+    return;
+  }
   route();
   runAction(loadPageData);
 });

@@ -193,9 +193,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return CrisisRunEngine(current_config())
 
     def crisis_http_error(exc: CrisisRunError) -> HTTPException:
+        if isinstance(exc, CrisisRunConflict):
+            detail: str | dict[str, Any] = {
+                "code": exc.code,
+                "message": str(exc),
+                "state": exc.state,
+                "tick": exc.tick,
+            }
+        else:
+            detail = str(exc)
         return HTTPException(
             status_code=409 if isinstance(exc, CrisisRunConflict) else 400,
-            detail=str(exc),
+            detail=detail,
         )
 
     @app.get("/health")

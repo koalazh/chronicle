@@ -28,6 +28,19 @@ class CrisisRunError(ValueError):
 class CrisisRunConflict(CrisisRunError):
     """A Run state conflicts with the requested mutation."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "run_conflict",
+        state: str = "",
+        tick: int | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.state = state
+        self.tick = tick
+
 
 class RunMode(StrEnum):
     WATCH = "WATCH"
@@ -587,6 +600,67 @@ class CrisisRunEngine:
             "events": self.db.worldline_events(run_id),
         }
 
+    def human_decision_state(self, run_id: str, tick: int | None = None) -> dict[str, Any]:
+        run = self.db.worldline(run_id)
+        if run is None or run["kind"] != "CRISIS":
+            raise CrisisRunError("Run not found")
+        current_tick = int(run["current_tick"] if tick is None else tick)
+        decision_wake = next(
+            (
+                wake
+                for wake in self.db.crisis_wakes(run_id, tick=current_tick)
+                if wake["actor_id"] == "wu-sangui"
+                and wake["wake_type"] == "DECISION"
+                and wake["trigger_event_id"] == ""
+            ),
+            None,
+        )
+        if decision_wake is not None:
+            wake_state = {
+                "COMPLETED": "COMMITTED",
+                "FAILED": "FAILED",
+            }.get(str(decision_wake["status"]), "RUNNING")
+            return {
+                "state": wake_state,
+                "kind": (
+                    "silence"
+                    if decision_wake.get("result", {}).get("silence")
+                    else "decision"
+                ),
+                "tick": current_tick,
+            }
+        if any(
+            event["event_type"] == "HUMAN_SILENCE"
+            and event["seat_id"] == "wu-sangui"
+            and int(event["tick"]) == current_tick
+            for event in self.db.worldline_events(run_id)
+        ):
+            return {"state": "COMMITTED", "kind": "silence", "tick": current_tick}
+        return {"state": "NONE", "kind": "", "tick": current_tick}
+
+    def _human_decision_conflict(self, run_id: str, tick: int) -> CrisisRunConflict:
+        state = self.human_decision_state(run_id, tick)
+        if state["state"] == "COMMITTED":
+            return CrisisRunConflict(
+                "当前模拟日已经提交过决定，请先继续推进。",
+                code="decision_already_exists",
+                state="COMMITTED",
+                tick=tick,
+            )
+        if state["state"] == "FAILED":
+            return CrisisRunConflict(
+                "当前模拟日的决定处理失败，请先核对这一局的状态。",
+                code="decision_failed",
+                state="FAILED",
+                tick=tick,
+            )
+        return CrisisRunConflict(
+            "当前模拟日的决定仍在处理中，请稍候。",
+            code="decision_in_progress",
+            state="RUNNING",
+            tick=tick,
+        )
+
     def submit_human_decision(
         self,
         run_id: str,
@@ -601,56 +675,74 @@ class CrisisRunEngine:
         human_actors = [actor_id for actor_id, controller in controllers.items() if controller == "HUMAN"]
         if human_actors != ["wu-sangui"]:
             raise CrisisRunError("this Run has no Human decision desk")
+        tick = int(run["current_tick"])
+        if self.human_decision_state(run_id, tick)["state"] != "NONE":
+            raise self._human_decision_conflict(run_id, tick)
         if not text.strip():
-            event = self._event(
-                run_id,
-                int(run["current_tick"]),
-                "HUMAN_SILENCE",
-                {"visibility": ["wu-sangui"]},
-                seat_id="wu-sangui",
-            )
             snapshot = self.db.worldline_snapshot(run_id)
             if snapshot is None:
                 raise CrisisRunError("Run snapshot is missing")
             lifetime = self.db.worldline_lifetime(run_id, "wu-sangui")
             if lifetime is None:
                 raise CrisisRunError("Human life state is missing")
-            commitments = list(lifetime["commitments"])
-            fulfilled_events = self._resolve_human_commitments(
-                run_id,
-                int(run["current_tick"]),
-                commitments,
-                event["id"],
-            )
-            self.db.commit_worldline_moment(
-                run_id,
-                [event, *fulfilled_events],
-                current_tick=int(run["current_tick"]),
-                lifetime_updates=[
+            try:
+                wake = self.db.create_crisis_wake(
                     {
-                        "seat": "wu-sangui",
-                        "commitments_json": json.dumps(
-                            commitments, ensure_ascii=False, sort_keys=True
+                        "worldline_id": run_id,
+                        "actor_id": "wu-sangui",
+                        "wake_type": "DECISION",
+                        "tick": tick,
+                        "status": "RUNNING",
+                        "source": "human",
+                        "hermes_session_id": f"human-{uuid.uuid4().hex[:12]}",
+                        "frozen_perspective": self._perspective_from(
+                            run_id, "wu-sangui", snapshot["projection"]
                         ),
                     }
-                ],
-                snapshot=snapshot["projection"],
+                )
+            except sqlite3.IntegrityError as exc:
+                raise self._human_decision_conflict(run_id, tick) from exc
+            try:
+                event = self._event(
+                    run_id,
+                    tick,
+                    "HUMAN_SILENCE",
+                    {"visibility": ["wu-sangui"]},
+                    seat_id="wu-sangui",
+                )
+                commitments = list(lifetime["commitments"])
+                fulfilled_events = self._resolve_human_commitments(
+                    run_id,
+                    tick,
+                    commitments,
+                    event["id"],
+                )
+                self.db.commit_worldline_moment(
+                    run_id,
+                    [event, *fulfilled_events],
+                    current_tick=tick,
+                    lifetime_updates=[
+                        {
+                            "seat": "wu-sangui",
+                            "commitments_json": json.dumps(
+                                commitments, ensure_ascii=False, sort_keys=True
+                            ),
+                        }
+                    ],
+                    snapshot=snapshot["projection"],
+                )
+            except Exception as exc:
+                self.db.update_crisis_wake(
+                    wake["id"], status="FAILED", error={"type": type(exc).__name__}
+                )
+                raise CrisisRunError("Human silence could not be safely applied") from exc
+            self.db.update_crisis_wake(
+                wake["id"],
+                status="COMPLETED",
+                result={"silence": True, "summary": "暂不追加命令，继续观察。"},
             )
             return {"silence": True, "events": [event, *fulfilled_events], "operations": []}
 
-        tick = int(run["current_tick"])
-        existing_decision = next(
-            (
-                wake
-                for wake in self.db.crisis_wakes(run_id, tick=tick)
-                if wake["actor_id"] == "wu-sangui"
-                and wake["wake_type"] == "DECISION"
-                and wake["trigger_event_id"] == ""
-            ),
-            None,
-        )
-        if existing_decision is not None:
-            raise CrisisRunConflict("当前模拟日已经提交过决定，请先继续推进。")
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
@@ -670,7 +762,7 @@ class CrisisRunEngine:
                 }
             )
         except sqlite3.IntegrityError as exc:
-            raise CrisisRunConflict("当前模拟日已经提交过决定，请先继续推进。") from exc
+            raise self._human_decision_conflict(run_id, tick) from exc
         selected = interpreter or (
             ModelDecisionInterpreter(self.config)
             if run["runtime_mode"] == "live"
@@ -1723,6 +1815,7 @@ class CrisisRunEngine:
                 (actor_id for actor_id, controller in controllers.items() if controller == "HUMAN"),
                 None,
             ),
+            "human_decision": self.human_decision_state(run_id, int(run["current_tick"])),
             "created_at": run["created_at"],
             "seal_reason": run["seal_reason"],
         }

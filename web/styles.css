@@ -45,6 +45,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .main.compact { width: min(1080px, 100%); }
 .kicker, .column-label { margin: 0 0 14px; color: var(--red); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; }
 .primary, .secondary, .quiet { min-height: 42px; border: 1px solid var(--line); padding: 10px 18px; background: transparent; color: var(--ink); font-size: 12px; }
+.primary:disabled, .secondary:disabled, .quiet:disabled, button:disabled { cursor: not-allowed; opacity: .48; }
 .primary { border-color: var(--red); background: var(--red); color: #fff9ef; }
 .primary:hover { background: var(--red-dark); }
 .secondary:hover, .quiet:hover { border-color: var(--red); color: var(--red); }
@@ -83,6 +84,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .run-actions { display: flex; align-items: center; gap: 28px; }
 .day-count { font-family: var(--serif); font-size: 48px; color: var(--red); white-space: nowrap; }
 .day-count small { font-size: 12px; color: var(--ink-faint); }
+.activity-banner { position: relative; display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; margin: 18px 0 0; padding: 15px 18px; border: 1px solid rgba(70,111,115,.32); background: var(--paper-light); box-shadow: 0 8px 24px rgba(32,39,35,.05); }
+.activity-banner::after { content: ""; position: absolute; left: 74px; right: 18px; bottom: 8px; height: 1px; background: var(--blue); opacity: .35; animation: ink-breathe 2.4s ease-in-out infinite; }
+.activity-stamp { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--red); color: var(--red); font-family: var(--serif); font-size: 17px; transform: rotate(-4deg); }
+.activity-copy { min-width: 0; }
+.activity-copy .column-label { margin-bottom: 3px; }
+.activity-copy strong { display: block; font-family: var(--serif); font-size: 17px; font-weight: 500; }
+.activity-copy p { margin: 4px 0 0; color: var(--ink-soft); font-size: 11px; }
+.pending-folio-text { margin: 0; max-width: 26em; color: var(--ink); font-family: var(--serif); font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-folio { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; margin-top: 28px; padding: 18px; border: 1px solid rgba(70,111,115,.28); background: var(--paper-light); }
+.pending-folio .activity-stamp { width: 30px; height: 30px; font-size: 15px; }
+.pending-folio strong { display: block; font-family: var(--serif); font-size: 21px; font-weight: 500; }
+.pending-folio p { margin: 8px 0 0; color: var(--ink-soft); font-family: var(--serif); line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-folio small { display: block; margin-top: 10px; color: var(--red); font-size: 10px; }
+.pending-folio.settled { border-color: rgba(166,75,61,.34); }
+.activity-reconcile { position: relative; z-index: 1; justify-self: end; white-space: nowrap; }
 .lens-switcher { display: flex; gap: 28px; border-bottom: 1px solid var(--line); }
 .lens-switcher button { border: 0; background: transparent; padding: 18px 0 14px; color: var(--ink-soft); font-family: var(--serif); }
 .lens-switcher button[aria-current="true"] { color: var(--red); border-bottom: 2px solid var(--red); }
@@ -214,6 +230,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .notice.error { border-color: var(--red); color: var(--red-dark); }
 
 @keyframes lift { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes ink-breathe { 0%, 100% { opacity: .22; transform: scaleX(.98); transform-origin: left; } 50% { opacity: .5; transform: scaleX(1); } }
 
 @media (max-width: 900px) {
   .main { padding-top: 30px; }
@@ -238,6 +255,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .setup-link { margin-left: auto; }
   .run-header, .sheet-heading { align-items: flex-start; flex-direction: column; }
   .run-actions { width: 100%; justify-content: space-between; }
+  .activity-banner { grid-template-columns: auto 1fr; }
+  .pending-folio-text { grid-column: 2; }
+  .activity-reconcile { grid-column: 2; justify-self: start; }
   .lens-switcher { gap: 18px; overflow-x: auto; }
   .history-grid { grid-template-columns: 1fr; }
   .source-register { border-right: 0; border-bottom: 1px solid var(--line); padding-right: 0; }

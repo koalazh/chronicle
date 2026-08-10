@@ -20,6 +20,7 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     run_id = created.json()["run"]["id"]
     assert created.json()["started"] is True
     assert created.json()["run"]["current_tick"] == 0
+    assert created.json()["run"]["human_decision"]["state"] == "NONE"
     assert client.get("/api/runs/active").json()["run"]["id"] == run_id
     assert client.get(f"/api/runs/{run_id}/world").status_code == 200
     for actor_id in ("li-zicheng", "wu-sangui", "dorgon"):
@@ -38,7 +39,7 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     assert any(item["id"] == run_id for item in archive.json()["runs"])
 
 
-def test_takeover_api_enforces_perspective_lock_and_accepts_multi_action_silence(
+def test_takeover_api_enforces_perspective_lock_and_single_decision_slot(
     app_config, tmp_path
 ):
     config = replace(app_config, database_path=tmp_path / "takeover-api.db", dev=True)
@@ -62,9 +63,15 @@ def test_takeover_api_enforces_perspective_lock_and_accepts_multi_action_silence
 
     assert decision.status_code == 200
     assert duplicate.status_code == 409
-    assert "当前模拟日已经提交过决定" in duplicate.json()["detail"]
+    assert duplicate.json()["detail"] == {
+        "code": "decision_already_exists",
+        "message": "当前模拟日已经提交过决定，请先继续推进。",
+        "state": "COMMITTED",
+        "tick": 0,
+    }
     assert len(decision.json()["operations"]) == 3
-    assert silence.json()["silence"] is True
+    assert silence.status_code == 409
+    assert silence.json()["detail"]["code"] == "decision_already_exists"
     assert client.post(f"/api/runs/{run_id}/seal", json={}).status_code == 200
     assert client.get(f"/api/runs/{run_id}/world").status_code == 200
     assert client.get(f"/api/runs/{run_id}/replay").status_code == 200
@@ -120,7 +127,7 @@ def test_live_run_stages_orient_until_gateway_has_reloaded_profiles(
     assert not engine.db.crisis_wakes(run_id, status="COMPLETED")
     not_ready = client.post(f"/api/runs/{run_id}/continue")
     assert not_ready.status_code == 409
-    assert "设置页" in not_ready.json()["detail"]
+    assert "设置页" in not_ready.json()["detail"]["message"]
     assert not engine.db.crisis_wakes(run_id, status="COMPLETED")
 
 

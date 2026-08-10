@@ -88,3 +88,27 @@ def test_frontend_surfaces_boot_failure_instead_of_staying_on_placeholder():
     boot = source[source.index("async function boot"):]
     assert "const bootTimeoutMs = 15_000" in boot
     assert 'api("/api/config", { timeoutMs: bootTimeoutMs })' in boot
+
+
+def test_frontend_uses_a_scroll_activity_state_and_keeps_decisions_locked():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    for required in (
+        "activity: null",
+        "operationSeq: 0",
+        "pending-folio",
+        "activity-banner",
+        'aria-busy="true"',
+        "decisionSlotCommitted",
+        "decisionSlotState",
+        "syncDecisionActivity",
+        'data-action="reconcile-run"',
+        'error.code === "decision_already_exists" && error.state === "COMMITTED"',
+        'error.code === "decision_in_progress" && error.state === "RUNNING"',
+        'error.code === "decision_failed" && error.state === "FAILED"',
+        "history.replaceState",
+        "setActivityPhase(seq, \"advancing\")",
+    ):
+        assert required in source
+
+    assert "当前模拟日已经提交过决定" not in source

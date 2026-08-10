@@ -72,7 +72,6 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
         "向关外说明条件，并在两日后重新比较。",
         interpreter=FixtureDecisionInterpreter(),
     )
-    silence = engine.submit_human_decision(run_id, "")
     result = engine.run_until_idle(run_id)
 
     assert decision["silence"] is False
@@ -81,7 +80,6 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
         "COMMITTED",
         "COMMITTED",
     ]
-    assert silence["silence"] is True
     assert any(
         event["event_type"] == "MESSAGE_DISPATCHED"
         and event["seat_id"] == "wu-sangui"
@@ -106,6 +104,55 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
     lifetime = engine.db.worldline_lifetime(run_id, "wu-sangui")
     assert lifetime["plan"][0]["objective"].startswith("向关外")
     assert any(commitment["status"] == "DUE" for commitment in lifetime["commitments"])
+    silence = engine.submit_human_decision(run_id, "")
+    assert silence["silence"] is True
+
+
+def test_human_decision_conflicts_expose_machine_state(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+    snapshot = engine.db.worldline_snapshot(run_id)
+
+    running = engine.db.create_crisis_wake(
+        {
+            "worldline_id": run_id,
+            "actor_id": "wu-sangui",
+            "wake_type": "DECISION",
+            "tick": 0,
+            "status": "RUNNING",
+            "source": "human",
+            "frozen_perspective": snapshot["projection"],
+        }
+    )
+    with pytest.raises(CrisisRunConflict) as running_error:
+        engine.submit_human_decision(run_id, "仍在处理的重复提交")
+    assert running_error.value.code == "decision_in_progress"
+    assert running_error.value.state == "RUNNING"
+    assert running_error.value.tick == 0
+
+    engine.db.update_crisis_wake(running["id"], status="FAILED")
+    with pytest.raises(CrisisRunConflict) as failed_error:
+        engine.submit_human_decision(run_id, "失败后的重复提交")
+    assert failed_error.value.code == "decision_failed"
+    assert failed_error.value.state == "FAILED"
+    assert engine.run_summary(run_id)["human_decision"]["state"] == "FAILED"
+
+
+def test_human_silence_is_the_same_single_decision_slot(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+
+    silence = engine.submit_human_decision(run_id, "")
+
+    assert silence["silence"] is True
+    assert engine.run_summary(run_id)["human_decision"] == {
+        "state": "COMMITTED",
+        "kind": "silence",
+        "tick": 0,
+    }
+    with pytest.raises(CrisisRunConflict) as duplicate:
+        engine.submit_human_decision(run_id, "同一日不应再写第二笔")
+    assert duplicate.value.code == "decision_already_exists"
 
 
 def test_repeated_human_decision_same_tick_is_a_controlled_conflict(app_config):

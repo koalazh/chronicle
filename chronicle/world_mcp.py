@@ -42,18 +42,18 @@ def communicate(
 
 
 @mcp.tool()
-def act(
-    action: str,
+def operate(
+    operation_definition_id: str,
+    targets: list[str],
     description: str,
     idempotency_key: str,
-    target: str = "",
 ) -> dict[str, Any]:
-    """Request hold, prepare, or move within the Actor's crisis authority."""
+    """Start one currently available Crisis-defined Operation."""
 
-    return _world().act(
-        action,
+    return _world().operate(
+        operation_definition_id,
+        targets,
         description,
-        target=target,
         idempotency_key=idempotency_key,
     )
 

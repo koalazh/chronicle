@@ -129,19 +129,17 @@ def test_private_perspective_exposes_a_grounded_affordance_manifest(app_config):
         "li-zicheng",
         "dorgon",
     }
-    assert perspective["known_entities"] == [
-        {"id": "shanhaiguan", "type": "PLACE", "display_name": "山海关"}
-    ]
+    assert {item["id"] for item in perspective["known_entities"]} == {
+        "shanhaiguan",
+        "wu-field-force",
+        "shanhai-pass",
+    }
     assert {item["id"] for item in perspective["own_assets"]} == {
-        "pass_control",
-        "field_force",
-        "couriers",
+        "wu-field-force",
+        "shanhai-pass",
     }
-    assert {item["id"] for item in perspective["available_operations"]} == {
-        "hold",
-        "prepare",
-        "move",
-    }
+    assert {item["id"] for item in perspective["available_operations"]} == {"prepare_force"}
+    assert perspective["active_operations"] == []
     assert perspective["active_investigations"] == []
     assert perspective["active_offers"] == []
     assert perspective["active_agreements"] == []
@@ -374,7 +372,7 @@ def test_communication_never_creates_a_recursive_same_tick_wake(app_config):
     assert result["arrival_tick"] == 1
 
 
-def test_prepare_and_hold_require_owned_resource_or_current_position(app_config):
+def test_operate_requires_a_currently_available_crisis_operation(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     wake = next(
@@ -385,35 +383,60 @@ def test_prepare_and_hold_require_owned_resource_or_current_position(app_config)
     engine.db.update_crisis_wake(wake["id"], status="RUNNING")
     world = engine.world.fixture_session(wake["id"], "wu-sangui")
 
-    rejected = world.act(
-        "prepare",
+    rejected = world.operate(
+        "prepare_force",
+        ["nonexistent-artillery"],
         "动用不存在的重炮。",
-        target="nonexistent-artillery",
         idempotency_key="bad-resource",
     )
-    accepted = world.act(
-        "hold",
-        "维持关口防备。",
-        target="shanhaiguan",
-        idempotency_key="grounded-position",
+    unavailable = world.operate(
+        "move_force",
+        ["wu-field-force", "yongping"],
+        "在整备前就向永平行军。",
+        idempotency_key="move-before-ready",
+    )
+    accepted = world.operate(
+        "prepare_force",
+        ["wu-field-force"],
+        "整备关宁所部。",
+        idempotency_key="prepare-force",
+    )
+    conflicting = world.operate(
+        "prepare_force",
+        ["wu-field-force"],
+        "同一时刻重复整备同一支兵力。",
+        idempotency_key="duplicate-prepare-force",
     )
 
-    assert rejected == {"status": "rejected", "code": "unknown_resource_or_position"}
-    assert accepted["status"] == "accepted"
+    assert rejected == {"status": "rejected", "code": "invalid_operation_targets"}
+    assert unavailable == {"status": "rejected", "code": "operation_precondition_unmet"}
+    assert accepted["status"] == "accepted" and accepted["expected_complete_tick"] == 2
+    assert conflicting == {"status": "rejected", "code": "operation_conflict"}
 
 
-def test_movement_arrival_advances_truth_then_wakes_only_the_moving_actor(app_config):
+def test_operation_completion_changes_asset_state_then_enables_movement(app_config):
     class MoveDriver:
         source = "fixture"
 
         def run_wake(self, actor_id, wake, perspective, world):
             from chronicle.crisis_runtime import ActorTurnResult
 
-            if actor_id == "dorgon" and wake["wake_type"] == "ORIENT":
-                world.act(
-                    "move",
+            if actor_id != "dorgon":
+                return ActorTurnResult("保持有限行动。")
+            if wake["wake_type"] == "ORIENT":
+                world.operate(
+                    "prepare_force",
+                    ["qing-expedition-force"],
+                    "先整备西征主力。",
+                    idempotency_key="prepare-west",
+                )
+            elif wake["wake_type"] == "OPERATION_RESULT" and any(
+                item["id"] == "move_force" for item in perspective["available_operations"]
+            ):
+                world.operate(
+                    "move_force",
+                    ["qing-expedition-force", "shanhaiguan"],
                     "向山海关方向继续行军。",
-                    target="shanhaiguan",
                     idempotency_key="move-west",
                 )
             return ActorTurnResult("保持有限行动。")
@@ -422,15 +445,69 @@ def test_movement_arrival_advances_truth_then_wakes_only_the_moving_actor(app_co
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     result = engine.run_until_idle(run_id)
 
-    assert engine.db.worldline_snapshot(run_id)["projection"]["positions"]["dorgon"] == "shanhaiguan"
-    assert any(event["event_type"] == "MOVEMENT_ARRIVED" for event in result["events"])
-    observation_wakes = [
-        wake for wake in result["wakes"] if wake["wake_type"] == "OBSERVATION"
-    ]
-    assert {(wake["actor_id"], wake["tick"]) for wake in observation_wakes} == {
-        ("dorgon", 2)
+    snapshot = engine.db.worldline_snapshot(run_id)["projection"]
+    assert snapshot["positions"]["dorgon"] == "shanhaiguan"
+    operations = snapshot["operations"]
+    assert [operation["status"] for operation in operations] == ["COMPLETED", "COMPLETED"]
+    assert operations[0]["input_state"] == {"qing-expedition-force": "FORMING"}
+    assert operations[0]["result_state"] == {"qing-expedition-force": "READY"}
+    assert operations[1]["input_state"] == {
+        "qing-expedition-force": "READY",
+        "shanhaiguan": "CONTESTED",
     }
-    assert "已到达山海关" not in str(engine.actor_perspective(run_id, "li-zicheng"))
+    assert operations[1]["result_state"] == {"qing-expedition-force": "COMMITTED"}
+    assert snapshot["entities"]["qing-expedition-force"]["state"] == "COMMITTED"
+
+    prepare_started = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "OPERATION_STARTED"
+        and event["payload"]["operation"]["id"] == operations[0]["id"]
+    )
+    prepare_completed = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "OPERATION_COMPLETED"
+        and event["payload"]["operation"]["id"] == operations[0]["id"]
+    )
+    prepare_completion_state = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "ENTITY_STATE_CHANGED"
+        and event["payload"]["operation_id"] == operations[0]["id"]
+        and event["payload"]["phase"] == "completion"
+    )
+    assert prepare_completed["causal_parent_ids"] == [prepare_started["id"]]
+    assert prepare_completion_state["causal_parent_ids"] == [prepare_completed["id"]]
+    move_started = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "OPERATION_STARTED"
+        and event["payload"]["operation"]["id"] == operations[1]["id"]
+    )
+    move_start_state = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "ENTITY_STATE_CHANGED"
+        and event["payload"]["operation_id"] == operations[1]["id"]
+        and event["payload"]["phase"] == "start"
+    )
+    assert move_start_state["causal_parent_ids"] == [move_started["id"]]
+
+    operation_wakes = [wake for wake in result["wakes"] if wake["wake_type"] == "OPERATION_RESULT"]
+    assert {(wake["actor_id"], wake["tick"]) for wake in operation_wakes} == {
+        ("dorgon", 2),
+        ("dorgon", 4),
+    }
+    li_view = engine.actor_perspective(run_id, "li-zicheng")
+    assert "qing-expedition-force" not in {item["id"] for item in li_view["known_entities"]}
+    assert prepare_completed["id"] not in {
+        item.get("event_id") for item in li_view["knowledge"] if isinstance(item, dict)
+    }
+
+    engine.seal(run_id, "operation-replay-test")
+    replay_titles = {item["title"] for item in engine.replay(run_id)["items"]}
+    assert {"一项行动已经开始", "一项行动已经完成", "一项关键资产状态已经改变"} <= replay_titles
 
 
 def test_same_moment_runs_different_actors_concurrently_from_frozen_perspectives(

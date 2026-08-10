@@ -15,7 +15,7 @@ class DecisionInterpretationError(ValueError):
 
 
 class DecisionOperation(StrictModel):
-    tool: Literal["communicate", "act", "update_plan", "schedule_revisit"]
+    tool: Literal["communicate", "operate", "update_plan", "schedule_revisit"]
     arguments: dict[str, Any]
 
 
@@ -63,10 +63,32 @@ class FixtureDecisionInterpreter:
         if "两日" in text:
             operations.append(
                 DecisionOperation(
-                tool="schedule_revisit",
-                arguments={"after_days": 2, "reason": "两日后重新比较两方回应"},
+                    tool="schedule_revisit",
+                    arguments={"after_days": 2, "reason": "两日后重新比较两方回应"},
                 )
             )
+        if "整备" in text or "准备兵力" in text:
+            prepare = next(
+                (
+                    item
+                    for item in perspective.get("available_operations", [])
+                    if item.get("id") == "prepare_force"
+                ),
+                None,
+            )
+            prepare_targets = prepare.get("targets", []) if prepare else []
+            force_options = prepare_targets[0].get("options", []) if prepare_targets else []
+            if force_options:
+                operations.append(
+                    DecisionOperation(
+                        tool="operate",
+                        arguments={
+                            "operation_definition_id": "prepare_force",
+                            "targets": [force_options[0]["id"]],
+                            "description": "开始整备可用兵力。",
+                        },
+                    )
+                )
         return InterpretedDecision(summary="已把这项决定解释为有限的危局请求。", operations=operations)
 
 
@@ -102,12 +124,12 @@ class ModelDecisionInterpreter:
                 "content": (
                     "你是 Chronicle 的 Human Decision Interpreter，不是历史主体，也不决定世界结果。"
                     "把用户一句自然语言决定解释成 0 到 8 个 World Affordance 请求。"
-                    "只可使用 communicate、act、update_plan、schedule_revisit。"
+                    "只可使用 communicate、operate、update_plan、schedule_revisit。"
                     "不得伪造 actor_id/run_id/wake_id，不得加入用户没有表达的不可逆选择。"
                     "返回严格 JSON：{summary:string,operations:[{tool:string,arguments:object}]}。"
                     f"communicate 参数 recipient/content；{recipient_rule}"
-                    "act 参数 action/description/target；"
-                    "prepare/hold 的 target 只能使用 private_perspective.resources 中的键或当前位置；"
+                    "operate 参数 operation_definition_id/targets/description；"
+                    "operation_definition_id 与 targets 必须从 private_perspective.available_operations 选择；"
                     "update_plan 参数 objective/steps/rationale/belief_updates/reconsider_when；"
                     "schedule_revisit 参数 after_days/reason。"
                 ),

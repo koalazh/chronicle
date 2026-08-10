@@ -61,7 +61,8 @@ actors:
       political_control: fragile
       field_force: available-but-dispersed
       courier_network: active
-    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    asset_ids: [shun-eastern-force]
 
   - id: wu-sangui
     display_name: 吴三桂
@@ -79,7 +80,8 @@ actors:
       pass_control: contested-but-held
       field_force: cohesive-limited
       couriers: scarce
-    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    asset_ids: [wu-field-force, shanhai-pass]
 
   - id: dorgon
     display_name: 多尔衮
@@ -97,9 +99,62 @@ actors:
       command: expeditionary-army
       mobility: high
       artillery: following-column
-    world_authority: [communicate, update_plan, schedule_revisit, hold, prepare, move]
+    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    asset_ids: [qing-expedition-force]
 
 playable_actor_ids: [wu-sangui, li-zicheng, dorgon]
+
+entities:
+  - {id: beijing, type: PLACE, display_name: 北京, initial_state: OPEN, assertion_ids: [c008]}
+  - {id: yongping, type: PLACE, display_name: 永平, initial_state: OPEN, assertion_ids: [c009]}
+  - {id: shanhaiguan, type: PLACE, display_name: 山海关, initial_state: CONTESTED, assertion_ids: [c002]}
+  - {id: liaoxi, type: PLACE, display_name: 辽西行军路, initial_state: OPEN, assertion_ids: [c001, c008]}
+  - {id: shanhai-pass, type: ASSET, display_name: 山海关通道, initial_state: CONTESTED, assertion_ids: [c002]}
+  - {id: shun-eastern-force, type: FORCE, display_name: 大顺东向兵力, initial_state: DISPERSED, assertion_ids: [c013]}
+  - {id: wu-field-force, type: FORCE, display_name: 关宁所部, initial_state: FORMING, assertion_ids: [c002, c013]}
+  - {id: qing-expedition-force, type: FORCE, display_name: 清军西征主力, initial_state: FORMING, assertion_ids: [c001, c013]}
+
+operations:
+  - id: prepare_force
+    display_name: 整备兵力
+    description: 使一支尚未就绪的自有兵力完成整备；完成前不能转入移动。
+    actor_ids: [li-zicheng, wu-sangui, dorgon]
+    targets:
+      - {id: force, entity_types: [FORCE], owned_by_actor: true}
+    kind: STATE_CHANGE
+    duration_kind: FIXED
+    duration_days: 2
+    required_assets: [force]
+    preconditions:
+      - {subject: force, states: [DISPERSED, FORMING]}
+    start_effects:
+      - {subject: force, state: FORMING}
+    completion_effects:
+      - {subject: force, state: READY}
+    visibility: PRIVATE
+    interruptibility: false
+    conflicts: [prepare_force, move_force]
+
+  - id: move_force
+    display_name: 调动兵力
+    description: 让一支已经整备完成的自有兵力沿已知路线移动到另一处地点。
+    actor_ids: [li-zicheng, wu-sangui, dorgon]
+    targets:
+      - {id: force, entity_types: [FORCE], owned_by_actor: true}
+      - {id: destination, entity_types: [PLACE]}
+    kind: MOVEMENT
+    duration_kind: ROUTE
+    movement_destination_target: destination
+    required_assets: [force]
+    preconditions:
+      - {subject: force, states: [READY]}
+    start_effects:
+      - {subject: force, state: MOVING}
+    completion_effects:
+      - {subject: force, state: COMMITTED}
+    visibility: PRIVATE
+    interruptibility: false
+    conflicts: [prepare_force, move_force]
 
 corridor:
   - {id: beijing, display_name: 北京, order: 0}

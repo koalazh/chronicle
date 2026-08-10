@@ -52,6 +52,7 @@ class CrisisWakeType(StrEnum):
     ORIENT = "ORIENT"
     MESSAGE = "MESSAGE"
     OBSERVATION = "OBSERVATION"
+    OPERATION_RESULT = "OPERATION_RESULT"
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
 
@@ -326,8 +327,8 @@ class HermesActorDriver:
                     "调用参数：update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)；"
                     "schedule_revisit(after_days, reason, idempotency_key)；"
                     "communicate(recipient, content, idempotency_key)；"
-                    "act(action, description, target, idempotency_key) 的可用 target 已在私有视野 "
-                    "available_operations 中列出。"
+                    "operate(operation_definition_id, targets, description, idempotency_key)，"
+                    "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
                     "不要声称工具尚未确认的结果。最终只用简体中文简短说明你如何处置本次触发。"
                     + orient_rule
@@ -344,7 +345,7 @@ class HermesActorDriver:
                         "private_perspective": perspective,
                         "available_world_tools": [
                             "communicate",
-                            "act",
+                            "operate",
                             "update_plan",
                             "schedule_revisit",
                         ],
@@ -457,6 +458,17 @@ class CrisisRunEngine:
                 for message in self.pack.crisis.checkpoint.in_transit
             ],
             "movements": [],
+            "entities": {
+                entity.id: {
+                    "id": entity.id,
+                    "type": entity.type.value,
+                    "display_name": entity.display_name,
+                    "state": entity.initial_state,
+                    "assertion_ids": list(entity.assertion_ids),
+                }
+                for entity in self.pack.crisis.entities
+            },
+            "operations": [],
         }
         events = [
             self._event(
@@ -491,6 +503,17 @@ class CrisisRunEngine:
         ]
         events[1]["causal_parent_ids"] = [events[0]["id"]]
         checkpoint_event_id = events[-1]["id"]
+        for entity in projection["entities"].values():
+            events.append(
+                self._event(
+                    run_id,
+                    0,
+                    "ENTITY_INITIALIZED",
+                    entity,
+                    provenance="scenario_assumption",
+                    causal_parent_ids=[checkpoint_event_id],
+                )
+            )
         for message in projection["messages"]:
             dispatch = self._event(
                 run_id,
@@ -932,8 +955,8 @@ class CrisisRunEngine:
         values["idempotency_key"] = idempotency_key
         if tool == "communicate":
             return world.communicate(**values)
-        if tool == "act":
-            return world.act(**values)
+        if tool == "operate":
+            return world.operate(**values)
         if tool == "update_plan":
             return world.update_plan(**values)
         if tool == "schedule_revisit":
@@ -1124,6 +1147,9 @@ class CrisisRunEngine:
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
         projection = copy.deepcopy(snapshot["projection"])
+        if self._operations_due(projection, next_tick):
+            self._commit_operations(run_id, next_tick, projection)
+            return True
         if self._movements_due(projection, next_tick):
             self._commit_movements(run_id, next_tick, projection)
             return True
@@ -1229,11 +1255,182 @@ class CrisisRunEngine:
             if message["status"] == "in_transit"
         )
         candidates.extend(
+            int(operation["expected_complete_tick"])
+            for operation in snapshot["projection"].get("operations", [])
+            if operation["status"] == "IN_PROGRESS"
+        )
+        candidates.extend(
             int(movement["arrival_tick"])
             for movement in snapshot["projection"].get("movements", [])
             if movement["status"] == "in_transit"
         )
         return min(candidates) if candidates else None
+
+    @staticmethod
+    def _operations_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
+        return [
+            operation
+            for operation in projection.get("operations", [])
+            if operation["status"] == "IN_PROGRESS"
+            and int(operation["expected_complete_tick"]) == tick
+        ]
+
+    def _operation_visible_actor_ids(self, operation: dict[str, Any]) -> list[str]:
+        definition = self.pack.operation_by_id[str(operation["definition_id"])]
+        if definition.visibility.value == "PUBLIC":
+            return sorted(self.pack.actor_by_id)
+        return [str(operation["actor_id"])]
+
+    def _apply_operation_state_effects(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        operation: dict[str, Any],
+        effects: list[Any],
+        *,
+        phase: str,
+        causal_parent_id: str,
+        visible_actor_ids: list[str],
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        events: list[dict[str, Any]] = []
+        result_state: dict[str, str] = {}
+        target_map = dict(operation["target_map"])
+        for effect in effects:
+            entity_id = target_map.get(effect.subject, effect.subject)
+            entity = projection["entities"][entity_id]
+            previous_state = str(entity["state"])
+            entity["state"] = effect.state
+            result_state[entity_id] = effect.state
+            if previous_state == effect.state:
+                continue
+            events.append(
+                self._event(
+                    run_id,
+                    tick,
+                    "ENTITY_STATE_CHANGED",
+                    {
+                        "operation_id": operation["id"],
+                        "entity_id": entity_id,
+                        "before": previous_state,
+                        "after": effect.state,
+                        "phase": phase,
+                        "visibility": visible_actor_ids,
+                    },
+                    seat_id=operation["actor_id"],
+                    causal_parent_ids=[causal_parent_id],
+                )
+            )
+        return events, result_state
+
+    def _commit_operations(self, run_id: str, tick: int, projection: dict[str, Any]) -> None:
+        due = self._operations_due(projection, tick)
+        projection["tick"] = tick
+        events: list[dict[str, Any]] = []
+        knowledge_by_actor: dict[str, list[Any]] = {}
+        queued: set[tuple[str, str]] = set()
+        for operation in due:
+            definition = self.pack.operation_by_id[str(operation["definition_id"])]
+            visible_actor_ids = self._operation_visible_actor_ids(operation)
+            operation["status"] = "COMPLETED"
+            completed = self._event(
+                run_id,
+                tick,
+                "OPERATION_COMPLETED",
+                {
+                    "operation": operation,
+                    "visibility": visible_actor_ids,
+                },
+                seat_id=operation["actor_id"],
+                causal_parent_ids=[operation["start_event_id"]]
+                if operation.get("start_event_id")
+                else [],
+            )
+            operation["completion_event_id"] = completed["id"]
+            events.append(completed)
+            state_events, result_state = self._apply_operation_state_effects(
+                run_id,
+                tick,
+                projection,
+                operation,
+                definition.completion_effects,
+                phase="completion",
+                causal_parent_id=completed["id"],
+                visible_actor_ids=visible_actor_ids,
+            )
+            operation["result_state"] = result_state
+            events.extend(state_events)
+            observation = f"{definition.display_name}已经完成。"
+            if definition.kind.value == "MOVEMENT":
+                movement = next(
+                    (
+                        item
+                        for item in projection.get("movements", [])
+                        if item.get("operation_id") == operation["id"]
+                        and item.get("status") == "in_transit"
+                    ),
+                    None,
+                )
+                if movement is None:
+                    raise CrisisRunError("movement Operation lost its in-transit projection")
+                movement["status"] = "arrived"
+                projection["positions"][operation["actor_id"]] = movement["to"]
+                arrived = self._event(
+                    run_id,
+                    tick,
+                    "MOVEMENT_ARRIVED",
+                    movement,
+                    seat_id=operation["actor_id"],
+                    causal_parent_ids=[completed["id"]],
+                )
+                movement["arrival_event_id"] = arrived["id"]
+                events.append(arrived)
+                observation = (
+                    f"{definition.display_name}已经完成，"
+                    f"已抵达{self.pack.location_by_id[movement['to']].display_name}。"
+                )
+            for actor_id in visible_actor_ids:
+                lifetime = self.db.worldline_lifetime(run_id, actor_id)
+                if lifetime is None:
+                    raise CrisisRunError("operation observer life state is missing")
+                knowledge = knowledge_by_actor.setdefault(actor_id, list(lifetime["knowledge"]))
+                knowledge.append(
+                    {
+                        "kind": "observation",
+                        "event_id": completed["id"],
+                        "observation": observation,
+                        "received_tick": tick,
+                        "provenance": "branch_derived",
+                    }
+                )
+                queued.add((actor_id, completed["id"]))
+        updates = [
+            {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+                "last_perspective_json": json.dumps(
+                    self._perspective_from(run_id, actor_id, projection, knowledge=knowledge),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+            for actor_id, knowledge in knowledge_by_actor.items()
+        ]
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            lifetime_updates=updates,
+            snapshot=projection,
+        )
+        for actor_id, trigger_event_id in sorted(queued):
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.OPERATION_RESULT,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
 
     @staticmethod
     def _movements_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
@@ -1912,38 +2109,110 @@ class CrisisRunEngine:
             message["dispatch_event_id"] = dispatch["id"]
             events.append(dispatch)
             return dispatch["id"]
-        elif tool_name == "act":
-            event_type = "ACTOR_ACTION_RECORDED"
-            if payload["action"] == "move":
-                movement = {
-                    "id": result["movement_id"],
-                    "actor_id": actor_id,
-                    "from": projection["positions"][actor_id],
-                    "to": payload["target"],
-                    "started_tick": tick,
-                    "arrival_tick": result["arrival_tick"],
-                    "status": "in_transit",
-                }
-                projection["movements"].append(movement)
-                event_type = "MOVEMENT_STARTED"
-            action_event = self._event(
+        elif tool_name == "operate":
+            return self._start_operation(
                 run_id,
                 tick,
-                event_type,
-                {
-                    "wake_id": wake["id"],
-                    "request": payload,
-                    "result": result,
-                    "visibility": [actor_id],
-                },
-                seat_id=actor_id,
-                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                projection,
+                wake,
+                operation,
+                events,
+                causal_parent_id=causal_parent_id,
             )
-            if payload["action"] == "move":
-                movement["start_event_id"] = action_event["id"]
-            events.append(action_event)
-            return action_event["id"]
         return causal_parent_id
+
+    def _start_operation(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        *,
+        causal_parent_id: str,
+    ) -> str:
+        actor_id = str(wake["actor_id"])
+        payload = operation["payload"]
+        result = operation["result"]
+        request, code = self.pack.operation_request(
+            actor_id,
+            str(payload["operation_definition_id"]),
+            list(payload["targets"]),
+            projection,
+            tick,
+        )
+        if request is None:
+            raise CrisisRunError(f"accepted Operation became unavailable: {code}")
+        if int(result["expected_complete_tick"]) != request.expected_complete_tick:
+            raise CrisisRunError("accepted Operation completion time changed before commit")
+        visible_actor_ids = (
+            sorted(self.pack.actor_by_id)
+            if request.definition.visibility.value == "PUBLIC"
+            else [actor_id]
+        )
+        started = {
+            "id": result["operation_id"],
+            "definition_id": request.definition.id,
+            "actor_id": actor_id,
+            "target_ids": list(request.target_ids),
+            "target_map": request.target_map,
+            "started_tick": tick,
+            "expected_complete_tick": request.expected_complete_tick,
+            "status": "IN_PROGRESS",
+            "visibility": request.definition.visibility.value,
+            "interruptibility": request.definition.interruptibility,
+            "input_state": request.input_state,
+            "result_state": {},
+            "description": payload["description"],
+        }
+        projection.setdefault("operations", []).append(started)
+        started_event = self._event(
+            run_id,
+            tick,
+            "OPERATION_STARTED",
+            {"wake_id": wake["id"], "operation": started, "visibility": visible_actor_ids},
+            seat_id=actor_id,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+        )
+        started["start_event_id"] = started_event["id"]
+        events.append(started_event)
+        state_events, _ = self._apply_operation_state_effects(
+            run_id,
+            tick,
+            projection,
+            started,
+            request.definition.start_effects,
+            phase="start",
+            causal_parent_id=started_event["id"],
+            visible_actor_ids=visible_actor_ids,
+        )
+        events.extend(state_events)
+        if request.definition.kind.value == "MOVEMENT":
+            destination_id = request.target_map[request.definition.movement_destination_target]
+            movement = {
+                "id": f"movement-{uuid.uuid4().hex[:16]}",
+                "operation_id": started["id"],
+                "actor_id": actor_id,
+                "from": projection["positions"][actor_id],
+                "to": destination_id,
+                "started_tick": tick,
+                "arrival_tick": request.expected_complete_tick,
+                "status": "in_transit",
+            }
+            projection.setdefault("movements", []).append(movement)
+            movement_event = self._event(
+                run_id,
+                tick,
+                "MOVEMENT_STARTED",
+                movement,
+                seat_id=actor_id,
+                causal_parent_ids=[started_event["id"]],
+            )
+            movement["start_event_id"] = movement_event["id"]
+            started["movement_id"] = movement["id"]
+            events.append(movement_event)
+        return started_event["id"]
 
     @staticmethod
     def _same_material_plan(current: dict[str, Any] | None, candidate: dict[str, Any]) -> bool:
@@ -2015,46 +2284,54 @@ class CrisisRunEngine:
             if candidate.id != actor_id
             and self.world.route_days(location_id, projection["positions"][candidate.id]) is not None
         ]
+        projected_entities = projection.get("entities", {})
         own_assets = [
-            {"id": asset_id, "state": value}
-            for asset_id, value in sorted(actor.resources.items())
+            {
+                "id": asset_id,
+                "type": projected_entities[asset_id]["type"],
+                "display_name": projected_entities[asset_id]["display_name"],
+                "state": projected_entities[asset_id]["state"],
+            }
+            for asset_id in actor.asset_ids
+            if asset_id in projected_entities
         ]
-        action_targets = own_assets + [{"id": location_id, "state": "CURRENT_POSITION"}]
-        available_operations: list[dict[str, Any]] = []
-        for action in ("hold", "prepare"):
-            if action in actor.world_authority:
-                available_operations.append(
-                    {
-                        "id": action,
-                        "targets": action_targets,
-                    }
-                )
-        if "move" in actor.world_authority:
-            destinations = [
+        known_entities = []
+        if location_id in projected_entities:
+            location_entity = projected_entities[location_id]
+            known_entities.append(
                 {
-                    "id": candidate.id,
-                    "display_name": candidate.display_name,
-                    "travel_days": travel_days,
+                    "id": location_id,
+                    "type": location_entity["type"],
+                    "display_name": location_entity["display_name"],
+                    "state": location_entity["state"],
                 }
-                for candidate in self.pack.crisis.corridor
-                if (travel_days := self.world.route_days(location_id, candidate.id))
-                and int(projection["tick"]) + travel_days
-                < int(self.pack.crisis.simulation_boundary.maximum_tick)
-            ]
-            if destinations:
-                available_operations.append({"id": "move", "targets": destinations})
+            )
+        else:
+            known_entities.append(
+                {"id": location.id, "type": "PLACE", "display_name": location.display_name}
+            )
+        known_entities.extend(
+            asset for asset in own_assets if asset["id"] not in {item["id"] for item in known_entities}
+        )
+        active_operations = [
+            operation
+            for operation in projection.get("operations", [])
+            if operation.get("actor_id") == actor_id
+            and operation.get("status") in {"PLANNED", "IN_PROGRESS"}
+        ]
         constraints = [{"kind": "authority", "description": "只能使用当前职权内的行动。"}]
         if self.pack.crisis.routes:
             constraints.append(
-                {"kind": "travel_time", "description": "通信与移动需要沿已知路线等待。"}
+                {"kind": "travel_time", "description": "通信与行动需要沿已知路线或时程等待。"}
             )
         return {
             "contactable_actors": contactable_actors,
-            "known_entities": [
-                {"id": location.id, "type": "PLACE", "display_name": location.display_name}
-            ],
+            "known_entities": known_entities,
             "own_assets": own_assets,
-            "available_operations": available_operations,
+            "available_operations": self.pack.operation_affordances(
+                actor_id, projection, int(projection["tick"])
+            ),
+            "active_operations": active_operations,
             "active_investigations": [],
             "active_offers": [],
             "active_agreements": [],
@@ -2137,6 +2414,8 @@ class CrisisRunEngine:
                 for actor in self.pack.crisis.actors
             ],
             "messages": list(projection.get("messages", [])),
+            "entities": list(projection.get("entities", {}).values()),
+            "operations": list(projection.get("operations", [])),
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
@@ -2236,6 +2515,7 @@ class CrisisRunEngine:
             "known_entities": perspective["known_entities"],
             "own_assets": perspective["own_assets"],
             "available_operations": perspective["available_operations"],
+            "active_operations": perspective["active_operations"],
             "active_investigations": perspective["active_investigations"],
             "active_offers": perspective["active_offers"],
             "active_agreements": perspective["active_agreements"],
@@ -2313,6 +2593,9 @@ class CrisisRunEngine:
             "REVISIT_FULFILLED": "一次重新判断已经发生",
             "COMMITMENT_SCHEDULED": "有人决定稍后再作判断",
             "COMMITMENT_FULFILLED": "一次约定的复查已经发生",
+            "OPERATION_STARTED": "一项行动已经开始",
+            "OPERATION_COMPLETED": "一项行动已经完成",
+            "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
             "MOVEMENT_STARTED": "一支队伍开始移动",
             "MOVEMENT_ARRIVED": "一支队伍抵达新的位置",
             "ACTOR_ACTION_RECORDED": "有人作出有限行动",
@@ -2386,6 +2669,17 @@ class CrisisRunEngine:
             return f"{sender} → {recipient}：{payload['content']}"
         if event["event_type"] == "PLAN_UPDATED":
             return str(payload["plan"]["objective"])
+        if event["event_type"] in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
+            operation = payload["operation"]
+            definition = self.pack.operation_by_id.get(str(operation["definition_id"]))
+            if definition is None:
+                return str(operation.get("description", ""))
+            description = str(operation.get("description", ""))
+            return f"{definition.display_name}：{description}" if description else definition.display_name
+        if event["event_type"] == "ENTITY_STATE_CHANGED":
+            entity = self.pack.entity_by_id.get(str(payload["entity_id"]))
+            display_name = entity.display_name if entity is not None else str(payload["entity_id"])
+            return f"{display_name}：{payload['before']} → {payload['after']}"
         if event["event_type"] == "MOVEMENT_ARRIVED":
             return f"抵达{self.pack.location_by_id[payload['to']].display_name}"
         if event["event_type"] == "HUMAN_DECISION_APPLIED":

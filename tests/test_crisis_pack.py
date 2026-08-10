@@ -29,10 +29,13 @@ def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
         actor = copy.deepcopy(template)
         actor["id"] = actor_id
         actor["display_name"] = actor_id
+        actor["asset_ids"] = []
         crisis["actors"].append(actor)
     crisis["playable_actor_ids"] = [actor_ids[0]]
     crisis["checkpoint"]["in_transit"] = []
     crisis["anchors"] = []
+    crisis["entities"] = []
+    crisis["operations"] = []
     (root / "crisis.yaml").write_text(
         yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -136,6 +139,26 @@ def test_crisis_pack_rejects_a_playable_actor_that_is_not_in_the_cast(tmp_path):
     )
 
     with pytest.raises(CrisisValidationError, match="playable_actor_ids: unknown actors"):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_operation_reference_to_a_missing_entity(tmp_path):
+    root = tmp_path / "invalid-operation-reference"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["operations"][0]["preconditions"][0]["subject"] = "missing-force"
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="operation prepare_force: unknown precondition subject missing-force",
+    ):
         CrisisPack.load(root)
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,31 @@ class CrisisSurfaceKind(StrEnum):
     POLITICAL = "POLITICAL"
 
 
+class CrisisEntityType(StrEnum):
+    PERSON = "PERSON"
+    CLAIMANT = "CLAIMANT"
+    INSTITUTION = "INSTITUTION"
+    FORCE = "FORCE"
+    PLACE = "PLACE"
+    ASSET = "ASSET"
+    DOCUMENT = "DOCUMENT"
+
+
+class OperationDurationKind(StrEnum):
+    FIXED = "FIXED"
+    ROUTE = "ROUTE"
+
+
+class OperationKind(StrEnum):
+    STATE_CHANGE = "STATE_CHANGE"
+    MOVEMENT = "MOVEMENT"
+
+
+class OperationVisibility(StrEnum):
+    PRIVATE = "PRIVATE"
+    PUBLIC = "PUBLIC"
+
+
 class RoleCharter(StrictModel):
     who: str
     responsibility: list[str]
@@ -46,6 +73,50 @@ class CrisisActorDefinition(StrictModel):
     initial_beliefs: dict[str, str]
     resources: dict[str, str | int]
     world_authority: list[str]
+    asset_ids: list[str] = Field(default_factory=list)
+
+
+class CrisisEntity(StrictModel):
+    id: str
+    type: CrisisEntityType
+    display_name: str
+    initial_state: str
+    assertion_ids: list[str] = Field(default_factory=list)
+
+
+class OperationTarget(StrictModel):
+    id: str
+    entity_types: list[CrisisEntityType]
+    owned_by_actor: bool = False
+
+
+class OperationStateCondition(StrictModel):
+    subject: str
+    states: list[str]
+
+
+class OperationStateEffect(StrictModel):
+    subject: str
+    state: str
+
+
+class CrisisOperationDefinition(StrictModel):
+    id: str
+    display_name: str
+    description: str
+    actor_ids: list[str]
+    targets: list[OperationTarget] = Field(default_factory=list)
+    kind: OperationKind = OperationKind.STATE_CHANGE
+    duration_kind: OperationDurationKind = OperationDurationKind.FIXED
+    duration_days: int | None = Field(default=None, ge=1)
+    movement_destination_target: str = ""
+    required_assets: list[str] = Field(default_factory=list)
+    preconditions: list[OperationStateCondition] = Field(default_factory=list)
+    start_effects: list[OperationStateEffect] = Field(default_factory=list)
+    completion_effects: list[OperationStateEffect] = Field(default_factory=list)
+    visibility: OperationVisibility = OperationVisibility.PRIVATE
+    interruptibility: bool = False
+    conflicts: list[str] = Field(default_factory=list)
 
 
 class CorridorLocation(StrictModel):
@@ -123,6 +194,8 @@ class CrisisDefinition(StrictModel):
     corridor: list[CorridorLocation]
     routes: list[CrisisRoute]
     anchors: list[HistoricalAnchor]
+    entities: list[CrisisEntity] = Field(default_factory=list)
+    operations: list[CrisisOperationDefinition] = Field(default_factory=list)
 
 
 class CrisisReference(StrictModel):
@@ -137,6 +210,15 @@ class VolumeDefinition(StrictModel):
     native_period: str
     description: str
     crises: list[CrisisReference]
+
+
+@dataclass(frozen=True)
+class OperationRequest:
+    definition: CrisisOperationDefinition
+    target_ids: tuple[str, ...]
+    target_map: dict[str, str]
+    expected_complete_tick: int
+    input_state: dict[str, str]
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -176,6 +258,179 @@ class CrisisPack:
     @property
     def location_by_id(self) -> dict[str, CorridorLocation]:
         return {location.id: location for location in self.crisis.corridor}
+
+    @property
+    def entity_by_id(self) -> dict[str, CrisisEntity]:
+        return {entity.id: entity for entity in self.crisis.entities}
+
+    @property
+    def operation_by_id(self) -> dict[str, CrisisOperationDefinition]:
+        return {operation.id: operation for operation in self.crisis.operations}
+
+    def route_days(self, start: str, end: str) -> int | None:
+        queue: list[tuple[int, str]] = [(0, start)]
+        best: dict[str, int] = {start: 0}
+        edges: dict[str, list[tuple[str, int]]] = {}
+        for route in self.crisis.routes:
+            edges.setdefault(route.from_location, []).append((route.to_location, route.travel_days))
+        while queue:
+            distance, location = heapq.heappop(queue)
+            if location == end:
+                return distance
+            if distance != best.get(location):
+                continue
+            for target, days in edges.get(location, []):
+                candidate = distance + days
+                if candidate < best.get(target, 10**9):
+                    best[target] = candidate
+                    heapq.heappush(queue, (candidate, target))
+        return None
+
+    @staticmethod
+    def _operation_subject_entity_id(subject: str, target_map: dict[str, str]) -> str:
+        return target_map.get(subject, subject)
+
+    @staticmethod
+    def _entity_state(projection: dict[str, Any], entity_id: str) -> str:
+        entity = projection.get("entities", {}).get(entity_id, {})
+        return str(entity.get("state", "")) if isinstance(entity, dict) else ""
+
+    def operation_request(
+        self,
+        actor_id: str,
+        definition_id: str,
+        target_ids: list[str],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[OperationRequest | None, str]:
+        actor = self.actor_by_id.get(actor_id)
+        definition = self.operation_by_id.get(definition_id)
+        if actor is None or definition is None:
+            return None, "unknown_operation"
+        if actor_id not in definition.actor_ids:
+            return None, "operation_authority_denied"
+        if len(target_ids) != len(definition.targets) or any(
+            not isinstance(target_id, str) or not target_id for target_id in target_ids
+        ):
+            return None, "invalid_operation_targets"
+        if len(target_ids) != len(set(target_ids)):
+            return None, "invalid_operation_targets"
+        target_map = {
+            target.id: target_id for target, target_id in zip(definition.targets, target_ids, strict=True)
+        }
+        entities = self.entity_by_id
+        for target, target_id in zip(definition.targets, target_ids, strict=True):
+            entity = entities.get(target_id)
+            if entity is None or entity.type not in target.entity_types:
+                return None, "invalid_operation_targets"
+            if target.owned_by_actor and target_id not in actor.asset_ids:
+                return None, "operation_target_not_owned"
+        for subject in definition.required_assets:
+            entity_id = self._operation_subject_entity_id(subject, target_map)
+            if entity_id not in actor.asset_ids:
+                return None, "required_asset_unavailable"
+        for condition in definition.preconditions:
+            entity_id = self._operation_subject_entity_id(condition.subject, target_map)
+            if self._entity_state(projection, entity_id) not in condition.states:
+                return None, "operation_precondition_unmet"
+        for active in projection.get("operations", []):
+            if active.get("status") not in {"PLANNED", "IN_PROGRESS"}:
+                continue
+            active_definition = self.operation_by_id.get(str(active.get("definition_id", "")))
+            if active_definition is None:
+                continue
+            if not set(target_ids).intersection(active.get("target_ids", [])):
+                continue
+            if (
+                active_definition.id in definition.conflicts
+                or definition.id in active_definition.conflicts
+            ):
+                return None, "operation_conflict"
+        if definition.duration_kind == OperationDurationKind.FIXED:
+            expected_complete_tick = tick + int(definition.duration_days or 0)
+        else:
+            destination_id = target_map.get(definition.movement_destination_target, "")
+            travel_days = self.route_days(
+                str(projection.get("positions", {}).get(actor_id, "")), destination_id
+            )
+            if travel_days is None or travel_days <= 0:
+                return None, "no_route"
+            expected_complete_tick = tick + travel_days
+        if expected_complete_tick >= self.crisis.simulation_boundary.maximum_tick:
+            return None, "crosses_simulation_boundary"
+        input_state = {
+            entity_id: self._entity_state(projection, entity_id)
+            for entity_id in target_ids
+        }
+        return (
+            OperationRequest(
+                definition=definition,
+                target_ids=tuple(target_ids),
+                target_map=target_map,
+                expected_complete_tick=expected_complete_tick,
+                input_state=input_state,
+            ),
+            "",
+        )
+
+    def operation_affordances(
+        self,
+        actor_id: str,
+        projection: dict[str, Any],
+        tick: int,
+    ) -> list[dict[str, Any]]:
+        actor = self.actor_by_id[actor_id]
+        entities = self.entity_by_id
+        affordances: list[dict[str, Any]] = []
+        for definition in self.crisis.operations:
+            if actor_id not in definition.actor_ids:
+                continue
+            options_by_target: list[list[str]] = []
+            for target in definition.targets:
+                options = [
+                    entity.id
+                    for entity in sorted(entities.values(), key=lambda item: item.id)
+                    if entity.type in target.entity_types
+                    and (not target.owned_by_actor or entity.id in actor.asset_ids)
+                ]
+                options_by_target.append(options)
+            valid_target_ids = [
+                tuple(candidate)
+                for candidate in product(*options_by_target)
+                if self.operation_request(
+                    actor_id, definition.id, list(candidate), projection, tick
+                )[0]
+                is not None
+            ]
+            if not valid_target_ids:
+                continue
+            affordances.append(
+                {
+                    "id": definition.id,
+                    "display_name": definition.display_name,
+                    "description": definition.description,
+                    "kind": definition.kind.value,
+                    "duration_kind": definition.duration_kind.value,
+                    "duration_days": definition.duration_days,
+                    "targets": [
+                        {
+                            "id": target.id,
+                            "options": [
+                                {
+                                    "id": entity_id,
+                                    "display_name": entities[entity_id].display_name,
+                                    "state": self._entity_state(projection, entity_id),
+                                }
+                                for entity_id in sorted(
+                                    {candidate[index] for candidate in valid_target_ids}
+                                )
+                            ],
+                        }
+                        for index, target in enumerate(definition.targets)
+                    ],
+                }
+            )
+        return affordances
 
     @property
     def content_hash(self) -> str:
@@ -252,6 +507,17 @@ class CrisisPack:
                 if source_id not in source_ids:
                     errors.append(f"assertion {assertion.id}: unknown source {source_id}")
 
+        entity_ids = [entity.id for entity in self.crisis.entities]
+        if len(entity_ids) != len(set(entity_ids)):
+            errors.append("entities: ids must be unique")
+        known_entities = set(entity_ids)
+        for entity in self.crisis.entities:
+            if not entity.initial_state:
+                errors.append(f"entity {entity.id}: initial state is required")
+            for assertion_id in entity.assertion_ids:
+                if assertion_id not in known_assertions:
+                    errors.append(f"entity {entity.id}: unknown assertion {assertion_id}")
+
         location_ids = [location.id for location in self.crisis.corridor]
         if len(location_ids) != len(set(location_ids)):
             errors.append("corridor: location ids must be unique")
@@ -269,9 +535,63 @@ class CrisisPack:
             for assertion_id in actor.initial_knowledge:
                 if assertion_id not in known_assertions:
                     errors.append(f"actor {actor.id}: unknown knowledge assertion {assertion_id}")
+            unknown_assets = set(actor.asset_ids) - known_entities
+            if unknown_assets:
+                errors.append(
+                    f"actor {actor.id}: unknown assets {', '.join(sorted(unknown_assets))}"
+                )
         for route in self.crisis.routes:
             if route.from_location not in known_locations or route.to_location not in known_locations:
                 errors.append(f"route {route.id}: endpoint is not on the corridor")
+
+        operation_ids = [operation.id for operation in self.crisis.operations]
+        if len(operation_ids) != len(set(operation_ids)):
+            errors.append("operations: ids must be unique")
+        known_operations = set(operation_ids)
+        for operation in self.crisis.operations:
+            unknown_actors = set(operation.actor_ids) - set(actor_ids)
+            if unknown_actors:
+                errors.append(
+                    f"operation {operation.id}: unknown actors {', '.join(sorted(unknown_actors))}"
+                )
+            target_ids = [target.id for target in operation.targets]
+            if len(target_ids) != len(set(target_ids)) or any(not target_id for target_id in target_ids):
+                errors.append(f"operation {operation.id}: target ids must be unique and nonempty")
+            if any(not target.entity_types for target in operation.targets):
+                errors.append(f"operation {operation.id}: target types are required")
+            if operation.duration_kind == OperationDurationKind.FIXED and operation.duration_days is None:
+                errors.append(f"operation {operation.id}: fixed duration requires duration_days")
+            if operation.duration_kind == OperationDurationKind.ROUTE and operation.duration_days is not None:
+                errors.append(f"operation {operation.id}: route duration cannot set duration_days")
+            if operation.kind == OperationKind.MOVEMENT:
+                destination = next(
+                    (target for target in operation.targets if target.id == operation.movement_destination_target),
+                    None,
+                )
+                if destination is None or CrisisEntityType.PLACE not in destination.entity_types:
+                    errors.append(
+                        f"operation {operation.id}: movement destination must be a PLACE target"
+                    )
+            elif operation.movement_destination_target:
+                errors.append(f"operation {operation.id}: only MOVEMENT may set a destination target")
+            for subject in operation.required_assets:
+                if subject not in target_ids and subject not in known_entities:
+                    errors.append(f"operation {operation.id}: unknown required asset {subject}")
+            for condition in operation.preconditions:
+                if condition.subject not in target_ids and condition.subject not in known_entities:
+                    errors.append(f"operation {operation.id}: unknown precondition subject {condition.subject}")
+                if not condition.states:
+                    errors.append(f"operation {operation.id}: precondition states are required")
+            for effect in [*operation.start_effects, *operation.completion_effects]:
+                if effect.subject not in target_ids and effect.subject not in known_entities:
+                    errors.append(f"operation {operation.id}: unknown effect subject {effect.subject}")
+                if not effect.state:
+                    errors.append(f"operation {operation.id}: effect state is required")
+            unknown_conflicts = set(operation.conflicts) - known_operations
+            if unknown_conflicts:
+                errors.append(
+                    f"operation {operation.id}: unknown conflicts {', '.join(sorted(unknown_conflicts))}"
+                )
 
         checkpoint = self.crisis.checkpoint
         if self.crisis.simulation_boundary.maximum_tick > checkpoint.safety_horizon_days:

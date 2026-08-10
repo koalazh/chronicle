@@ -180,8 +180,8 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
     monkeypatch.setattr(
         "chronicle.doctor.probe_mcp_tools",
         lambda _config, _server: (
-            "act",
             "communicate",
+            "operate",
             "schedule_revisit",
             "update_plan",
         ),

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import heapq
 import inspect
 import json
 import uuid
@@ -112,25 +111,7 @@ class WorldService:
         )
 
     def route_days(self, start: str, end: str) -> int | None:
-        queue: list[tuple[int, str]] = [(0, start)]
-        best: dict[str, int] = {start: 0}
-        edges: dict[str, list[tuple[str, int]]] = {}
-        for route in self.pack.crisis.routes:
-            edges.setdefault(route.from_location, []).append(
-                (route.to_location, route.travel_days)
-            )
-        while queue:
-            distance, location = heapq.heappop(queue)
-            if location == end:
-                return distance
-            if distance != best.get(location):
-                continue
-            for target, days in edges.get(location, []):
-                candidate = distance + days
-                if candidate < best.get(target, 10**9):
-                    best[target] = candidate
-                    heapq.heappush(queue, (candidate, target))
-        return None
+        return self.pack.route_days(start, end)
 
 
 class WorldAffordanceSession:
@@ -222,56 +203,73 @@ class WorldAffordanceSession:
         }
         return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
 
-    def act(
+    def operate(
         self,
-        action: str,
+        operation_definition_id: str,
+        targets: list[str],
         description: str,
         *,
-        target: str = "",
         idempotency_key: str,
     ) -> dict[str, Any]:
-        action = action.strip().lower()
-        payload = {"action": action, "description": description.strip(), "target": target}
-        if action not in {"hold", "prepare", "move"}:
-            result = {"status": "rejected", "code": "unsupported_action"}
-            return self._stage("act", payload, result, idempotency_key=idempotency_key)
-        if action not in self._actor().world_authority:
+        payload = {
+            "operation_definition_id": operation_definition_id.strip(),
+            "targets": [target.strip() if isinstance(target, str) else "" for target in targets],
+            "description": description.strip(),
+        }
+        if "operate" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
-            return self._stage("act", payload, result, idempotency_key=idempotency_key)
+            return self._stage("operate", payload, result, idempotency_key=idempotency_key)
         if not payload["description"]:
             result = {"status": "rejected", "code": "missing_description"}
-            return self._stage("act", payload, result, idempotency_key=idempotency_key)
+            return self._stage("operate", payload, result, idempotency_key=idempotency_key)
         tick, projection = self._tick_and_projection()
-        result: dict[str, Any] = {"status": "accepted", "action_id": f"action-{uuid.uuid4().hex[:16]}"}
-        if action == "move":
-            if target not in self.service.pack.location_by_id:
-                result = {"status": "rejected", "code": "unknown_location"}
-            else:
-                start = projection["positions"][self.identity.actor_id]
-                travel_days = self.service.route_days(start, target)
-                if travel_days is None or travel_days <= 0:
-                    result = {"status": "rejected", "code": "no_route"}
-                else:
-                    arrival_tick = tick + travel_days
-                    boundary = self.service.pack.crisis.simulation_boundary.maximum_tick
-                    if arrival_tick >= boundary:
-                        result = {"status": "rejected", "code": "crosses_simulation_boundary"}
-                    else:
-                        result.update(
-                            {
-                                "movement_id": f"movement-{uuid.uuid4().hex[:16]}",
-                                "arrival_tick": arrival_tick,
-                            }
-                        )
+        request, code = self.service.pack.operation_request(
+            self.identity.actor_id,
+            payload["operation_definition_id"],
+            payload["targets"],
+            projection,
+            tick,
+        )
+        if request is None:
+            result = {"status": "rejected", "code": code}
         else:
-            actor = self._actor()
-            current_location = projection["positions"][self.identity.actor_id]
-            valid_targets = set(actor.resources) | {current_location}
-            if not target:
-                result = {"status": "rejected", "code": "missing_grounded_target"}
-            elif target not in valid_targets:
-                result = {"status": "rejected", "code": "unknown_resource_or_position"}
-        return self._stage("act", payload, result, idempotency_key=idempotency_key)
+            conflicts_with_staged = any(
+                existing["tool_name"] == "operate"
+                and existing["status"] == "PROPOSED"
+                and self._operations_conflict(
+                    request.definition.id,
+                    payload["targets"],
+                    str(existing["payload"].get("operation_definition_id", "")),
+                    list(existing["payload"].get("targets", [])),
+                )
+                for existing in self.service.db.crisis_wake_operations(self.identity.wake_id)
+            )
+            result = (
+                {"status": "rejected", "code": "operation_conflict"}
+                if conflicts_with_staged
+                else {
+                    "status": "accepted",
+                    "operation_id": f"operation-{uuid.uuid4().hex[:16]}",
+                    "expected_complete_tick": request.expected_complete_tick,
+                    "input_state": request.input_state,
+                }
+            )
+        return self._stage("operate", payload, result, idempotency_key=idempotency_key)
+
+    def _operations_conflict(
+        self,
+        definition_id: str,
+        target_ids: list[str],
+        existing_definition_id: str,
+        existing_target_ids: list[str],
+    ) -> bool:
+        definition = self.service.pack.operation_by_id.get(definition_id)
+        existing = self.service.pack.operation_by_id.get(existing_definition_id)
+        if definition is None or existing is None:
+            return False
+        return bool(set(target_ids).intersection(existing_target_ids)) and (
+            existing.id in definition.conflicts or definition.id in existing.conflicts
+        )
 
     def update_plan(
         self,
@@ -338,5 +336,5 @@ def world_tool_signatures() -> dict[str, inspect.Signature]:
 
     return {
         name: inspect.signature(getattr(WorldAffordanceSession, name))
-        for name in ("communicate", "act", "update_plan", "schedule_revisit")
+        for name in ("communicate", "operate", "update_plan", "schedule_revisit")
     }

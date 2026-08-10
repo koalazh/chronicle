@@ -334,6 +334,70 @@ def test_human_desk_persists_known_state_outbox_decisions_and_resolves_due_matte
     assert any(event["event_type"] == "REVISIT_FULFILLED" for event in silence["events"])
 
 
+def test_human_operation_persists_then_changes_a_later_available_action(app_config):
+    class PrepareInterpreter:
+        source = "fixture"
+
+        def interpret(self, text, perspective):
+            assert {item["id"] for item in perspective["available_operations"]} == {
+                "prepare_force"
+            }
+            return InterpretedDecision(
+                summary="先整备关宁所部。",
+                operations=[
+                    DecisionOperation(
+                        tool="operate",
+                        arguments={
+                            "operation_definition_id": "prepare_force",
+                            "targets": ["wu-field-force"],
+                            "description": "开始整备关宁所部。",
+                        },
+                    )
+                ],
+            )
+
+    class MoveInterpreter:
+        source = "fixture"
+
+        def interpret(self, text, perspective):
+            assert perspective["active_operations"] == []
+            assert {item["id"] for item in perspective["available_operations"]} == {
+                "move_force"
+            }
+            return InterpretedDecision(
+                summary="向永平调动所部。",
+                operations=[
+                    DecisionOperation(
+                        tool="operate",
+                        arguments={
+                            "operation_definition_id": "move_force",
+                            "targets": ["wu-field-force", "yongping"],
+                            "description": "向永平调动已整备所部。",
+                        },
+                    )
+                ],
+            )
+
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+
+    started = engine.submit_human_decision(run_id, "先整备兵力", interpreter=PrepareInterpreter())
+    assert started["operations"][0]["status"] == "COMMITTED"
+    restarted = CrisisRunEngine(app_config)
+    assert restarted.product_perspective(run_id, "wu-sangui")["active_operations"][0][
+        "status"
+    ] == "IN_PROGRESS"
+
+    restarted.run_until_idle(run_id)
+    resumed = restarted.product_perspective(run_id, "wu-sangui")
+
+    assert resumed["own_assets"][0]["id"] == "wu-field-force"
+    assert resumed["own_assets"][0]["state"] == "READY"
+    assert {item["id"] for item in resumed["available_operations"]} == {"move_force"}
+    moved = restarted.submit_human_decision(run_id, "向永平调动", interpreter=MoveInterpreter())
+    assert moved["operations"][0]["status"] == "COMMITTED"
+
+
 def test_invalid_later_human_operation_leaves_no_partial_world_commit(app_config):
     class InvalidInterpreter:
         source = "fixture"
@@ -347,9 +411,10 @@ def test_invalid_later_human_operation_leaves_no_partial_world_commit(app_config
                         arguments={"recipient": "dorgon", "content": "合法的第一项"},
                     ),
                     DecisionOperation(
-                        tool="act",
+                        tool="operate",
                         arguments={
-                            "action": "hold",
+                            "operation_definition_id": "prepare_force",
+                            "targets": ["wu-field-force"],
                             "description": "非法携带身份",
                             "actor_id": "li-zicheng",
                         },

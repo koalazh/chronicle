@@ -65,7 +65,7 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
             stdout=(
                 "Connected (15ms)\nTools discovered: 4\n\n"
                 "    communicate                         Send a message\n"
-                "    act                                 Request an action\n"
+                "    operate                             Start an operation\n"
                 "    update_plan                         Update a plan\n"
                 "    schedule_revisit                    Schedule a revisit\n"
             ),
@@ -75,8 +75,8 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
     )
 
     assert probe_mcp_tools(app_config, "chronicle-world") == (
-        "act",
         "communicate",
+        "operate",
         "schedule_revisit",
         "update_plan",
     )

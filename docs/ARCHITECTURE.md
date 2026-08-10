@@ -37,7 +37,7 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 
 | 层 | 保存什么 | 谁能更新 |
 | --- | --- | --- |
-| Truth / Projection | 模拟日、位置、路线、消息、移动和世界效果 | Host 的确定性提交路径 |
+| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Operation、移动和世界效果 | Host 的确定性提交路径 |
 | Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
 | Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
 | Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
@@ -48,17 +48,17 @@ Knowledge 不是 Truth 的副本，Belief 不是史实定论，Plan/Revisit 也�
 
 ### 创建
 
-同一时间最多一局可玩的 ACTIVE Run。Host 从 Crisis Pack 读取 checkpoint、主体、走廊、路线、初始信息和在途消息，建立 Projection 与每个主体的 Life State，并原子写入创建/checkpoint 事件。fixture Run 随后直接授权 Agent binding 和 `ORIENT` Wake。
+同一时间最多一局可玩的 ACTIVE Run。Host 从 Crisis Pack 读取 checkpoint、主体、实体、走廊、路线、初始信息和在途消息，建立 Projection 与每个主体的 Life State，并原子写入创建/checkpoint/entity 初始化事件。fixture Run 随后直接授权 Agent binding 和 `ORIENT` Wake。
 
-Watch 的 controller map 是三位 Agent；Takeover 是李自成 Agent、吴三桂 Human、多尔衮 Agent。live Run 先以 `BOOTSTRAPPING` 持久化同一局的主体 identity，再按 identity 幂等建立所需 Profile、当前局唯一的 root MCP allowlist 和私有 Gateway child，最后才在一个事务里授权 binding 和排入 `ORIENT` Wake。初始 `ORIENT` 必须通过 World MCP 留下 committed `update_plan`；否则 Run 保持同一 identity 并进入 `FAILED`，不会伪装成 memory-only 的合法 no-op。
+Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将该 Crisis 指定的一个 playable Actor 设为 Human，其余 Actor 均为 Agent。live Run 先以 `BOOTSTRAPPING` 持久化同一局的主体 identity，再按 identity 幂等建立所需 Profile、当前局唯一的 root MCP allowlist 和私有 Gateway child，最后才在一个事务里授权 binding 和排入 `ORIENT` Wake。初始 `ORIENT` 必须通过 World MCP 留下 committed `update_plan`；否则 Run 保持同一 identity 并进入 `FAILED`，不会伪装成 memory-only 的合法 no-op。
 
 ### 推进
 
-Scheduler 只寻找已经存在的下一件事：移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+Scheduler 只寻找已经存在的下一件事：Operation 完成、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
 
 `ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
-一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、移动和观察排入未来时刻。
+一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Operation、移动和观察排入未来时刻。
 
 因此模型返回顺序不能改变世界语义；拒绝、等待、沉默和 no-op 都是合法结果；消息不能在同 tick 递归唤醒收件人。
 
@@ -78,7 +78,7 @@ GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项
 
 ## Perspective 与隐私
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用行动和 target、自己拥有的 asset、当前 Revisit、已知实体与可见世界约束；尚未实现的 Investigation、Offer 和 Agreement 在此阶段以空集合显式表示。
+Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、自己拥有的 asset、进行中的自身 Operation、当前 Revisit、已知实体与可见世界约束；尚未实现的 Investigation、Offer 和 Agreement 在此阶段以空集合显式表示。
 
 人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
 
@@ -89,11 +89,13 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | 工具 | 主体表达什么 | Host 至少校验什么 |
 | --- | --- | --- |
 | `communicate(recipient, content, idempotency_key)` | 给另一主体发送一封信 | 收件人、内容、路线和抵达日 |
-| `act(action, description, target, idempotency_key)` | `hold`、`prepare` 或 `move` | authority、目标资源/位置、路线、资源、边界和现实前提 |
+| `operate(operation_definition_id, targets, description, idempotency_key)` | 启动 Crisis Pack 声明、需要模拟时间的行动 | authority、目标类型/归属、Asset 状态、冲突、路线、时程、边界和现实前提 |
 | `update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)` | 更新目标、方法、重新判断条件和必要的 Belief | 内容完整性、信念格式、语义 no-op 和幂等键 |
 | `schedule_revisit(after_days, reason, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、原因、边界和幂等键 |
 
 工具参数不接受 actor、run 或 wake 身份。Agent 身份来自 Profile 私有 token，Human 身份来自当前控制者。调用先落为 `PROPOSED` 或 `REJECTED`，Wake 成功时才与 Ledger、Projection、Life State 一起提交；重复幂等键返回第一次结果，超过 8 次被拒绝。
+
+已接受的 `operate` 会写入 `OPERATION_STARTED` 与必要的起始 Asset state effect，随后以 `IN_PROGRESS` 留在 Projection，直到确定的 complete tick 才写入 `OPERATION_COMPLETED`、完成 effect 和对可见主体的 Observation/Wake。第一轮山海关 Operation 只实现启动与完成；取消和中断会在对应 Crisis 真实需要这些后果时再进入同一 lifecycle，而不是把 `interruptibility` 伪装成已经可用的按钮。
 
 ## Hermes 边界
 
@@ -101,9 +103,9 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | --- | --- |
 | Profile、模型请求、Agent loop、fresh Session | Run、模拟时间、停止边界、Perspective |
 | Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Revisit、Resource、Authority |
-| 模型判断与工具调用 | 路线、消息送达、权限、世界效果和 Ledger |
+| 模型判断与工具调用 | 路线、消息送达、Operation lifecycle、权限、世界效果和 Ledger |
 
-Watch 在 live Run 建立后运行三个 Agent Profile；Takeover 运行李自成和多尔衮两个 Profile，吴三桂由 Human lifetime 承担。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
+Watch 在 live Run 建立后为全部 Agent-controlled Actor 运行 Profile；Takeover 只为非 Human-controlled Actor 运行 Profile。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
 
 每次 Agent Wake 使用 fresh Session。普通 Wake 不得改变 durable Memory；只有 `REFLECTION` Wake 可以写入长期经验，也可以选择 `NO_CHANGE`。Plan、Belief、Revisit 和未送达消息属于 Chronicle Life State，不写进 Memory。Reflection 的 native Memory、Life State、Ledger 事件和 lineage version 必须作为同一个 SQLite moment 提交，失败时恢复 native 文件。
 

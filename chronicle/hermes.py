@@ -699,6 +699,514 @@ def materialize_crisis_profiles(
     return records
 
 
+def lifetime_profile_name(worldline_id: str, lifetime_id: str) -> str:
+    return f"chronicle-{worldline_id}-{lifetime_id}"
+
+
+def lifetime_world_server_name(worldline_id: str, lifetime_id: str) -> str:
+    return f"chronicle-volume-world-{worldline_id}-{lifetime_id}"
+
+
+def stable_lifetime_profile_marker(worldline_id: str, lifetime_id: str, profile: str) -> str:
+    return hashlib.sha256(
+        f"{worldline_id}:{lifetime_id}:{profile}:v5".encode()
+    ).hexdigest()
+
+
+def _lifetime_pending_profile_path(config: AppConfig, profile: str) -> Path:
+    return config.runtime_dir / "lifetime-profile-pending" / f"{profile}.json"
+
+
+def _lifetime_marker_values(
+    *,
+    profile: str,
+    worldline_id: str,
+    volume_id: str,
+    content_version: int,
+    content_hash: str,
+    lifetime_id: str,
+    genesis_hash: str,
+    runtime_epoch: str,
+    ownership_marker: str,
+    world_server_name: str,
+) -> dict[str, Any]:
+    return {
+        "profile_scope": "LIFETIME",
+        "profile": profile,
+        "worldline_id": worldline_id,
+        "volume_id": volume_id,
+        "volume_content_version": content_version,
+        "volume_content_hash": content_hash,
+        "lifetime_id": lifetime_id,
+        "genesis_hash": genesis_hash,
+        "runtime_epoch": runtime_epoch,
+        "ownership_marker": ownership_marker,
+        "distribution": "chronicle-actor",
+        "toolsets": ["memory", world_server_name],
+    }
+
+
+def _lifetime_marker_matches(
+    values: Any,
+    *,
+    profile: str,
+    worldline_id: str,
+    volume_id: str,
+    content_version: int,
+    content_hash: str,
+    lifetime_id: str,
+    genesis_hash: str,
+    runtime_epoch: str,
+    ownership_marker: str,
+    world_server_name: str,
+) -> bool:
+    return isinstance(values, dict) and values == _lifetime_marker_values(
+        profile=profile,
+        worldline_id=worldline_id,
+        volume_id=volume_id,
+        content_version=content_version,
+        content_hash=content_hash,
+        lifetime_id=lifetime_id,
+        genesis_hash=genesis_hash,
+        runtime_epoch=runtime_epoch,
+        ownership_marker=ownership_marker,
+        world_server_name=world_server_name,
+    )
+
+
+def _lifetime_pending_matches(
+    path: Path,
+    *,
+    profile: str,
+    worldline_id: str,
+    lifetime_id: str,
+    runtime_epoch: str,
+    ownership_marker: str,
+) -> bool:
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(values, dict) and values == {
+        "profile": profile,
+        "profile_scope": "LIFETIME",
+        "worldline_id": worldline_id,
+        "lifetime_id": lifetime_id,
+        "runtime_epoch": runtime_epoch,
+        "ownership_marker": ownership_marker,
+    }
+
+
+def _sync_lifetime_soul(profile_home: Path, lifetime: dict[str, Any]) -> None:
+    path = profile_home / "SOUL.md"
+    if not path.exists():
+        path.write_text("# Chronicle Persistent Lifetime\n", encoding="utf-8")
+    common = path.read_text(encoding="utf-8").rstrip()
+    context = lifetime.get("genesis_context", {})
+    if isinstance(context, dict):
+        context_text = "；".join(f"{key}：{value}" for key, value in context.items())
+    else:
+        context_text = str(context)
+    authority = "；".join(str(item) for item in lifetime.get("stable_authority", []))
+    stable_section = (
+        "\n\n## Persistent Lifetime Genesis\n\n"
+        f"主体：{lifetime.get('display_name', lifetime.get('seat', ''))}\n\n"
+        f"Genesis context：{context_text}\n\n"
+        f"Stable authority：{authority}\n"
+    )
+    if "## Persistent Lifetime Genesis" not in common:
+        path.write_text(common + stable_section, encoding="utf-8")
+
+
+def _sync_gateway_lifetime_mcp(
+    config: AppConfig,
+    records: dict[str, dict[str, Any]],
+) -> None:
+    config_path = config.hermes_home / "config.yaml"
+    values = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = values or {}
+    servers = values.setdefault("mcp_servers", {})
+    root_env = _read_env_file(config.hermes_home / ".env")
+    managed_servers = [
+        name for name in servers if str(name).startswith("chronicle-volume-world-")
+    ]
+    for server_name in managed_servers:
+        servers.pop(server_name, None)
+        suffix = re.sub(r"[^A-Z0-9_]", "_", str(server_name).upper())
+        root_env.pop(f"{suffix}_TOKEN", None)
+        root_env.pop(f"{suffix}_DATABASE_URL", None)
+    for record in records.values():
+        server_name = str(record["world_server_name"])
+        suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
+        token_key = f"{suffix}_TOKEN"
+        database_key = f"{suffix}_DATABASE_URL"
+        root_env[token_key] = str(record["world_token"])
+        root_env[database_key] = f"sqlite:///{config.database_path}"
+        servers[server_name] = {
+            "command": str(Path(sys.executable).absolute()),
+            "args": ["-m", "chronicle.world_mcp"],
+            "env": {
+                "CHRONICLE_DATABASE_URL": f"${{{database_key}}}",
+                "CHRONICLE_WORLD_TOKEN": f"${{{token_key}}}",
+            },
+            "timeout": 30,
+            "connect_timeout": 30,
+        }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.safe_dump(values, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    _write_profile_env(config.hermes_home, root_env)
+
+
+def materialize_lifetime_profiles(
+    config: AppConfig,
+    worldline_id: str,
+    lifetimes: list[dict[str, Any]],
+    *,
+    volume_id: str,
+    content_version: int,
+    content_hash: str,
+    runtime_epoch: str,
+) -> dict[str, dict[str, Any]]:
+    """Materialize every V5 Lifetime Profile without starting cognition or a Wake."""
+
+    distribution = config.root / ACTOR_DISTRIBUTION
+    records: dict[str, dict[str, Any]] = {}
+    installed: list[Path] = []
+    try:
+        for lifetime in lifetimes:
+            lifetime_id = str(lifetime.get("id") or lifetime.get("lifetime_id") or "")
+            if not lifetime_id:
+                raise RuntimeError("V5 Lifetime is missing its durable id")
+            profile = lifetime_profile_name(worldline_id, lifetime_id)
+            world_server_name = lifetime_world_server_name(worldline_id, lifetime_id)
+            expected_marker = stable_lifetime_profile_marker(worldline_id, lifetime_id, profile)
+            profile_home = config.hermes_home / "profiles" / profile
+            marker = profile_home / "chronicle-genesis.json"
+            pending = _lifetime_pending_profile_path(config, profile)
+            marker_values: dict[str, Any] | None = None
+            if profile_home.exists():
+                if profile_home.is_symlink():
+                    raise RuntimeError(f"cannot verify Lifetime Profile {profile}")
+                try:
+                    parsed_marker = json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(parsed_marker, dict):
+                        marker_values = parsed_marker
+                except (OSError, ValueError):
+                    marker_values = None
+                if marker_values is not None and not _lifetime_marker_matches(
+                    marker_values,
+                    profile=profile,
+                    worldline_id=worldline_id,
+                    volume_id=volume_id,
+                    content_version=int(content_version),
+                    content_hash=content_hash,
+                    lifetime_id=lifetime_id,
+                    genesis_hash=str(lifetime["genesis_hash"]),
+                    runtime_epoch=runtime_epoch,
+                    ownership_marker=expected_marker,
+                    world_server_name=world_server_name,
+                ):
+                    marker_values = None
+                if marker_values is None:
+                    if not _lifetime_pending_matches(
+                        pending,
+                        profile=profile,
+                        worldline_id=worldline_id,
+                        lifetime_id=lifetime_id,
+                        runtime_epoch=runtime_epoch,
+                        ownership_marker=expected_marker,
+                    ):
+                        raise RuntimeError(f"{profile} does not belong to this Volume Worldline")
+                    shutil.rmtree(profile_home)
+            fresh = not profile_home.exists()
+            if fresh:
+                _write_json_atomic(
+                    pending,
+                    {
+                        "profile": profile,
+                        "profile_scope": "LIFETIME",
+                        "worldline_id": worldline_id,
+                        "lifetime_id": lifetime_id,
+                        "runtime_epoch": runtime_epoch,
+                        "ownership_marker": expected_marker,
+                    },
+                )
+                result = _run_cli(
+                    config,
+                    ["profile", "install", str(distribution), "--name", profile, "-y"],
+                    timeout=90,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Hermes Lifetime Profile install failed for {profile}: {result.stderr.strip()}"
+                    )
+                installed.append(profile_home)
+                _write_json_atomic(
+                    marker,
+                    _lifetime_marker_values(
+                        profile=profile,
+                        worldline_id=worldline_id,
+                        volume_id=volume_id,
+                        content_version=int(content_version),
+                        content_hash=content_hash,
+                        lifetime_id=lifetime_id,
+                        genesis_hash=str(lifetime["genesis_hash"]),
+                        runtime_epoch=runtime_epoch,
+                        ownership_marker=expected_marker,
+                        world_server_name=world_server_name,
+                    ),
+                )
+            profile_env = _read_env_file(profile_home / ".env")
+            profile_key = profile_env.get("API_SERVER_KEY", "") or generate_secret(32)
+            world_token = profile_env.get("CHRONICLE_WORLD_TOKEN", "") or generate_secret(40)
+            _sync_profile_env(
+                profile_home,
+                profile_key,
+                config,
+                extra={
+                    "CHRONICLE_DATABASE_URL": f"sqlite:///{config.database_path}",
+                    "CHRONICLE_WORLD_TOKEN": world_token,
+                },
+            )
+            _sync_profile_config(
+                profile_home,
+                config,
+                distribution / "config.yaml",
+                crisis_world=True,
+                world_server_name=world_server_name,
+            )
+            if fresh:
+                _sync_lifetime_soul(profile_home, dict(lifetime))
+            memory_path = profile_home / "memories" / "MEMORY.md"
+            memory_path.parent.mkdir(parents=True, exist_ok=True)
+            memory_path.touch(exist_ok=True)
+            pending.unlink(missing_ok=True)
+            records[lifetime_id] = {
+                "profile": profile,
+                "profile_scope": "LIFETIME",
+                "worldline_id": worldline_id,
+                "volume_id": volume_id,
+                "lifetime_id": lifetime_id,
+                "profile_key": profile_key,
+                "world_token": world_token,
+                "ownership_marker": expected_marker,
+                "world_server_name": world_server_name,
+                "controller": str(lifetime.get("controller", "AGENT")),
+                "profile_state": str(lifetime.get("profile_state", "DORMANT")),
+            }
+        if records:
+            existing_gateway_key = _read_env_file(config.hermes_home / ".env").get("API_SERVER_KEY", "")
+            _write_gateway_env(config, existing_gateway_key or next(iter(records.values()))["profile_key"])
+            _sync_gateway_lifetime_mcp(config, records)
+    except Exception as exc:
+        for profile_home in reversed(installed):
+            if profile_home.exists():
+                try:
+                    shutil.rmtree(profile_home)
+                except OSError as cleanup_exc:
+                    raise RuntimeError(
+                        f"Hermes Lifetime Profile cleanup failed for {profile_home.name}: {cleanup_exc}"
+                    ) from exc
+        raise
+    return records
+
+
+def load_lifetime_profile_records(
+    config: AppConfig,
+    worldline_id: str,
+    lifetimes: list[dict[str, Any]],
+    *,
+    volume_id: str,
+    content_version: int,
+    content_hash: str,
+    runtime_epoch: str,
+) -> dict[str, dict[str, Any]]:
+    """Read V5 Lifetime Profiles without repairing or changing their files."""
+
+    records: dict[str, dict[str, Any]] = {}
+    for lifetime in lifetimes:
+        lifetime_id = str(lifetime.get("id") or lifetime.get("lifetime_id") or "")
+        profile = lifetime_profile_name(worldline_id, lifetime_id)
+        world_server_name = lifetime_world_server_name(worldline_id, lifetime_id)
+        ownership_marker = stable_lifetime_profile_marker(worldline_id, lifetime_id, profile)
+        marker_path = config.hermes_home / "profiles" / profile / "chronicle-genesis.json"
+        try:
+            marker_values = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"cannot verify Lifetime Profile {profile}") from exc
+        if not _lifetime_marker_matches(
+            marker_values,
+            profile=profile,
+            worldline_id=worldline_id,
+            volume_id=volume_id,
+            content_version=int(content_version),
+            content_hash=content_hash,
+            lifetime_id=lifetime_id,
+            genesis_hash=str(lifetime["genesis_hash"]),
+            runtime_epoch=runtime_epoch,
+            ownership_marker=ownership_marker,
+            world_server_name=world_server_name,
+        ):
+            raise RuntimeError(f"{profile} does not belong to this Volume Worldline")
+        env = _read_env_file(config.hermes_home / "profiles" / profile / ".env")
+        profile_key = env.get("API_SERVER_KEY", "")
+        world_token = env.get("CHRONICLE_WORLD_TOKEN", "")
+        if not profile_key or not world_token:
+            raise RuntimeError(f"{profile} is missing its private runtime credentials")
+        records[lifetime_id] = {
+            "profile": profile,
+            "profile_scope": "LIFETIME",
+            "worldline_id": worldline_id,
+            "volume_id": volume_id,
+            "lifetime_id": lifetime_id,
+            "profile_key": profile_key,
+            "world_token": world_token,
+            "ownership_marker": ownership_marker,
+            "world_server_name": world_server_name,
+        }
+    _verify_lifetime_runtime_configuration(config, records)
+    return records
+
+
+def _verify_lifetime_runtime_configuration(
+    config: AppConfig,
+    records: dict[str, dict[str, Any]],
+) -> None:
+    """Verify V5 Profile files and only the V5 Gateway MCP allowlist."""
+
+    expected_servers = {str(record["world_server_name"]) for record in records.values()}
+    config_path = config.hermes_home / "config.yaml"
+    values = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = values or {}
+    servers = values.get("mcp_servers", {})
+    if not isinstance(servers, dict):
+        raise RuntimeError("gateway MCP configuration is invalid")
+    managed_servers = {
+        str(name)
+        for name in servers
+        if str(name).startswith("chronicle-volume-world-")
+    }
+    if managed_servers != expected_servers:
+        raise RuntimeError("current Volume Gateway MCP allowlist is incomplete")
+    root_env = _read_env_file(config.hermes_home / ".env")
+    database_url = f"sqlite:///{config.database_path}"
+    expected_command = str(Path(sys.executable).absolute())
+    for record in records.values():
+        profile = str(record["profile"])
+        server_name = str(record["world_server_name"])
+        suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
+        expected_server = {
+            "command": expected_command,
+            "args": ["-m", "chronicle.world_mcp"],
+            "env": {
+                "CHRONICLE_DATABASE_URL": f"${{{suffix}_DATABASE_URL}}",
+                "CHRONICLE_WORLD_TOKEN": f"${{{suffix}_TOKEN}}",
+            },
+            "timeout": 30,
+            "connect_timeout": 30,
+        }
+        if servers.get(server_name) != expected_server:
+            raise RuntimeError(f"{profile} has an incomplete Volume World MCP configuration")
+        if (
+            root_env.get(f"{suffix}_TOKEN") != str(record["world_token"])
+            or root_env.get(f"{suffix}_DATABASE_URL") != database_url
+        ):
+            raise RuntimeError(f"{profile} is missing its root Volume World MCP credentials")
+        profile_home = config.hermes_home / "profiles" / profile
+        profile_config_path = profile_home / "config.yaml"
+        profile_values = (
+            yaml.safe_load(profile_config_path.read_text(encoding="utf-8"))
+            if profile_config_path.exists()
+            else {}
+        ) or {}
+        profile_toolsets = profile_values.get("platform_toolsets", {}).get("api_server", [])
+        profile_servers = profile_values.get("mcp_servers", {})
+        expected_profile_server = {
+            "command": expected_command,
+            "args": ["-m", "chronicle.world_mcp"],
+            "env": {
+                "CHRONICLE_DATABASE_URL": "${CHRONICLE_DATABASE_URL}",
+                "CHRONICLE_WORLD_TOKEN": "${CHRONICLE_WORLD_TOKEN}",
+            },
+            "timeout": 30,
+            "connect_timeout": 30,
+        }
+        profile_env = _read_env_file(profile_home / ".env")
+        profile_server = (
+            profile_servers.get(server_name) if isinstance(profile_servers, dict) else None
+        )
+        if (
+            profile_toolsets != ["memory", server_name]
+            or set(profile_servers) != {server_name}
+            or profile_server != expected_profile_server
+            or profile_env.get("CHRONICLE_DATABASE_URL") != database_url
+            or profile_env.get("CHRONICLE_WORLD_TOKEN") != str(record["world_token"])
+        ):
+            raise RuntimeError(f"{profile} has an incomplete Lifetime tool configuration")
+
+
+def cleanup_volume_runtime(
+    config: AppConfig,
+    worldline_id: str,
+    profiles: list[str],
+    *,
+    server_names: list[str] | None = None,
+) -> None:
+    """Remove V5 Lifetime Profiles only when the owning Volume is sealed."""
+
+    managed_servers = {
+        str(name)
+        for name in (server_names or [])
+        if str(name).startswith(f"chronicle-volume-world-{worldline_id}-")
+    }
+    for profile in profiles:
+        profile_home = config.hermes_home / "profiles" / profile
+        marker = profile_home / "chronicle-genesis.json"
+        pending = _lifetime_pending_profile_path(config, profile)
+        if not profile_home.exists():
+            pending.unlink(missing_ok=True)
+            continue
+        if profile_home.is_symlink() or not profile_home.is_dir():
+            raise RuntimeError(f"cannot verify Lifetime Profile {profile}")
+        try:
+            values = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"cannot verify Lifetime Profile {profile}") from exc
+        if not isinstance(values, dict) or values.get("profile_scope") != "LIFETIME":
+            raise RuntimeError(f"refusing to remove unrelated Hermes Profile {profile}")
+        lifetime_id = str(values.get("lifetime_id", ""))
+        if (
+            values.get("worldline_id") != worldline_id
+            or values.get("profile") != profile
+            or not lifetime_id
+            or lifetime_profile_name(worldline_id, lifetime_id) != profile
+        ):
+            raise RuntimeError(f"refusing to remove unrelated Hermes Profile {profile}")
+        managed_servers.add(lifetime_world_server_name(worldline_id, lifetime_id))
+        shutil.rmtree(profile_home)
+        pending.unlink(missing_ok=True)
+
+    config_path = config.hermes_home / "config.yaml"
+    values = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    values = values or {}
+    servers = values.get("mcp_servers", {})
+    if isinstance(servers, dict):
+        root_env = _read_env_file(config.hermes_home / ".env")
+        for server_name in managed_servers:
+            if server_name not in servers:
+                continue
+            servers.pop(server_name, None)
+            suffix = re.sub(r"[^A-Z0-9_]", "_", server_name.upper())
+            root_env.pop(f"{suffix}_TOKEN", None)
+            root_env.pop(f"{suffix}_DATABASE_URL", None)
+        config_path.write_text(
+            yaml.safe_dump(values, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+        _write_profile_env(config.hermes_home, root_env)
+
+
 def load_crisis_profile_records(
     config: AppConfig,
     run_id: str,

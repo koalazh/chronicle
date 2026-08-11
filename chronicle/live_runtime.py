@@ -127,6 +127,17 @@ class LiveRuntimeManager:
                     engine.mark_live_runtime_failed(run_id, "runtime_wake_failed")
                 raise
 
+    def advance_to_attention(self, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            engine = self._engine()
+            try:
+                return engine.advance_to_attention(run_id)
+            except CrisisRunError:
+                run = engine.db.worldline(run_id)
+                if run and run.get("runtime_mode") == "live" and run["status"] == "ACTIVE":
+                    engine.mark_live_runtime_failed(run_id, "runtime_wake_failed")
+                raise
+
     def submit_human_decision(self, run_id: str, text: str) -> dict[str, Any]:
         """Keep a live Human decision in the same mutation gate as continue and seal."""
 

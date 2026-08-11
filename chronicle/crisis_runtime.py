@@ -69,6 +69,28 @@ class CrisisWakeType(StrEnum):
     REFLECTION = "REFLECTION"
 
 
+WATCH_ATTENTION_EVENT_TYPES = frozenset(
+    {
+        "OFFER_PROPOSED",
+        "OFFER_COUNTERED",
+        "OFFER_ACCEPTED",
+        "OFFER_REJECTED",
+        "OFFER_WITHDRAWN",
+        "OFFER_EXPIRED",
+        "AGREEMENT_CREATED",
+        "AGREEMENT_FULFILLED",
+        "AGREEMENT_BREACHED",
+        "OPERATION_STARTED",
+        "OPERATION_COMPLETED",
+        "INVESTIGATION_COMPLETED",
+        "OBSERVATION_OBTAINED",
+        "MOVEMENT_STARTED",
+        "MOVEMENT_ARRIVED",
+        "PRESSURE_APPLIED",
+    }
+)
+
+
 @dataclass(frozen=True)
 class ActorTurnResult:
     summary: str
@@ -775,6 +797,125 @@ class CrisisRunEngine:
             "wakes": self.db.crisis_wakes(run_id),
             "events": self.db.worldline_events(run_id),
         }
+
+    def advance_to_attention(self, run_id: str, *, max_moments: int = 80) -> dict[str, Any]:
+        run = self._activate_run_pack(run_id)
+        if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
+            raise CrisisRunError("Run is not active")
+        start_tick = int(run["current_tick"])
+        human_attention = self._human_attention(run_id)
+        if human_attention is not None:
+            return {
+                "advanced": False,
+                "attention": human_attention,
+                "moments": 0,
+                "from_tick": start_tick,
+                "to_tick": start_tick,
+            }
+
+        moments = 0
+        while moments < max_moments:
+            event_count = len(self.db.worldline_events(run_id))
+            if not self.advance_one(run_id):
+                current = self.db.worldline(run_id)
+                return {
+                    "advanced": moments > 0,
+                    "attention": None,
+                    "moments": moments,
+                    "from_tick": start_tick,
+                    "to_tick": int(current["current_tick"]) if current is not None else start_tick,
+                }
+            moments += 1
+            current = self.db.worldline(run_id)
+            if current is None:
+                raise CrisisRunError("Run disappeared while advancing")
+            if self._human_actor_id(run_id) is not None:
+                human_attention = self._human_attention(run_id)
+                if human_attention is not None:
+                    return {
+                        "advanced": True,
+                        "attention": human_attention,
+                        "moments": moments,
+                        "from_tick": start_tick,
+                        "to_tick": int(current["current_tick"]),
+                    }
+                continue
+            watch_attention = self._watch_attention(self.db.worldline_events(run_id)[event_count:])
+            if watch_attention is not None:
+                return {
+                    "advanced": True,
+                    "attention": watch_attention,
+                    "moments": moments,
+                    "from_tick": start_tick,
+                    "to_tick": int(current["current_tick"]),
+                }
+
+        if self._next_tick(run_id) is not None:
+            raise CrisisRunError("attention scheduler exceeded the finite moment budget")
+        current = self.db.worldline(run_id)
+        return {
+            "advanced": moments > 0,
+            "attention": None,
+            "moments": moments,
+            "from_tick": start_tick,
+            "to_tick": int(current["current_tick"]) if current is not None else start_tick,
+        }
+
+    def _human_attention(self, run_id: str) -> dict[str, Any] | None:
+        run = self.db.worldline(run_id)
+        if run is None or run["kind"] != "CRISIS":
+            raise CrisisRunError("Run not found")
+        actor_id = self._human_actor_id(run_id)
+        if actor_id is None:
+            return None
+        tick = int(run["current_tick"])
+        if self.human_decision_state(run_id, tick)["state"] != "NONE":
+            return None
+        interruptions = [
+            event
+            for event in self.db.worldline_events(run_id)
+            if event["event_type"] == "HUMAN_INTERRUPTION_READY"
+            and event["seat_id"] == actor_id
+            and int(event["tick"]) == tick
+        ]
+        if interruptions:
+            return {
+                "mode": "TAKEOVER",
+                "actor_id": actor_id,
+                "tick": tick,
+                "reasons": [
+                    {
+                        "wake_type": event["payload"]["wake_type"],
+                        "trigger_event_id": event["payload"]["trigger_event_id"],
+                    }
+                    for event in interruptions
+                ],
+            }
+        if tick == self.pack.crisis.checkpoint.start_tick:
+            return {
+                "mode": "TAKEOVER",
+                "actor_id": actor_id,
+                "tick": tick,
+                "reasons": [{"wake_type": "INITIAL_DECISION", "trigger_event_id": ""}],
+            }
+        return None
+
+    @staticmethod
+    def _watch_attention(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for event in events:
+            event_type = str(event["event_type"])
+            if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
+                if event["payload"].get("source") == "checkpoint":
+                    continue
+            elif event_type not in WATCH_ATTENTION_EVENT_TYPES:
+                continue
+            return {
+                "mode": "WATCH",
+                "tick": int(event["tick"]),
+                "event_id": event["id"],
+                "event_type": event_type,
+            }
+        return None
 
     def human_decision_state(self, run_id: str, tick: int | None = None) -> dict[str, Any]:
         run = self.db.worldline(run_id)
@@ -2020,15 +2161,13 @@ class CrisisRunEngine:
             snapshot=projection,
         )
         for recipient, trigger_event_id in queued:
-            controller = self._controller_map(run_id)[recipient]
-            if controller == "AGENT":
-                self._queue_wake(
-                    run_id,
-                    recipient,
-                    CrisisWakeType.MESSAGE,
-                    tick,
-                    trigger_event_id=trigger_event_id,
-                )
+            self._queue_wake(
+                run_id,
+                recipient,
+                CrisisWakeType.MESSAGE,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
 
     def _run_wake_moment(
         self,

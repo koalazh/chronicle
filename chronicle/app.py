@@ -383,12 +383,16 @@ def create_app(
         engine = CrisisRunEngine(active)
         try:
             summary = engine.run_summary(run_id)
-            advanced = await asyncio.to_thread(
-                crisis_runtime(active).advance_one if summary["runtime_mode"] == "live" else engine.advance_one,
+            advancement = await asyncio.to_thread(
+                crisis_runtime(active).advance_to_attention
+                if summary["runtime_mode"] == "live"
+                else engine.advance_to_attention,
                 run_id,
             )
             return {
-                "advanced": advanced,
+                "advanced": advancement["advanced"],
+                "attention": advancement["attention"],
+                "moments": advancement["moments"],
                 "run": crisis_engine().run_summary(run_id),
             }
         except CrisisRunError as exc:

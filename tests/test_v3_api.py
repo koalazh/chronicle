@@ -56,7 +56,10 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
             actor_id
         ]
 
-    assert client.post(f"/api/runs/{run_id}/continue").json()["advanced"] is True
+    continued = client.post(f"/api/runs/{run_id}/continue").json()
+    assert continued["advanced"] is True
+    assert continued["attention"]["mode"] == "WATCH"
+    assert continued["moments"] > 1
     sealed = client.post(f"/api/runs/{run_id}/seal", json={"reason": "test_complete"})
     replay = client.get(f"/api/runs/{run_id}/replay")
     archive = client.get("/api/archive")
@@ -191,7 +194,9 @@ def test_live_run_bootstraps_without_a_manual_gateway_restart(
     orient = [wake for wake in engine.db.crisis_wakes(run_id) if wake["wake_type"] == "ORIENT"]
     assert len(orient) == 3
     assert {wake["status"] for wake in orient} == {"COMPLETED"}
-    assert client.post(f"/api/runs/{run_id}/continue").status_code == 200
+    continued = client.post(f"/api/runs/{run_id}/continue")
+    assert continued.status_code == 200
+    assert continued.json()["attention"]["mode"] == "WATCH"
 
 
 def test_product_startup_reconciles_the_active_live_run(app_config, monkeypatch):

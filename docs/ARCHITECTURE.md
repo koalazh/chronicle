@@ -56,6 +56,8 @@ Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将
 
 Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、Offer 到期、Pressure trigger、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
 
+`advance_one()` 保留给 `/api/dev/*` 与确定性测试。产品的 `/continue` 则使用 `advance_to_attention()`：Takeover 会先保留初始 Human 决断，并在收信、调查结果、行动结果、条件/约定变化、可见 Pressure 或 Revisit 真正进入该主体视野时才停下；Watch 会跨过 Plan、Wake 重试和 checkpoint 投递等内部噪音，只在可见的信件、条件、行动、调查结果、移动或 Pressure 改变世界时停下。两种模式之间被跳过的 moment 仍完整写入 Ledger 和各自的私有 Perspective，不会为了产品节奏被丢弃。
+
 `ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
 一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（依次包括 Operation completion、Investigation result、Offer expiry 与 Pressure）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Offer/Agreement、Operation、Investigation、移动和观察排入未来时刻。

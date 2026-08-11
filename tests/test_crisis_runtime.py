@@ -476,6 +476,58 @@ def test_investigate_requires_a_currently_available_crisis_capability(app_config
     assert engine.db.worldline_snapshot(run_id)["projection"]["investigations"] == []
 
 
+def test_world_accepts_manifest_reference_objects_without_inventing_beliefs(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    wu_wake = next(
+        item
+        for item in engine.db.crisis_wakes(run_id, status="QUEUED")
+        if item["actor_id"] == "wu-sangui"
+    )
+    dorgon_wake = next(
+        item
+        for item in engine.db.crisis_wakes(run_id, status="QUEUED")
+        if item["actor_id"] == "dorgon"
+    )
+    engine.db.update_crisis_wake(wu_wake["id"], status="RUNNING")
+    engine.db.update_crisis_wake(dorgon_wake["id"], status="RUNNING")
+    wu = engine.world.fixture_session(wu_wake["id"], "wu-sangui")
+    dorgon = engine.world.fixture_session(dorgon_wake["id"], "dorgon")
+    perspective = engine.actor_perspective(run_id, "wu-sangui")
+
+    operation = wu.operate(
+        "prepare_force",
+        [{"id": "wu-field-force", "display_name": "关宁所部"}],
+        "先整备关宁所部。",
+        idempotency_key="manifest-operation",
+    )
+    offer = wu.manage_offer(
+        "PROPOSE",
+        recipient={"id": "dorgon", "display_name": "多尔衮"},
+        terms=[perspective["available_offer_terms"][0]],
+        message="请明确山海关通行条件。",
+        idempotency_key="manifest-offer",
+    )
+    plan = wu.update_plan(
+        "先核验通行条件并整备所部",
+        ["维持关口", "等待对方回应"],
+        belief_updates=["关口通行仍未得到可执行确认。"],
+        idempotency_key="manifest-plan",
+    )
+    investigation = dorgon.investigate(
+        "山海关当前由谁守持？",
+        {"id": "shanhai-pass", "display_name": "山海关"},
+        method="courier_report",
+        idempotency_key="manifest-investigation",
+    )
+
+    assert operation["status"] == "accepted"
+    assert offer["status"] == "accepted"
+    assert plan["status"] == "accepted"
+    assert plan["ignored_optional_belief_updates"] == 1
+    assert investigation["status"] == "accepted"
+
+
 def test_investigation_yields_a_delayed_private_sourced_observation(app_config):
     investigation_ids: list[str] = []
 

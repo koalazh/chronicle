@@ -430,6 +430,8 @@ class HermesActorDriver:
                     "可用条件、待回应 Offer 与生效 Agreement 已在私有视野中列出；"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
+                    "引用 ID 必须传对象 id 字段的裸字符串，不能把 target、targets、recipient、offer 或 term.subject 的完整对象原样传入；"
+                    "belief_updates 是可选项，若使用，每项必须是含 subject、assessment、confidence（low/medium/high）的对象。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
                     "不要声称工具尚未确认的结果。最终只用简体中文简短说明你如何处置本次触发。"
                     + orient_rule

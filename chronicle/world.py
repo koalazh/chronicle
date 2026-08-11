@@ -163,6 +163,27 @@ class WorldAffordanceSession:
     def _actor(self):
         return self.service.pack.actor_by_id[self.identity.actor_id]
 
+    @staticmethod
+    def _reference_id(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            reference = value.get("id", "")
+            return reference.strip() if isinstance(reference, str) else ""
+        return ""
+
+    def _normalized_terms(self, terms: list[Any] | None) -> list[Any]:
+        normalized: list[Any] = []
+        for term in terms or []:
+            if not isinstance(term, dict):
+                normalized.append(term)
+                continue
+            value = dict(term)
+            value["subject"] = self._reference_id(value.get("subject", ""))
+            value.pop("recipient", None)
+            normalized.append(value)
+        return normalized
+
     def _tick_and_projection(self) -> tuple[int, dict[str, Any]]:
         wake = self.service.db.crisis_wake(self.identity.wake_id)
         snapshot = self.service.db.worldline_snapshot(self.identity.run_id)
@@ -172,16 +193,22 @@ class WorldAffordanceSession:
 
     def communicate(
         self,
-        recipient: str,
+        recipient: str | dict[str, Any],
         content: str,
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        payload = {"recipient": recipient, "content": content.strip()}
+        payload = {
+            "recipient": self._reference_id(recipient),
+            "content": content.strip() if isinstance(content, str) else "",
+        }
         if "communicate" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
             return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
-        if recipient not in self.service.pack.actor_by_id or recipient == self.identity.actor_id:
+        if (
+            payload["recipient"] not in self.service.pack.actor_by_id
+            or payload["recipient"] == self.identity.actor_id
+        ):
             result = {"status": "rejected", "code": "invalid_recipient"}
             return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
         if not payload["content"] or len(payload["content"]) > 1200:
@@ -189,7 +216,7 @@ class WorldAffordanceSession:
             return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
         tick, projection = self._tick_and_projection()
         start = projection["positions"][self.identity.actor_id]
-        end = projection["positions"][recipient]
+        end = projection["positions"][payload["recipient"]]
         travel_days = self.service.route_days(start, end)
         if travel_days is None:
             result = {"status": "rejected", "code": "no_route"}
@@ -205,16 +232,16 @@ class WorldAffordanceSession:
 
     def operate(
         self,
-        operation_definition_id: str,
-        targets: list[str],
+        operation_definition_id: str | dict[str, Any],
+        targets: list[str | dict[str, Any]],
         description: str,
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
         payload = {
-            "operation_definition_id": operation_definition_id.strip(),
-            "targets": [target.strip() if isinstance(target, str) else "" for target in targets],
-            "description": description.strip(),
+            "operation_definition_id": self._reference_id(operation_definition_id),
+            "targets": [self._reference_id(target) for target in targets],
+            "description": description.strip() if isinstance(description, str) else "",
         }
         if "operate" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
@@ -274,14 +301,14 @@ class WorldAffordanceSession:
     def investigate(
         self,
         question: str,
-        target: str,
+        target: str | dict[str, Any],
         *,
         method: str = "",
         idempotency_key: str,
     ) -> dict[str, Any]:
         payload = {
             "question": question.strip() if isinstance(question, str) else "",
-            "target": target.strip() if isinstance(target, str) else "",
+            "target": self._reference_id(target),
             "method": method.strip() if isinstance(method, str) else "",
         }
         if "investigate" not in self._actor().world_authority:
@@ -325,8 +352,8 @@ class WorldAffordanceSession:
         self,
         action: str,
         *,
-        offer_id: str = "",
-        recipient: str = "",
+        offer_id: str | dict[str, Any] = "",
+        recipient: str | dict[str, Any] = "",
         terms: list[dict[str, Any]] | None = None,
         message: str = "",
         expires_after_days: int = 0,
@@ -334,9 +361,9 @@ class WorldAffordanceSession:
     ) -> dict[str, Any]:
         payload = {
             "action": action.strip().upper() if isinstance(action, str) else "",
-            "offer_id": offer_id.strip() if isinstance(offer_id, str) else "",
-            "recipient": recipient.strip() if isinstance(recipient, str) else "",
-            "terms": terms if isinstance(terms, list) else [],
+            "offer_id": self._reference_id(offer_id),
+            "recipient": self._reference_id(recipient),
+            "terms": self._normalized_terms(terms),
             "message": message.strip() if isinstance(message, str) else "",
             "expires_after_days": expires_after_days,
         }
@@ -451,11 +478,12 @@ class WorldAffordanceSession:
         steps: list[str],
         *,
         rationale: str = "",
-        belief_updates: list[dict[str, str]] | None = None,
+        belief_updates: list[dict[str, str] | str] | None = None,
         reconsider_when: list[str] | None = None,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        beliefs = belief_updates or []
+        beliefs = [item for item in belief_updates or [] if isinstance(item, dict)]
+        ignored_belief_updates = len(belief_updates or []) - len(beliefs)
         payload = {
             "objective": objective.strip(),
             "steps": [step.strip() for step in steps if step.strip()],
@@ -477,6 +505,8 @@ class WorldAffordanceSession:
             result = {"status": "rejected", "code": "invalid_belief_update"}
         else:
             result = {"status": "accepted", "plan_version": f"plan-{uuid.uuid4().hex[:12]}"}
+            if ignored_belief_updates:
+                result["ignored_optional_belief_updates"] = ignored_belief_updates
         return self._stage("update_plan", payload, result, idempotency_key=idempotency_key)
 
     def schedule_revisit(

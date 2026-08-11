@@ -32,7 +32,7 @@ def _world():
 
 @mcp.tool()
 def communicate(
-    recipient: str,
+    recipient: str | dict[str, Any],
     content: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
@@ -44,7 +44,7 @@ def communicate(
 @mcp.tool()
 def investigate(
     question: str,
-    target: str,
+    target: str | dict[str, Any],
     idempotency_key: str,
     method: str = "",
 ) -> dict[str, Any]:
@@ -62,8 +62,8 @@ def investigate(
 def manage_offer(
     action: str,
     idempotency_key: str,
-    offer_id: str = "",
-    recipient: str = "",
+    offer_id: str | dict[str, Any] = "",
+    recipient: str | dict[str, Any] = "",
     terms: list[dict[str, Any]] | None = None,
     message: str = "",
     expires_after_days: int = 0,
@@ -83,8 +83,8 @@ def manage_offer(
 
 @mcp.tool()
 def operate(
-    operation_definition_id: str,
-    targets: list[str],
+    operation_definition_id: str | dict[str, Any],
+    targets: list[str | dict[str, Any]],
     description: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def update_plan(
     steps: list[str],
     idempotency_key: str,
     rationale: str = "",
-    belief_updates: list[dict[str, str]] | None = None,
+    belief_updates: list[dict[str, str] | str] | None = None,
     reconsider_when: list[str] | None = None,
 ) -> dict[str, Any]:
     """Replace the private current plan and optionally revise a few private beliefs."""

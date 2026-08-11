@@ -1,6 +1,6 @@
 # 南都定策：历史策展与 Pack 契约
 
-> 状态：Phase 15 已策展，尚未接入 Volume registry。`nanjing-succession` 只有在 POLITICAL surface、`nanjing-succession-v1` resolver 与对应运行测试完成后，才成为可创建的 Crisis Run。
+> 状态：Phase 17 已接入经校验的 Pack、Volume registry 与 `nanjing-succession-v1` deterministic resolver。它已可经 API/fixture 创建；Volume 首页与 Takeover Desk 的产品重构仍属于后续 Phase，不把当前 API 证据冒充为完整 UI 或 live Hermes 验收。
 
 ## 危局边界
 
@@ -149,6 +149,6 @@ Pack 只设置两个 `REFERENCE_ONLY` 后续节点：五月初三的福王监国
 
 ## 实现与验证入口
 
-Phase 16 先为上述对象提供一个小型 `POLITICAL` surface：按福王、潞王、制度承认、可见军政支持和公开文书展示 known / unknown / unconfirmed，不画图、不做关系网。Pack 只需声明有序的 `subject_ids` 与 `context_entity_ids`；世界视图可显示实体状态，私有视图只会为当前合法知道的实体带回状态，未获确认的主体显示 `UNCONFIRMED`，其余事实显示 `UNKNOWN`。Phase 17 再注册 resolver、接入 Volume，并为以下事实写纯 deterministic tests：福王认可、替代候选认可、争议、延期、历史样本型汇合、相同 Projection/seed 的字节稳定结果，以及 Agreement 确实改变程序 Operation affordance。
+Phase 16 已提供小型 `POLITICAL` surface：按福王、潞王、制度承认、可见军政支持和公开文书展示 known / unknown / unconfirmed，不画图、不做关系网。Pack 只需声明有序的 `subject_ids` 与 `context_entity_ids`；世界视图可显示实体状态，私有视图只会为当前合法知道的实体带回状态，未获确认的主体显示 `UNCONFIRMED`，其余事实显示 `UNKNOWN`。合法操作或调查的 target 名称本身不构成状态知识：只有自有资产、所在地点、可见行动／Pressure 的效果或已送达的 Resolution 才能让私有 Surface 显示状态。Phase 17 已注册 resolver、接入 Volume，并以纯 deterministic tests 覆盖福王认可、替代候选认可、争议、碎片化、延期、历史样本型汇合、不同 seed 的字节稳定结果、Agreement 解锁程序 Operation，以及完整的福王承认→Aftermath→Settlement fixture loop。
 
-对应来源数据在 [`scenarios/jiashen/crises/nanjing-succession/sources.yaml`](../scenarios/jiashen/crises/nanjing-succession/sources.yaml)。在本文所述的 surface/resolver 尚未存在前，该目录故意不含 `crisis.yaml`，也不列入 `volume.yaml`；这避免把无法验证的策展草案伪装成可玩的 Crisis。
+对应来源数据与已校验 Pack 位于 [`scenarios/jiashen/crises/nanjing-succession/`](../scenarios/jiashen/crises/nanjing-succession/)。它只在 POLITICAL surface、resolver 与 fixture/API 回归同时存在后才加入 `volume.yaml`；仍不把这一层 fixture/API 证据称为完成的 Desk、浏览器或 live Hermes 体验。

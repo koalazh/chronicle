@@ -6,3 +6,5 @@ description: 两场彼此独立的历史危局；每一局都从自己的校验�
 crises:
   - id: before-shanhaiguan
     path: crises/before-shanhaiguan
+  - id: nanjing-succession
+    path: crises/nanjing-succession

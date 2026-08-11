@@ -354,16 +354,25 @@ function spatialSurfaceMarkup(surface, options = {}) {
 }
 
 function politicalSurfaceMarkup(surface) {
+  const entityTypeLabel = (type) => ({
+    CLAIMANT: "候选",
+    INSTITUTION: "制度程序",
+    ASSET: "现实条件",
+    DOCUMENT: "公开文书",
+    PERSON: "人物",
+    FORCE: "可见力量",
+    PLACE: "地点",
+  }[type] || "世界事实");
   const stateMarkup = (entry) => {
     if (entry.knowledge === "KNOWN") {
-      return `<strong>${escapeHtml(entry.state || "尚无定论")}</strong>`;
+      return `<strong>${escapeHtml(entry.state_label || entry.state || "尚无定论")}</strong>`;
     }
     return `<strong class="political-unknown">${entry.knowledge === "UNCONFIRMED" ? "尚待确证" : "未获所知"}</strong>`;
   };
   const subjects = (surface.subjects || [])
     .map(
       (subject) => `<article class="political-subject">
-        <span>${escapeHtml(subject.type)}</span>
+        <span>${escapeHtml(entityTypeLabel(subject.type))}</span>
         <h3>${escapeHtml(subject.display_name)}</h3>
         ${stateMarkup(subject)}
       </article>`,

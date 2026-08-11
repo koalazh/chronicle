@@ -82,6 +82,7 @@ class PressureStatus(StrEnum):
 
 class AgreementTermType(StrEnum):
     PASSAGE = "passage"
+    ENDORSEMENT = "endorsement"
 
 
 class OfferAction(StrEnum):
@@ -133,6 +134,7 @@ class CrisisEntity(StrictModel):
     type: CrisisEntityType
     display_name: str
     initial_state: str
+    state_labels: dict[str, str] = Field(default_factory=dict)
     assertion_ids: list[str] = Field(default_factory=list)
 
 
@@ -762,8 +764,12 @@ class CrisisPack:
 
     @property
     def content_hash(self) -> str:
+        crisis = self.crisis.model_dump(mode="json")
+        for entity in crisis.get("entities", []):
+            if not entity.get("state_labels"):
+                entity.pop("state_labels", None)
         payload = {
-            "crisis": self.crisis.model_dump(mode="json"),
+            "crisis": crisis,
             "sources": [source.model_dump(mode="json") for source in self.sources],
             "assertions": [assertion.model_dump(mode="json") for assertion in self.assertions],
         }
@@ -820,7 +826,9 @@ class CrisisPack:
                     item["knowledge"] = hidden_knowledge
                     return item
                 item["knowledge"] = "KNOWN"
-                item["state"] = str(entities.get(entity_id, {}).get("state", entity.initial_state))
+                state = str(entities.get(entity_id, {}).get("state", entity.initial_state))
+                item["state"] = state
+                item["state_label"] = entity.state_labels.get(state, state)
                 return item
 
             return {

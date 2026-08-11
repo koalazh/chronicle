@@ -17,6 +17,7 @@ from chronicle.crisis import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CRISIS_ROOT = PROJECT_ROOT / "scenarios" / "jiashen" / "crises" / "before-shanhaiguan"
+NANJING_ROOT = PROJECT_ROOT / "scenarios" / "jiashen" / "crises" / "nanjing-succession"
 
 
 def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
@@ -70,6 +71,45 @@ def test_before_shanhaiguan_crisis_pack_is_complete():
         for term in ("Runtime", "checkpoint", "Run ", " tick", "Crisis", "Battle Resolver")
     )
     assert "Battle Resolver" not in pack.crisis.simulation_boundary.reason
+
+
+def test_nanjing_succession_pack_is_a_political_three_actor_crisis():
+    pack = CrisisPack.load(NANJING_ROOT)
+
+    assert pack.crisis.id == "nanjing-succession"
+    assert pack.crisis.surface.kind == CrisisSurfaceKind.POLITICAL
+    assert pack.crisis.surface.subject_ids == ["fu-prince", "lu-prince"]
+    assert pack.crisis.surface.context_entity_ids == [
+        "nanjing-court",
+        "nanjing-recognition",
+        "jiangbei-military-backing",
+        "regency-proclamation",
+    ]
+    assert set(pack.actor_by_id) == {"shi-kefa", "ma-shiying", "han-zanzhou"}
+    assert set(pack.crisis.playable_actor_ids) == set(pack.actor_by_id)
+    assert {entity.id for entity in pack.crisis.entities if entity.type.value == "CLAIMANT"} == {
+        "fu-prince",
+        "lu-prince",
+    }
+    assert {term.type.value for term in pack.crisis.offer_terms} == {"endorsement"}
+    assert validate_crisis_pack(NANJING_ROOT)[0].startswith("Crisis Pack valid")
+
+
+def test_empty_entity_state_labels_do_not_change_an_existing_pack_hash(tmp_path):
+    root = tmp_path / "explicit-empty-state-labels"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    for entity in crisis["entities"]:
+        entity["state_labels"] = {}
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    assert CrisisPack.load(root).content_hash == CrisisPack.load(CRISIS_ROOT).content_hash
 
 
 def test_spatial_surface_projects_locations_and_only_visible_actors():
@@ -165,6 +205,7 @@ def test_political_surface_projects_known_and_hidden_world_facts(tmp_path):
                 "display_name": "山海关通道",
                 "knowledge": "KNOWN",
                 "state": "CONTESTED",
+                "state_label": "CONTESTED",
             }
         ],
         "context": [
@@ -174,6 +215,7 @@ def test_political_surface_projects_known_and_hidden_world_facts(tmp_path):
                 "display_name": "关宁所部",
                 "knowledge": "KNOWN",
                 "state": "READY",
+                "state_label": "READY",
             }
         ],
     }
@@ -245,7 +287,10 @@ def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set(
         "li-zicheng",
         "dorgon",
     ]
-    assert registry.summary()["crises"][0]["id"] == "before-shanhaiguan"
+    assert [crisis["id"] for crisis in registry.summary()["crises"]] == [
+        "before-shanhaiguan",
+        "nanjing-succession",
+    ]
 
 
 @pytest.mark.parametrize("actor_count", [2, 3, 5])

@@ -1,0 +1,402 @@
+id: nanjing-succession
+version: 1
+title: 南都定策
+subtitle: 北都确报已至，谁能把候选变成可执行的现实
+
+checkpoint:
+  native_date_window: 崇祯十七年四月下旬
+  summary: 北都陷落与帝殉的确报已经进入南京；福王与潞王都在候选视野中，南京尚未完成监国礼，军政支持与制度程序仍未汇合为单一现实。
+  start_tick: 0
+  safety_horizon_days: 24
+  facts: [n001, n002, n008]
+  unresolved:
+    - 南京如何把已经到来的北都确报转化为可执行的继统程序
+    - 福王与潞王中，谁能够进入南京并获得真实的制度承认
+    - 军政支持、公开立场与中枢程序能否在不可逆之前汇合
+  in_transit: []
+
+simulation_boundary:
+  stop_before: 内部安全上限；正常结局必须由继统 Resolution 与 Settlement 形成
+  reason: 这是防止无限推进的内部 Harness 上限；到达时以延期危局结算，不作为产品 Ending。
+  maximum_tick: 18
+
+resolution_contract:
+  id: nanjing-succession-v1
+  version: 1
+
+surface:
+  kind: POLITICAL
+  title: 南京的未定国本
+  description: 候选、制度承认、可见军政支持与公开文书仍是分开的事实。
+  subject_ids: [fu-prince, lu-prince]
+  context_entity_ids: [nanjing-court, nanjing-recognition, jiangbei-military-backing, regency-proclamation]
+
+actors:
+  - id: shi-kefa
+    display_name: 史可法
+    role_charter:
+      who: 南京兵部尚书，正在北都确报之后处理留都军政连续性与继统程序之间的关系。
+      responsibility: [维持南京军政秩序, 判断候选与伦序程序, 处理北方风险下的可执行安排]
+      authority: [与南京中枢协商程序, 公开或保留候选立场, 安排候选进入程序空间, 提出或回应条件]
+      tensions: [伦序与程序连续性之间, 短期可执行秩序与长期正当性之间, 北方风险与南京内部定策之间]
+    initial_location: nanjing
+    initial_knowledge: [n001, n002, n003, n008]
+    initial_beliefs:
+      procedure: 继统必须进入南京可执行的程序，不能只停留在私下意见。
+      risk: 北方局势使留都无法无限延宕，但仓促形成的安排也会留下新的风险。
+    resources:
+      office: nanjing-ministry-of-war
+      court_access: active
+      northern_reports: incomplete
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+    asset_ids: []
+
+  - id: ma-shiying
+    display_name: 马士英
+    role_charter:
+      who: 凤阳总督，拥有江北方向的军政责任与可见网络，需要判断这些现实支持如何进入南京的继统安排。
+      responsibility: [维持凤阳与江北方向的可用秩序, 判断候选与军政支持的结合方式, 回应南京程序对现实保护的要求]
+      authority: [调动可见军政支持, 与南京中枢谈判条件, 安排福王一侧进入程序, 提出或拒绝公开支持]
+      tensions: [候选伦序与可执行支持之间, 地方责任与南京程序之间, 快速安排与保留协商空间之间]
+    initial_location: fengyang-command
+    initial_knowledge: [n001, n002, n003, n006, n008]
+    initial_beliefs:
+      backing: 没有可见的保护与支持，南京的程序难以成为稳定现实。
+      choice: 候选与程序的结合需要明确条件，不能只依赖后续传闻。
+    resources:
+      office: fengyang-governor
+      jiangbei_network: available-not-committed
+      courier_route: active
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+    asset_ids: [jiangbei-military-backing]
+
+  - id: han-zanzhou
+    display_name: 韩赞周
+    role_charter:
+      who: 南京中枢程序一侧的关键主体，能够决定何时把候选、议论与支持带入正式而可执行的礼制入口。
+      responsibility: [维持留都中枢程序与秩序, 组织继统议程, 判断何时让候选进入正式承认]
+      authority: [召集或延后程序, 推进制度承认, 处理公开文书, 与官员和军政网络谈判条件]
+      tensions: [程序连续性与公开正当性之间, 官员意见与军政压力之间, 尽快形成中心与避免不可收束争议之间]
+    initial_location: nanjing
+    initial_knowledge: [n001, n002, n008, n012]
+    initial_beliefs:
+      entry: 候选必须先进入可见程序，南京才可能形成可执行的承认。
+      pressure: 任何正式步骤都需要面对候选、支持与公开性尚未汇合的现实。
+    resources:
+      court_procedure: convenable
+      document_office: available
+      internal_access: active
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+    asset_ids: [nanjing-court, regency-proclamation]
+
+playable_actor_ids: [shi-kefa, ma-shiying, han-zanzhou]
+
+entities:
+  - {id: nanjing, type: PLACE, display_name: 南京, initial_state: OPEN, assertion_ids: [n001, n008]}
+  - {id: fengyang-command, type: PLACE, display_name: 凤阳军政驻地, initial_state: OPEN, assertion_ids: [n006, n008]}
+  - {id: north-court-news, type: DOCUMENT, display_name: 北都确报, initial_state: CONFIRMED, assertion_ids: [n001]}
+  - id: nanjing-court
+    type: INSTITUTION
+    display_name: 南京中枢程序
+    initial_state: CONVENED
+    state_labels: {CONVENED: 可召集, DELIBERATING: 正在议决, RECOGNIZED: 已形成程序结论, CONTESTED: 程序陷入争议, FRAGMENTED: 程序未能汇合, DEFERRED: 程序暂缓}
+    assertion_ids: [n001, n008, n012]
+  - id: nanjing-recognition
+    type: ASSET
+    display_name: 南京制度承认
+    initial_state: PENDING
+    state_labels: {PENDING: 尚待进入程序, DELIBERATING: 正在议决, URGENT: 不能再无限延宕, FU_RECOGNIZED: 福王已获承认, LU_RECOGNIZED: 潞王已获承认, CONTESTED: 承认已成争议, FRAGMENTED: 承认未能汇合, DEFERRED: 承认暂缓}
+    assertion_ids: [n001, n008, n009]
+  - id: fu-prince
+    type: CLAIMANT
+    display_name: 福王朱由崧
+    initial_state: APPROACHING_NANJING
+    state_labels: {APPROACHING_NANJING: 尚在接近南京, IN_NANJING: 已进入南京, NOT_SELECTED: 未获当前承认}
+    assertion_ids: [n002, n004, n008]
+  - id: lu-prince
+    type: CLAIMANT
+    display_name: 潞王朱常淓
+    initial_state: AVAILABLE
+    state_labels: {AVAILABLE: 仍可被引入, IN_NANJING: 已进入南京, NOT_SELECTED: 未获当前承认}
+    assertion_ids: [n002, n008]
+  - id: jiangbei-military-backing
+    type: ASSET
+    display_name: 江北可见军政支持
+    initial_state: UNCOMMITTED
+    state_labels: {UNCOMMITTED: 尚未形成可见安排, FU_BACKED: 已公开支持福王一侧}
+    assertion_ids: [n006, n009]
+  - id: regency-proclamation
+    type: DOCUMENT
+    display_name: 监国公开文书
+    initial_state: NOT_ISSUED
+    state_labels: {NOT_ISSUED: 尚未发布, ISSUED: 已发布}
+    assertion_ids: [n005, n009]
+
+operations:
+  - id: convene_recognition_assembly
+    display_name: 召集继统议程
+    description: 将南京中枢从可开会状态推进为实际处理候选与继统程序的议程。
+    actor_ids: [han-zanzhou]
+    targets:
+      - {id: court, entity_types: [INSTITUTION], owned_by_actor: true, allowed_entity_ids: [nanjing-court]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [court]
+    preconditions:
+      - {subject: court, states: [CONVENED]}
+      - {subject: nanjing-recognition, states: [PENDING]}
+    completion_effects:
+      - {subject: court, state: DELIBERATING}
+      - {subject: nanjing-recognition, state: DELIBERATING}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [convene_recognition_assembly, formalize_fu_regency, formalize_lu_regency, defer_recognition_procedure]
+
+  - id: make_fu_backing_visible
+    display_name: 使福王一侧的军政支持可见
+    description: 将江北方向已经能够承担的保护安排变为南京可见的世界事实，不宣称各方意图已经完全一致。
+    actor_ids: [ma-shiying]
+    targets:
+      - {id: backing, entity_types: [ASSET], owned_by_actor: true, allowed_entity_ids: [jiangbei-military-backing]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [backing]
+    preconditions:
+      - {subject: backing, states: [UNCOMMITTED]}
+    completion_effects:
+      - {subject: backing, state: FU_BACKED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [make_fu_backing_visible]
+
+  - id: arrange_fu_entry
+    display_name: 安排福王进入南京程序
+    description: 在议程已经开启且可见支持出现后，安排福王从淮上方向进入南京的程序空间。
+    actor_ids: [ma-shiying]
+    targets:
+      - {id: claimant, entity_types: [CLAIMANT], allowed_entity_ids: [fu-prince]}
+    duration_kind: FIXED
+    duration_days: 2
+    preconditions:
+      - {subject: claimant, states: [APPROACHING_NANJING]}
+      - {subject: nanjing-court, states: [DELIBERATING]}
+      - {subject: jiangbei-military-backing, states: [FU_BACKED]}
+    completion_effects:
+      - {subject: claimant, state: IN_NANJING}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [arrange_fu_entry]
+
+  - id: arrange_lu_entry
+    display_name: 安排潞王进入南京程序
+    description: 在议程已经开启后，安排潞王进入可被正式处理的南京程序空间。
+    actor_ids: [shi-kefa]
+    targets:
+      - {id: claimant, entity_types: [CLAIMANT], allowed_entity_ids: [lu-prince]}
+    duration_kind: FIXED
+    duration_days: 2
+    preconditions:
+      - {subject: claimant, states: [AVAILABLE]}
+      - {subject: nanjing-court, states: [DELIBERATING]}
+    completion_effects:
+      - {subject: claimant, state: IN_NANJING}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [arrange_lu_entry]
+
+  - id: formalize_fu_regency
+    display_name: 形成福王监国承认
+    description: 在福王已进入南京、程序开启、可见军政支持出现且相应公开支持约定有效时，完成福王一侧的制度承认。
+    actor_ids: [han-zanzhou]
+    targets:
+      - {id: claimant, entity_types: [CLAIMANT], allowed_entity_ids: [fu-prince]}
+      - {id: court, entity_types: [INSTITUTION], owned_by_actor: true, allowed_entity_ids: [nanjing-court]}
+      - {id: recognition, entity_types: [ASSET], allowed_entity_ids: [nanjing-recognition]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [court]
+    preconditions:
+      - {subject: claimant, states: [IN_NANJING]}
+      - {subject: court, states: [DELIBERATING]}
+      - {subject: recognition, states: [DELIBERATING, URGENT]}
+      - {subject: jiangbei-military-backing, states: [FU_BACKED]}
+    completion_effects:
+      - {subject: recognition, state: FU_RECOGNIZED}
+    agreement_requirements:
+      - {type: endorsement, subject: fu-prince, value: public_support, party_ids: [ma-shiying, han-zanzhou]}
+    agreement_fulfillments:
+      - {type: endorsement, subject: fu-prince, value: public_support, party_ids: [ma-shiying, han-zanzhou]}
+    agreement_breaches:
+      - {type: endorsement, subject: lu-prince, value: public_support, party_ids: [shi-kefa, han-zanzhou]}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [convene_recognition_assembly, formalize_fu_regency, formalize_lu_regency, defer_recognition_procedure]
+
+  - id: formalize_lu_regency
+    display_name: 形成潞王监国承认
+    description: 在潞王已进入南京、程序开启且相应公开支持约定有效时，完成潞王一侧的制度承认。
+    actor_ids: [han-zanzhou]
+    targets:
+      - {id: claimant, entity_types: [CLAIMANT], allowed_entity_ids: [lu-prince]}
+      - {id: court, entity_types: [INSTITUTION], owned_by_actor: true, allowed_entity_ids: [nanjing-court]}
+      - {id: recognition, entity_types: [ASSET], allowed_entity_ids: [nanjing-recognition]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [court]
+    preconditions:
+      - {subject: claimant, states: [IN_NANJING]}
+      - {subject: court, states: [DELIBERATING]}
+      - {subject: recognition, states: [DELIBERATING, URGENT]}
+    completion_effects:
+      - {subject: recognition, state: LU_RECOGNIZED}
+    agreement_requirements:
+      - {type: endorsement, subject: lu-prince, value: public_support, party_ids: [shi-kefa, han-zanzhou]}
+    agreement_fulfillments:
+      - {type: endorsement, subject: lu-prince, value: public_support, party_ids: [shi-kefa, han-zanzhou]}
+    agreement_breaches:
+      - {type: endorsement, subject: fu-prince, value: public_support, party_ids: [ma-shiying, han-zanzhou]}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [convene_recognition_assembly, formalize_fu_regency, formalize_lu_regency, defer_recognition_procedure]
+
+  - id: defer_recognition_procedure
+    display_name: 记录继统程序延期
+    description: 在制度真空已经收紧而没有可执行承认时，记录当前程序无法形成局部结论的延期状态。
+    actor_ids: [han-zanzhou]
+    targets:
+      - {id: court, entity_types: [INSTITUTION], owned_by_actor: true, allowed_entity_ids: [nanjing-court]}
+      - {id: recognition, entity_types: [ASSET], allowed_entity_ids: [nanjing-recognition]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [court]
+    preconditions:
+      - {subject: court, states: [DELIBERATING]}
+      - {subject: recognition, states: [URGENT]}
+    completion_effects:
+      - {subject: recognition, state: DEFERRED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [convene_recognition_assembly, formalize_fu_regency, formalize_lu_regency, defer_recognition_procedure]
+
+  - id: issue_regency_proclamation
+    display_name: 发布监国文书
+    description: 在制度承认已经形成后发布公开文书，使新的政治事实进入后续的 Aftermath。
+    actor_ids: [han-zanzhou]
+    targets:
+      - {id: proclamation, entity_types: [DOCUMENT], owned_by_actor: true, allowed_entity_ids: [regency-proclamation]}
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [proclamation]
+    preconditions:
+      - {subject: proclamation, states: [NOT_ISSUED]}
+      - {subject: nanjing-recognition, states: [FU_RECOGNIZED, LU_RECOGNIZED]}
+    completion_effects:
+      - {subject: proclamation, state: ISSUED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [issue_regency_proclamation]
+
+investigations:
+  - id: claimant-position-report
+    display_name: 查问候选所在与可接触性
+    description: 核实福王或潞王是否已经能够进入南京程序；回报只说明来源可见的到达与接触条件，不替主体判断应立何人。
+    actor_ids: [shi-kefa, ma-shiying, han-zanzhou]
+    target_ids: [fu-prince, lu-prince]
+    method: court_river_report
+    duration_days: 1
+    visibility: PRIVATE
+    observation:
+      content: 来报只能确认候选仍在南京政治视野内与可接触范围内；关于精确抵达日、私下条件和最终承认均尚待后续程序验证。
+      source: 往来使者、淮上与南京程序记录的交叉转述
+      source_ids: [mingji-nanlue-1, mingji-yiwen-2, palace-nanming-overview]
+      reliability: MEDIUM
+      related_assertion_ids: [n002, n004, n008]
+
+  - id: military-backing-report
+    display_name: 查问江北可见支持
+    description: 核实某项军政支持是否已经能够作为南京程序中的可见保护安排，而不窥探未公开的个人意图。
+    actor_ids: [shi-kefa, han-zanzhou]
+    target_ids: [jiangbei-military-backing]
+    method: network_report
+    duration_days: 1
+    visibility: PRIVATE
+    observation:
+      content: 江北方向的支持仍须通过公开安排和后续行动确认；来报不能把若干将领的私下态度化为确定承诺。
+      source: 江北军政网络与南京往来文书的交叉转述
+      source_ids: [mingji-yiwen-2, hongguang-shilu-chao-1, palace-nanming-overview]
+      reliability: MEDIUM
+      related_assertion_ids: [n006, n009]
+
+offer_terms:
+  - type: endorsement
+    subject: fu-prince
+    value: public_support
+    description: 对福王进入南京程序作出可被对方依赖的公开支持安排。
+    party_ids: [ma-shiying, han-zanzhou]
+  - type: endorsement
+    subject: lu-prince
+    value: public_support
+    description: 对潞王进入南京程序作出可被对方依赖的公开支持安排。
+    party_ids: [shi-kefa, han-zanzhou]
+
+pressures:
+  - id: institutional-vacuum-tightens
+    kind: EXOGENOUS
+    title: 留都制度真空收紧
+    description: 北都确报之后，南京不能无限维持没有可执行名义中心的状态；这不是任何 Decision Actor 的历史后续行动。
+    trigger_tick: 7
+    preconditions: []
+    effects:
+      - {subject: nanjing-recognition, state: URGENT}
+    visibility: PUBLIC
+    provenance: scenario_assumption
+    assertion_ids: [n010]
+
+corridor:
+  - {id: nanjing, display_name: 南京, order: 0}
+  - {id: fengyang-command, display_name: 凤阳军政驻地, order: 1}
+
+routes:
+  - {id: nanjing-fengyang, from_location: nanjing, to_location: fengyang-command, travel_days: 1}
+  - {id: fengyang-nanjing, from_location: fengyang-command, to_location: nanjing, travel_days: 1}
+
+anchors:
+  - id: historical-fu-regency
+    title: 福王后来以监国形式进入南京的正式程序
+    tick: 9
+    policy: REFERENCE_ONLY
+    assertion_ids: [n005]
+    compatibility_preconditions:
+      - id: fu-in-nanjing
+        kind: ENTITY_STATE
+        subject: fu-prince
+        satisfied_values: [IN_NANJING]
+        contradicted_values: [NOT_SELECTED]
+        description: 真实历史中的福王监国至少需要福王仍进入南京的程序空间。
+      - id: fu-recognized
+        kind: ENTITY_STATE
+        subject: nanjing-recognition
+        satisfied_values: [FU_RECOGNIZED]
+        contradicted_values: [LU_RECOGNIZED, CONTESTED, FRAGMENTED, DEFERRED]
+        description: 真实历史中的福王监国至少需要南京制度承认仍以福王为中心。
+      - id: regency-publicly-issued
+        kind: ENTITY_STATE
+        subject: regency-proclamation
+        satisfied_values: [ISSUED]
+        contradicted_values: []
+        description: 公开监国程序仍需要文书已经进入可见世界。
+  - id: historical-fu-enthronement
+    title: 福王后来即帝位
+    tick: 14
+    policy: REFERENCE_ONLY
+    assertion_ids: [n005]
+    compatibility_preconditions:
+      - id: fu-recognition-remains
+        kind: ENTITY_STATE
+        subject: nanjing-recognition
+        satisfied_values: [FU_RECOGNIZED]
+        contradicted_values: [LU_RECOGNIZED, CONTESTED, FRAGMENTED, DEFERRED]
+        description: 后来的福王即位至少需要当前危局没有消除福王的制度承认。
+      - id: later-enthronement-choice
+        kind: UNMODELED
+        description: 即位程序、后续政治选择与其余条件没有被本局未来模拟，不能由当前 Outcome 代替。

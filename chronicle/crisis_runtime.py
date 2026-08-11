@@ -184,7 +184,13 @@ class FixtureActorDriver:
                 "wu-sangui": ("在两方压力间保住所部与关口", ["核验北京条件", "等待关外回音"]),
                 "dorgon": ("保持西进行动自由并核验关内局势", ["继续西行", "等待可靠来使"]),
             }
-            objective, steps = objectives[actor_id]
+            objective, steps = objectives.get(
+                actor_id,
+                (
+                    "在当前有限信息下建立可修正的初始处置",
+                    ["核验当前可见事实", "保留仍可执行的行动"],
+                ),
+            )
             world.update_plan(
                 objective,
                 steps,
@@ -4237,6 +4243,69 @@ class CrisisRunEngine:
             results.append(result)
         return results
 
+    def _surface_visible_entity_ids(
+        self,
+        actor_id: str,
+        projection: dict[str, Any],
+        perspective: dict[str, Any],
+    ) -> set[str]:
+        """Return Entity states this Actor can actually see on a Crisis Surface.
+
+        Affordance manifests name legal targets, but naming a target must not
+        reveal its current World Truth. A Surface therefore only uses assets,
+        local place state, visible operation/pressure effects, and a delivered
+        Resolution result as state-bearing facts.
+        """
+
+        actor = self.pack.actor_by_id[actor_id]
+        visible = set(actor.asset_ids)
+        location_id = str(projection.get("positions", {}).get(actor_id, ""))
+        if location_id in self.pack.entity_by_id:
+            visible.add(location_id)
+        for operation in projection.get("operations", []):
+            if not isinstance(operation, dict) or operation.get("status") not in {
+                "IN_PROGRESS",
+                "COMPLETED",
+            }:
+                continue
+            definition = self.pack.operation_by_id.get(str(operation.get("definition_id", "")))
+            if definition is None:
+                continue
+            if (
+                operation.get("actor_id") != actor_id
+                and definition.visibility.value != "PUBLIC"
+            ):
+                continue
+            effects = list(definition.start_effects)
+            if operation.get("status") == "COMPLETED":
+                effects.extend(definition.completion_effects)
+            target_map = operation.get("target_map", {})
+            if not isinstance(target_map, dict):
+                target_map = {}
+            visible.update(
+                str(target_map.get(effect.subject, effect.subject)) for effect in effects
+            )
+        for pressure in perspective.get("visible_pressures", []):
+            if not isinstance(pressure, dict):
+                continue
+            visible.update(
+                str(effect.get("subject", ""))
+                for effect in pressure.get("effects", [])
+                if isinstance(effect, dict)
+            )
+        if any(
+            isinstance(item, dict) and item.get("kind") == "resolution"
+            for item in perspective.get("knowledge", [])
+        ):
+            visible.update(
+                str(effect.get("entity_id", ""))
+                for effect in projection.get("resolution", {}).get("result", {}).get(
+                    "entity_effects", []
+                )
+                if isinstance(effect, dict)
+            )
+        return {entity_id for entity_id in visible if entity_id in self.pack.entity_by_id}
+
     def product_perspective(self, run_id: str, actor_id: str) -> dict[str, Any]:
         self._activate_run_pack(run_id)
         if actor_id not in self.pack.actor_by_id:
@@ -4332,7 +4401,9 @@ class CrisisRunEngine:
             "surface": self.pack.surface_projection(
                 snapshot["projection"],
                 visible_actor_ids={actor_id},
-                visible_entity_ids={item["id"] for item in perspective["known_entities"]},
+                visible_entity_ids=self._surface_visible_entity_ids(
+                    actor_id, snapshot["projection"], perspective
+                ),
             ),
         }
 

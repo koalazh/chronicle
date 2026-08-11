@@ -53,7 +53,7 @@ actors:
       authority: [发送使者与命令, 调整可用部队的有限部署, 谈判与提出条件, 等待或拒绝]
       tensions: [巩固新政权与快速消除东部威胁之间, 招抚吴三桂与施加强制之间]
     initial_location: beijing
-    initial_knowledge: [c002, c003, c010]
+    initial_knowledge: [c002, c003, c010, c015]
     initial_beliefs:
       eastern_gate: 吴三桂仍可能通过条件与家属压力被纳入新秩序。
       urgency: 北京秩序尚未稳固，东部问题不能无限等待。
@@ -72,7 +72,7 @@ actors:
       authority: [发送使者, 调整关内外有限部署, 谈判条件, 拒绝或延迟承诺]
       tensions: [故明责任与现实生存之间, 父亲家属安危与所部安全之间, 借援与失去自主之间]
     initial_location: shanhaiguan
-    initial_knowledge: [c002, c003, c010, c011]
+    initial_knowledge: [c002, c003, c010, c011, c015]
     initial_beliefs:
       balance: 单独长期对抗任一大方都存在风险。
       correspondence: 两方承诺都需要通过行动和新消息验证。
@@ -91,7 +91,7 @@ actors:
       authority: [调整行军, 回复或拒绝外部请求, 提出政治条件, 调动随军资源]
       tensions: [既定西征目标与突发合作机会之间, 快速利用局势与避免受骗之间]
     initial_location: liaoxi
-    initial_knowledge: [c001, c002, c008]
+    initial_knowledge: [c001, c002, c008, c015]
     initial_beliefs:
       central_plains: 明朝秩序正在崩解，西进可能出现新的政治机会。
       shanhai: 山海关仍是进入关内的重要物理边界。

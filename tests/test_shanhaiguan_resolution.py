@@ -117,6 +117,26 @@ def test_pressure_and_shun_arrival_can_defer_without_replacing_qing_choice(app_c
     assert all(effect.entity_id != "qing-expedition-force" for effect in result.entity_effects)
 
 
+def test_expired_transit_window_defers_when_no_force_can_still_make_contact(app_config):
+    resolver = get_resolution_contract("shanhaiguan-v1", 1)
+    world = _world(app_config)
+    world["entities"]["eastern-transit-window"]["state"] = "CLOSING"
+
+    readiness = resolver.evaluate_gate(world)
+    result = resolver.resolve(world, "window-expired-seed")
+
+    assert readiness.status == ResolutionGateStatus.READY
+    assert readiness.candidate_kind == ResolutionKind.DEFERRED
+    assert result.variant == "WINDOW_EXPIRED_DEFERRED"
+    assert result.immediate_actor_ids == ("li-zicheng", "wu-sangui", "dorgon")
+    assert [effect.entity_id for effect in result.entity_effects] == [
+        "eastern-transit-window"
+    ]
+
+    world["operations"].append({"id": "op-in-flight", "status": "IN_PROGRESS"})
+    assert resolver.evaluate_gate(world).status == ResolutionGateStatus.NOT_READY
+
+
 def test_direct_conflict_uses_changed_readiness_and_control_as_world_facts(app_config):
     resolver = get_resolution_contract("shanhaiguan-v1", 1)
     qing_advantage = _direct_conflict_world(

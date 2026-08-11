@@ -531,6 +531,10 @@ def test_checkpoint_preserves_private_perspectives_and_unresolved_choices():
     assert wu["location"] == "shanhaiguan"
     assert dorgon["location"] == "liaoxi"
     assert li["knowledge"] != wu["knowledge"] != dorgon["knowledge"]
+    window_constraint = pack.assertion_by_id["c015"].claim
+    assert all(
+        window_constraint in perspective["knowledge"] for perspective in (li, wu, dorgon)
+    )
     assert all("已经决定" not in item for item in pack.crisis.checkpoint.unresolved)
     assert {message.recipient for message in pack.crisis.checkpoint.in_transit} == {
         "wu-sangui",

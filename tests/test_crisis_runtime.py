@@ -33,7 +33,9 @@ def test_watch_fixture_lives_without_forced_revisits_or_reflections(app_config):
     assert {wake["actor_id"] for wake in orient} == {"li-zicheng", "wu-sangui", "dorgon"}
     assert all(wake["status"] == "COMPLETED" and wake["source"] == "fixture" for wake in wakes)
     assert len({wake["hermes_session_id"] for wake in wakes}) == len(wakes)
-    assert result["run"]["current_tick"] == 5
+    assert result["run"]["current_tick"] == 6
+    assert result["run"]["status"] == "SEALED"
+    assert result["run"]["settlement_reason"] == "deferred_resolution"
     assert not any(event["event_type"] == "REVISIT_SCHEDULED" for event in events)
     assert not any(wake["wake_type"] == "REVISIT_DUE" for wake in wakes)
     assert not any(wake["wake_type"] == "REFLECTION" for wake in wakes)
@@ -216,7 +218,8 @@ def test_reaffirmed_plan_stays_private_and_does_not_schedule_reflection(app_conf
     assert len(plans) == 1
     assert len(reaffirmed) == 1
     assert not any(wake["wake_type"] == "REFLECTION" for wake in engine.db.crisis_wakes(run_id))
-    engine.seal(run_id, "test")
+    if engine.run_summary(run_id)["status"] == "ACTIVE":
+        engine.seal(run_id, "test")
     assert reaffirmed[0]["id"] not in {item["id"] for item in engine.replay(run_id)["items"]}
 
 
@@ -861,7 +864,8 @@ def test_operation_completion_changes_asset_state_then_enables_movement(app_conf
         item.get("event_id") for item in li_view["knowledge"] if isinstance(item, dict)
     }
 
-    engine.seal(run_id, "operation-replay-test")
+    if engine.run_summary(run_id)["status"] == "ACTIVE":
+        engine.seal(run_id, "operation-replay-test")
     replay_titles = {item["title"] for item in engine.replay(run_id)["items"]}
     assert {"一项行动已经开始", "一项行动已经完成", "一项关键资产状态已经改变"} <= replay_titles
 
@@ -1225,7 +1229,8 @@ def test_replay_preserves_actor_visibility_and_message_causality(app_config):
     engine = CrisisRunEngine(app_config, actor_driver=PrivateMessageDriver())
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     engine.run_until_idle(run_id)
-    engine.seal(run_id, "test")
+    if engine.run_summary(run_id)["status"] == "ACTIVE":
+        engine.seal(run_id, "test")
     replay = engine.replay(run_id)
 
     dispatch = next(
@@ -1251,7 +1256,8 @@ def test_replay_resolves_plan_message_receipt_plan_chain(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     engine.run_until_idle(run_id)
-    engine.seal(run_id, "test")
+    if engine.run_summary(run_id)["status"] == "ACTIVE":
+        engine.seal(run_id, "test")
     items = engine.replay(run_id)["items"]
     by_id = {item["id"]: item for item in items}
 

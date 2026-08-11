@@ -64,7 +64,8 @@ def test_exogenous_pressure_changes_world_without_an_actor_message(app_config):
 
     assert pressure["status"] == "APPLIED"
     assert pressure["applied_event_id"] == applied["id"]
-    assert projection["entities"]["eastern-transit-window"]["state"] == "CLOSING"
+    assert projection["entities"]["eastern-transit-window"]["state"] == "CLOSED"
+    assert engine.run_summary(run_id)["settlement_reason"] == "deferred_resolution"
     assert applied["causal_parent_ids"] == [scheduled["id"]]
     assert applied["provenance"] == "scenario_assumption"
     assert applied["seat_id"] is None
@@ -113,7 +114,8 @@ def test_exogenous_pressure_changes_world_without_an_actor_message(app_config):
     )
     assert request is None and code == "operation_precondition_unmet"
 
-    engine.seal(run_id, "test")
+    if engine.run_summary(run_id)["status"] == "ACTIVE":
+        engine.seal(run_id, "test")
     replay_item = next(
         item
         for item in engine.replay(run_id)["items"]

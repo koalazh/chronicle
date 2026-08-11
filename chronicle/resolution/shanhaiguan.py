@@ -40,6 +40,7 @@ class _ShanhaiFacts:
     passage_access_agreement_ids: tuple[str, ...]
     active_passage_agreement_ids: tuple[str, ...]
     breached_passage_agreement_ids: tuple[str, ...]
+    in_flight_operation_ids: tuple[str, ...]
     qing_investigations: int
     shun_investigations: int
 
@@ -109,6 +110,15 @@ class ShanhaiGuanResolutionContract:
                 status=ResolutionGateStatus.READY,
                 candidate_kind=ResolutionKind.DEFERRED,
                 reasons=("关口控制已经形成，但主要力量尚未形成可裁定的直接接触。",),
+                facts=self._gate_facts(facts),
+            )
+        if self._window_expired_without_contact(facts):
+            return ResolutionReadiness(
+                status=ResolutionGateStatus.READY,
+                candidate_kind=ResolutionKind.DEFERRED,
+                reasons=(
+                    "京东通行窗口已经收紧，双方主力均未进入山海关接触空间，当前危局不能再由新的普通调动结算。",
+                ),
                 facts=self._gate_facts(facts),
             )
         reasons = ["当前仍可通过普通通信、行动完成或新的世界信息改变局势。"]
@@ -221,6 +231,30 @@ class ShanhaiGuanResolutionContract:
                 ),
                 agreement_effects=(),
             )
+        if self._window_expired_without_contact(facts):
+            return ResolutionResult(
+                contract_id=self.id,
+                contract_version=self.version,
+                kind=ResolutionKind.DEFERRED,
+                variant="WINDOW_EXPIRED_DEFERRED",
+                ambiguity_used=False,
+                summary="京东通行窗口在双方主力进入山海关前已经收紧；本轮危局没有形成可裁定的关口接触，后续不能再由这一局直接推演。",
+                immediate_actor_ids=("li-zicheng", "wu-sangui", "dorgon"),
+                factors=(
+                    "京东通行窗口已经收紧，新的调动不再能在本场危局中可靠完成。",
+                    "清军主力尚未进入山海关。",
+                    "大顺东向兵力尚未进入山海关。",
+                    "没有仍在执行、足以改变当前接触空间的行动。",
+                ),
+                entity_effects=(
+                    ResolutionEntityEffect(
+                        "eastern-transit-window",
+                        "CLOSED",
+                        "这一轮通行窗口已经结束，未形成的关口接触留待本场危局之外。",
+                    ),
+                ),
+                agreement_effects=(),
+            )
         return ResolutionResult(
             contract_id=self.id,
             contract_version=self.version,
@@ -250,6 +284,15 @@ class ShanhaiGuanResolutionContract:
             facts.transit_window == "CLOSING"
             and facts.shun_at_pass
             and not facts.qing_at_pass
+        )
+
+    @staticmethod
+    def _window_expired_without_contact(facts: _ShanhaiFacts) -> bool:
+        return (
+            facts.transit_window == "CLOSING"
+            and not facts.qing_at_pass
+            and not facts.shun_at_pass
+            and not facts.in_flight_operation_ids
         )
 
     def _resolve_direct_conflict(self, facts: _ShanhaiFacts, seed: str) -> ResolutionResult:
@@ -373,6 +416,14 @@ class ShanhaiGuanResolutionContract:
             ),
             breached_passage_agreement_ids=tuple(
                 item["id"] for item in passage_agreements if item["status"] == "BREACHED"
+            ),
+            in_flight_operation_ids=tuple(
+                sorted(
+                    str(operation.get("id", ""))
+                    for operation in world.get("operations", [])
+                    if isinstance(operation, Mapping)
+                    and operation.get("status") == "IN_PROGRESS"
+                )
             ),
             qing_investigations=self._completed_investigation_count(world, "dorgon"),
             shun_investigations=self._completed_investigation_count(world, "li-zicheng"),

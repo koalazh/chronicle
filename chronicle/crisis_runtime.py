@@ -4,13 +4,13 @@ import copy
 import difflib
 import json
 import sqlite3
-import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from . import editorial
 from .compatibility import evaluate_historical_compatibility
 from .config import AppConfig
 from .crisis import (
@@ -22,6 +22,15 @@ from .crisis import (
     PressureStatus,
     VolumeRegistry,
 )
+from .crisis_lifecycle import next_simulation_tick
+from .crisis_projection import (
+    build_actor_perspective,
+    plan_text_key,
+    plan_texts_key,
+    project_world_view,
+    same_material_plan,
+)
+from .crisis_wakes import wake_batches, wake_sort_key
 from .db import ChronicleDB, content_hash, stable_hash
 from .decision import (
     DecisionInterpreter,
@@ -32,6 +41,8 @@ from .replay_projection import compare_material_runs, material_causal_roots, rep
 from .resolution import get_resolution_contract
 from .resolution.base import ResolutionGateStatus, ResolutionKind
 from .world import WorldAffordanceSession, WorldService, token_hash
+
+WATCH_ATTENTION_EVENT_TYPES = editorial.WATCH_ATTENTION_EVENT_TYPES
 
 
 class CrisisRunError(ValueError):
@@ -74,30 +85,6 @@ class CrisisWakeType(StrEnum):
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
 
-
-WATCH_ATTENTION_EVENT_TYPES = frozenset(
-    {
-        "OFFER_PROPOSED",
-        "OFFER_COUNTERED",
-        "OFFER_ACCEPTED",
-        "OFFER_REJECTED",
-        "OFFER_WITHDRAWN",
-        "OFFER_EXPIRED",
-        "AGREEMENT_CREATED",
-        "AGREEMENT_FULFILLED",
-        "AGREEMENT_BREACHED",
-        "OPERATION_STARTED",
-        "OPERATION_COMPLETED",
-        "INVESTIGATION_COMPLETED",
-        "OBSERVATION_OBTAINED",
-        "MOVEMENT_STARTED",
-        "MOVEMENT_ARRIVED",
-        "PRESSURE_APPLIED",
-        "RESOLUTION_GATE_REACHED",
-        "RESOLUTION_APPLIED",
-        "CRISIS_SETTLED",
-    }
-)
 
 _REPLAY_LABELS = {
     "RUN_CREATED": "危局开始",
@@ -980,20 +967,7 @@ class CrisisRunEngine:
 
     @staticmethod
     def _watch_attention(events: list[dict[str, Any]]) -> dict[str, Any] | None:
-        for event in events:
-            event_type = str(event["event_type"])
-            if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
-                if event["payload"].get("source") == "checkpoint":
-                    continue
-            elif event_type not in WATCH_ATTENTION_EVENT_TYPES:
-                continue
-            return {
-                "mode": "WATCH",
-                "tick": int(event["tick"]),
-                "event_id": event["id"],
-                "event_type": event_type,
-            }
-        return None
+        return editorial.watch_attention(events)
 
     def human_decision_state(self, run_id: str, tick: int | None = None) -> dict[str, Any]:
         run = self.db.worldline(run_id)
@@ -2141,47 +2115,10 @@ class CrisisRunEngine:
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             return None
-        candidates = [
-            int(wake["tick"])
-            for wake in self.db.crisis_wakes(run_id, status="QUEUED")
-        ]
-        candidates.extend(
-            int(message["arrival_tick"])
-            for message in snapshot["projection"].get("messages", [])
-            if message["status"] == "in_transit"
+        return next_simulation_tick(
+            snapshot["projection"],
+            self.db.crisis_wakes(run_id, status="QUEUED"),
         )
-        candidates.extend(
-            int(operation["expected_complete_tick"])
-            for operation in snapshot["projection"].get("operations", [])
-            if operation["status"] == "IN_PROGRESS"
-        )
-        candidates.extend(
-            int(investigation["expected_result_tick"])
-            for investigation in snapshot["projection"].get("investigations", [])
-            if investigation["status"] == "IN_PROGRESS"
-        )
-        candidates.extend(
-            int(offer["expires_tick"])
-            for offer in snapshot["projection"].get("offers", [])
-            if offer.get("status") == OfferStatus.PROPOSED.value
-            and offer.get("expires_tick") is not None
-        )
-        candidates.extend(
-            int(pressure["trigger_tick"])
-            for pressure in snapshot["projection"].get("pressures", [])
-            if pressure.get("status") == PressureStatus.PENDING.value
-        )
-        candidates.extend(
-            int(movement["arrival_tick"])
-            for movement in snapshot["projection"].get("movements", [])
-            if movement["status"] == "in_transit"
-        )
-        candidates.extend(
-            int(report["expected_tick"])
-            for report in snapshot["projection"].get("resolution_reports", [])
-            if report.get("status") == "IN_TRANSIT"
-        )
-        return min(candidates) if candidates else None
 
     @staticmethod
     def _operations_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
@@ -2858,53 +2795,11 @@ class CrisisRunEngine:
 
     @staticmethod
     def _wake_sort_key(wake: dict[str, Any]) -> tuple[int, str, str, str]:
-        priorities = {
-            CrisisWakeType.RESOLUTION_GATE.value: 0,
-            CrisisWakeType.RESOLUTION_RESULT.value: 1,
-            CrisisWakeType.AGREEMENT_CHANGE.value: 2,
-            CrisisWakeType.OFFER_CHANGE.value: 3,
-            CrisisWakeType.OPERATION_RESULT.value: 4,
-            CrisisWakeType.INVESTIGATION_RESULT.value: 5,
-            CrisisWakeType.OBSERVATION.value: 6,
-            CrisisWakeType.MESSAGE.value: 7,
-            CrisisWakeType.PRESSURE.value: 8,
-            CrisisWakeType.REVISIT_DUE.value: 9,
-            CrisisWakeType.REFLECTION.value: 10,
-            CrisisWakeType.ORIENT.value: 11,
-        }
-        return (
-            priorities.get(str(wake["wake_type"]), 99),
-            str(wake["wake_type"]),
-            str(wake["trigger_event_id"]),
-            str(wake["id"]),
-        )
+        return wake_sort_key(wake)
 
     @classmethod
     def _wake_batches(cls, wakes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-        """Merge ordinary same-tick inputs into one logical Actor attention."""
-        coalescible = {
-            CrisisWakeType.RESOLUTION_RESULT.value,
-            CrisisWakeType.AGREEMENT_CHANGE.value,
-            CrisisWakeType.OFFER_CHANGE.value,
-            CrisisWakeType.OPERATION_RESULT.value,
-            CrisisWakeType.INVESTIGATION_RESULT.value,
-            CrisisWakeType.OBSERVATION.value,
-            CrisisWakeType.MESSAGE.value,
-            CrisisWakeType.PRESSURE.value,
-            CrisisWakeType.REVISIT_DUE.value,
-        }
-        merged = sorted(
-            (wake for wake in wakes if wake["wake_type"] in coalescible),
-            key=cls._wake_sort_key,
-        )
-        batches = [
-            [wake]
-            for wake in wakes
-            if wake["wake_type"] not in coalescible
-        ]
-        if merged:
-            batches.append(merged)
-        return sorted(batches, key=lambda batch: cls._wake_sort_key(batch[0]))
+        return wake_batches(wakes)
 
     def _run_wake_moment(
         self,
@@ -4019,28 +3914,15 @@ class CrisisRunEngine:
 
     @staticmethod
     def _same_material_plan(current: dict[str, Any] | None, candidate: dict[str, Any]) -> bool:
-        if current is None:
-            return False
-        return (
-            CrisisRunEngine._plan_text_key(current.get("objective", ""))
-            == CrisisRunEngine._plan_text_key(candidate.get("objective", ""))
-            and CrisisRunEngine._plan_texts_key(current.get("steps", []))
-            == CrisisRunEngine._plan_texts_key(candidate.get("steps", []))
-            and CrisisRunEngine._plan_texts_key(current.get("reconsider_when", []))
-            == CrisisRunEngine._plan_texts_key(candidate.get("reconsider_when", []))
-        )
+        return same_material_plan(current, candidate)
 
     @staticmethod
     def _plan_texts_key(values: list[Any]) -> tuple[str, ...]:
-        return tuple(CrisisRunEngine._plan_text_key(value) for value in values)
+        return plan_texts_key(values)
 
     @staticmethod
     def _plan_text_key(value: Any) -> str:
-        return "".join(
-            character
-            for character in unicodedata.normalize("NFKC", str(value)).casefold()
-            if not character.isspace() and not unicodedata.category(character).startswith("P")
-        )
+        return plan_text_key(value)
 
     def _perspective_from(
         self,
@@ -4058,18 +3940,17 @@ class CrisisRunEngine:
             raise CrisisRunError("actor life state is missing")
         known = list(lifetime["knowledge"] if knowledge is None else knowledge)
         current_revisits = list(lifetime["revisits"] if revisits is None else revisits)
-        return {
-            "run_id": run_id,
-            "actor_id": actor_id,
-            "tick": int(projection["tick"]),
-            "location": projection["positions"][actor_id],
-            "knowledge": known,
-            "beliefs": dict(lifetime["beliefs"] if beliefs is None else beliefs),
-            "plan": list(lifetime["plan"] if plan is None else plan),
-            "revisits": current_revisits,
-            "resources": dict(lifetime["resources"]),
-            "authority": list(lifetime["authority"]),
-            **self._affordance_manifest(
+        return build_actor_perspective(
+            run_id=run_id,
+            actor_id=actor_id,
+            projection=projection,
+            knowledge=known,
+            beliefs=dict(lifetime["beliefs"] if beliefs is None else beliefs),
+            plan=list(lifetime["plan"] if plan is None else plan),
+            revisits=current_revisits,
+            resources=dict(lifetime["resources"]),
+            authority=list(lifetime["authority"]),
+            affordances=self._affordance_manifest(
                 actor_id,
                 projection,
                 current_revisits,
@@ -4078,7 +3959,7 @@ class CrisisRunEngine:
                     for item in known
                 ),
             ),
-        }
+        )
 
     def _affordance_manifest(
         self,
@@ -4314,43 +4195,7 @@ class CrisisRunEngine:
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
-        projection = snapshot["projection"]
-        movements = {
-            movement["actor_id"]: movement
-            for movement in projection.get("movements", [])
-            if movement["status"] == "in_transit"
-        }
-        return {
-            "tick": int(projection["tick"]),
-            "surface": self.pack.surface_projection(projection, include_messages=True),
-            "corridor": [
-                location.model_dump(mode="json")
-                for location in sorted(self.pack.crisis.corridor, key=lambda item: item.order)
-            ],
-            "actors": [
-                {
-                    "id": actor.id,
-                    "display_name": actor.display_name,
-                    "location": projection["positions"][actor.id],
-                    "movement": movements.get(actor.id),
-                }
-                for actor in self.pack.crisis.actors
-            ],
-            "messages": list(projection.get("messages", [])),
-            "entities": list(projection.get("entities", {}).values()),
-            "operations": list(projection.get("operations", [])),
-            "investigations": list(projection.get("investigations", [])),
-            "offers": list(projection.get("offers", [])),
-            "agreements": list(projection.get("agreements", [])),
-            "pressures": [
-                pressure
-                for pressure in projection.get("pressures", [])
-                if pressure.get("status") == PressureStatus.APPLIED.value
-            ],
-            "resolution": dict(projection.get("resolution", {})),
-            "settlement": dict(projection.get("settlement", {})),
-            "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
-        }
+        return project_world_view(snapshot["projection"], self.pack)
 
     def _human_decision_operation_results(
         self, run_id: str, tick: int, actor_id: str

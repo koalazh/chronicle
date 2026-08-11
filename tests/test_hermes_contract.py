@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import yaml
 
 from chronicle.db import content_hash
 from chronicle.hermes import (
+    _write_gateway_env,
     actor_protocol_prompt,
     cleanup_crisis_runtime,
     load_crisis_profile_records,
@@ -60,6 +62,20 @@ def test_actor_distribution_declines_recent_builtin_toolset():
 
     assert config["platform_toolsets"]["api_server"] == ["memory"]
     assert config["known_builtin_toolsets"]["api_server"] == ["bfl"]
+
+
+def test_private_gateway_uses_the_configured_base_url_port(app_config):
+    config = replace(app_config, hermes_base_url="http://127.0.0.1:18642")
+    config.hermes_home.mkdir()
+
+    _write_gateway_env(config, "gateway-key")
+
+    values = dict(
+        line.split("=", 1)
+        for line in (config.hermes_home / ".env").read_text(encoding="utf-8").splitlines()
+    )
+    assert values["API_SERVER_HOST"] == "127.0.0.1"
+    assert values["API_SERVER_PORT"] == "18642"
 
 
 @pytest.mark.asyncio

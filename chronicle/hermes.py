@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -681,7 +682,7 @@ def materialize_crisis_profiles(
         if records:
             existing_gateway_key = _read_env_file(config.hermes_home / ".env").get("API_SERVER_KEY", "")
             _write_gateway_env(
-                config.hermes_home,
+                config,
                 existing_gateway_key or next(iter(records.values()))["profile_key"],
             )
             _sync_gateway_crisis_mcp(config, records)
@@ -1013,15 +1014,21 @@ def restore_profile_memory(config: AppConfig, profile: str, existed: bool, text:
         path.unlink()
 
 
-def _write_gateway_env(home: Path, api_server_key: str) -> Path:
-    path = home / ".env"
+def _write_gateway_env(config: AppConfig, api_server_key: str) -> Path:
+    """Configure the private Gateway on the configured local API port."""
+
+    try:
+        configured_port = urlparse(config.hermes_base_url).port
+    except ValueError as exc:
+        raise RuntimeError("Chronicle Hermes base URL has an invalid port") from exc
+    path = config.hermes_home / ".env"
     values = _read_env_file(path)
     values.update(
         {
             "API_SERVER_ENABLED": "true",
             "API_SERVER_KEY": api_server_key,
             "API_SERVER_HOST": "127.0.0.1",
-            "API_SERVER_PORT": "8642",
+            "API_SERVER_PORT": str(configured_port or 8642),
             "GATEWAY_MULTIPLEX_PROFILES": "true",
         }
     )
@@ -1102,7 +1109,7 @@ def bootstrap(config: AppConfig, *, force_reset: bool = False) -> dict[str, Any]
                     ) from exc
             raise
         installed.append(profile)
-    gateway_env = _write_gateway_env(home, keys[PROFILE_NAMES["A"]])
+    gateway_env = _write_gateway_env(config, keys[PROFILE_NAMES["A"]])
     runtime_env = _write_runtime_config(config, keys)
     readiness = probe(config, list(PROFILE_NAMES.values()))
     return {

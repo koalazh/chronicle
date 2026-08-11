@@ -69,6 +69,7 @@ async def test_world_mcp_exposes_only_identity_free_crisis_tools():
     assert set(tools) == {
         "communicate",
         "investigate",
+        "manage_offer",
         "operate",
         "update_plan",
         "schedule_revisit",

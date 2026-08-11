@@ -1,4 +1,4 @@
-# Chronicle V3 架构
+# Chronicle V4 架构（实施中）
 
 本文是唯一的系统架构入口。它把 Run、主体状态、Hermes 和迁移放在同一条因果链里；产品旅程见 [产品说明](../PRODUCT.md)，页面约定见 [前端合同](FRONTEND.md)，历史边界见 [历史与视野](HISTORY.md)，现场操作见 [运维与验收](OPERATIONS.md)。
 
@@ -18,7 +18,7 @@ WorldService
 Ledger + Snapshot + 下一时刻
 ```
 
-Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有一个中央模型替三位主体决定；Hermes 负责长期主体和 Agent loop，Chronicle 负责模拟世界和所有可验证效果。
+Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有一个中央模型替 Decision Actor 决定；Hermes 负责长期主体和 Agent loop，Chronicle 负责模拟世界和所有可验证效果。
 
 ## 四个词足够理解产品
 
@@ -26,7 +26,7 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 | --- | --- | --- |
 | Crisis | 一段有来源、有地点、有停止边界的历史切片 | 这场危局 |
 | Run | 从 checkpoint 开始的一次可推进经历 | 这一局 |
-| Actor | 在 Run 中拥有私有状态并自己做选择的主体 | 李自成、吴三桂、多尔衮 |
+| Actor | 在 Run 中拥有私有状态并自己做选择的主体 | 这一危局中的关键主体 |
 | Perspective | 某个主体在某一刻合法能使用的信息 | 这个人的视野 |
 
 `Run`、`Actor` 和 `Perspective` 是实现名；主产品只需要让用户理解“一场危局、一局经历、一个人的视野”。
@@ -37,7 +37,7 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 
 | 层 | 保存什么 | 谁能更新 |
 | --- | --- | --- |
-| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Operation、Investigation、Observation、移动和世界效果 | Host 的确定性提交路径 |
+| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Investigation/Observation、Offer/Agreement、Operation、移动和世界效果 | Host 的确定性提交路径 |
 | Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
 | Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
 | Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
@@ -54,11 +54,11 @@ Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将
 
 ### 推进
 
-Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、Offer 到期、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
 
 `ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
-一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion 与 Investigation result）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Operation、Investigation、移动和观察排入未来时刻。
+一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion、Investigation result 与 Offer expiry）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Offer/Agreement、Operation、Investigation、移动和观察排入未来时刻。
 
 因此模型返回顺序不能改变世界语义；拒绝、等待、沉默和 no-op 都是合法结果；消息不能在同 tick 递归唤醒收件人。
 
@@ -78,18 +78,19 @@ GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项
 
 ## Perspective 与隐私
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束；尚未实现的 Offer 和 Agreement 仍以空集合显式表示。
+Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、可提出的结构化条件、自己作为当事人的未决 Offer/生效 Agreement、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束。Offer 与 Agreement 只在当事人合法知道时出现。
 
 人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
 
 ## World tools
 
-Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
+Hermes Agent 与 Human Decision Interpreter 共用同一组六种请求：
 
 | 工具 | 主体表达什么 | Host 至少校验什么 |
 | --- | --- | --- |
 | `communicate(recipient, content, idempotency_key)` | 给另一主体发送一封信 | 收件人、内容、路线和抵达日 |
 | `investigate(question, target, method, idempotency_key)` | 对当前可用对象启动一项受来源限制的调查 | authority、目标、方法、所需 asset、时程、边界和同一调查是否已经进行 |
+| `manage_offer(action, offer_id, recipient, terms, message, expires_after_days, idempotency_key)` | 提出、还价、接受、拒绝或撤回一个有世界后果的条件 | authority、当事人、Crisis 声明的 term、Offer 状态、到期、回应权和幂等键 |
 | `operate(operation_definition_id, targets, description, idempotency_key)` | 启动 Crisis Pack 声明、需要模拟时间的行动 | authority、目标类型/归属、Asset 状态、冲突、路线、时程、边界和现实前提 |
 | `update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)` | 更新目标、方法、重新判断条件和必要的 Belief | 内容完整性、信念格式、语义 no-op 和幂等键 |
 | `schedule_revisit(after_days, reason, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、原因、边界和幂等键 |
@@ -100,13 +101,19 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 
 已接受的 `investigate` 会写入 `INVESTIGATION_STARTED` 并以 `IN_PROGRESS` 留在 Projection；到达 Crisis Pack 固定的 result tick 后，Host 写入 `INVESTIGATION_COMPLETED` 与 `OBSERVATION_OBTAINED`，再把 Observation 交给可见主体并排入 `INVESTIGATION_RESULT` Wake。Observation 记录内容、来源、source IDs、可靠性、获得时刻与相关断言；它可以是部分或相互冲突的证据，绝不是即时的 `truth_lookup()`。当前山海关报告为私有观察，其他 Actor 不会因 Ledger 中存在该记录而自动得知。
 
+已接受的 `manage_offer` 先写入一个私有当事人可见的 Offer；Offer 可以被还价、接受、拒绝、撤回或在声明的模拟时刻到期。接受会把 Offer 的结构化 terms 和完整 source-offer lineage 写为 `ACTIVE` Agreement。Agreement 是 Projection 中的世界事实，不是任何一方的私有 Belief；当前山海关只声明“允许通过山海关”这一 `passage` term，不构建通用政治 DSL。
+
+同一 logical moment 内两个主体可能都依据冻结的合法视野操作同一 Offer。若先提交的世界变化已使后一个请求不再可用，Host 将后者记录为 `offer_not_open` 等 World refusal，而不是让 Run 崩溃、回滚已经发生的现实，或把拒绝伪装成成功。
+
+Crisis Operation 可以声明它需要某个 `ACTIVE` Agreement；因此已接受的通行条件会让多尔衮随后合法获得“通过山海关”的行动 affordance。相反，吴三桂仍可实际封闭关口；Host 不用一个 `betray()` 按钮替代现实行为，而是在该 Operation 完成时写入 `AGREEMENT_BREACHED`。只有同时是协议当事人且能合法看见该现实行动的主体会收到这一结论；其他人最多看见公开的关口变化，不会获得私下协议。没有 Trust Score，背约后的后果仍由主体依据自己收到的世界事实判断。
+
 ## Hermes 边界
 
 | Hermes 负责 | Chronicle 负责 |
 | --- | --- |
 | Profile、模型请求、Agent loop、fresh Session | Run、模拟时间、停止边界、Perspective |
 | Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Revisit、Resource、Authority |
-| 模型判断与工具调用 | 路线、消息送达、Operation lifecycle、权限、世界效果和 Ledger |
+| 模型判断与工具调用 | 路线、消息送达、Offer/Agreement 与 Operation lifecycle、权限、世界效果和 Ledger |
 
 Watch 在 live Run 建立后为全部 Agent-controlled Actor 运行 Profile；Takeover 只为非 Human-controlled Actor 运行 Profile。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
 
@@ -114,7 +121,7 @@ Watch 在 live Run 建立后为全部 Agent-controlled Actor 运行 Profile；Ta
 
 ## Human Decision Interpreter
 
-Takeover 的吴三桂没有 Hermes Actor Profile。Interpreter 只把用户文字解释成最多 8 个与 Agent 相同的 World tool 请求，再交给同一个 `WorldService` 校验和提交。它不决定行动是否成功，不替其他主体作决定，也不能从 private perspective 之外补充信息；live 解释失败不会回退成 regex 或 fixture。
+Takeover 中被选中的 Human Actor 没有 Hermes Actor Profile。Interpreter 只把用户文字解释成最多 8 个与 Agent 相同的 World tool 请求，再交给同一个 `WorldService` 校验和提交。它不决定行动是否成功，不替其他主体作决定，也不能从 private perspective 之外补充信息；live 解释失败不会回退成 regex 或 fixture。
 
 ## 迁移与旧数据
 

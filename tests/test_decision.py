@@ -107,6 +107,28 @@ def test_model_decision_interpreter_includes_canonical_recipient_catalog(
     assert "不得使用显示名或别名" in system_prompt
 
 
+def test_fixture_decision_interpreter_creates_an_offer_only_for_explicit_passage_language():
+    result = FixtureDecisionInterpreter().interpret(
+        "愿按约定条件允许清军通行。",
+        {
+            "available_offer_terms": [
+                {
+                    "type": "passage",
+                    "subject": {"id": "shanhai-pass", "display_name": "山海关通道"},
+                    "value": "permitted",
+                    "description": "允许清军按约定条件通过山海关通道。",
+                    "recipient": {"id": "dorgon", "display_name": "多尔衮"},
+                }
+            ]
+        },
+    )
+
+    offer = next(operation for operation in result.operations if operation.tool == "manage_offer")
+    assert offer.arguments["action"] == "PROPOSE"
+    assert offer.arguments["recipient"] == "dorgon"
+    assert offer.arguments["terms"][0]["subject"] == "shanhai-pass"
+
+
 def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
@@ -362,7 +384,8 @@ def test_human_operation_persists_then_changes_a_later_available_action(app_conf
         def interpret(self, text, perspective):
             assert perspective["active_operations"] == []
             assert {item["id"] for item in perspective["available_operations"]} == {
-                "move_force"
+                "move_force",
+                "secure-shanhai-pass",
             }
             return InterpretedDecision(
                 summary="向永平调动所部。",
@@ -393,7 +416,10 @@ def test_human_operation_persists_then_changes_a_later_available_action(app_conf
 
     assert resumed["own_assets"][0]["id"] == "wu-field-force"
     assert resumed["own_assets"][0]["state"] == "READY"
-    assert {item["id"] for item in resumed["available_operations"]} == {"move_force"}
+    assert {item["id"] for item in resumed["available_operations"]} == {
+        "move_force",
+        "secure-shanhai-pass",
+    }
     moved = restarted.submit_human_decision(run_id, "向永平调动", interpreter=MoveInterpreter())
     assert moved["operations"][0]["status"] == "COMMITTED"
 

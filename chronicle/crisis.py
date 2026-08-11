@@ -63,6 +63,35 @@ class ObservationReliability(StrEnum):
     HIGH = "HIGH"
 
 
+class AgreementTermType(StrEnum):
+    PASSAGE = "passage"
+
+
+class OfferAction(StrEnum):
+    PROPOSE = "PROPOSE"
+    COUNTER = "COUNTER"
+    ACCEPT = "ACCEPT"
+    REJECT = "REJECT"
+    WITHDRAW = "WITHDRAW"
+
+
+class OfferStatus(StrEnum):
+    PROPOSED = "PROPOSED"
+    COUNTERED = "COUNTERED"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+    EXPIRED = "EXPIRED"
+
+
+class AgreementStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    FULFILLED = "FULFILLED"
+    BREACHED = "BREACHED"
+    TERMINATED = "TERMINATED"
+    EXPIRED = "EXPIRED"
+
+
 class RoleCharter(StrictModel):
     who: str
     responsibility: list[str]
@@ -94,6 +123,7 @@ class OperationTarget(StrictModel):
     id: str
     entity_types: list[CrisisEntityType]
     owned_by_actor: bool = False
+    allowed_entity_ids: list[str] = Field(default_factory=list)
 
 
 class OperationStateCondition(StrictModel):
@@ -104,6 +134,24 @@ class OperationStateCondition(StrictModel):
 class OperationStateEffect(StrictModel):
     subject: str
     state: str
+
+
+class AgreementTerm(StrictModel):
+    type: AgreementTermType
+    subject: str
+    value: str
+    description: str
+
+
+class CrisisOfferTermDefinition(AgreementTerm):
+    party_ids: list[str]
+
+
+class AgreementTermRequirement(StrictModel):
+    type: AgreementTermType
+    subject: str
+    value: str
+    party_ids: list[str]
 
 
 class CrisisOperationDefinition(StrictModel):
@@ -120,6 +168,9 @@ class CrisisOperationDefinition(StrictModel):
     preconditions: list[OperationStateCondition] = Field(default_factory=list)
     start_effects: list[OperationStateEffect] = Field(default_factory=list)
     completion_effects: list[OperationStateEffect] = Field(default_factory=list)
+    agreement_requirements: list[AgreementTermRequirement] = Field(default_factory=list)
+    agreement_fulfillments: list[AgreementTermRequirement] = Field(default_factory=list)
+    agreement_breaches: list[AgreementTermRequirement] = Field(default_factory=list)
     visibility: OperationVisibility = OperationVisibility.PRIVATE
     interruptibility: bool = False
     conflicts: list[str] = Field(default_factory=list)
@@ -224,6 +275,7 @@ class CrisisDefinition(StrictModel):
     entities: list[CrisisEntity] = Field(default_factory=list)
     operations: list[CrisisOperationDefinition] = Field(default_factory=list)
     investigations: list[CrisisInvestigationDefinition] = Field(default_factory=list)
+    offer_terms: list[CrisisOfferTermDefinition] = Field(default_factory=list)
 
 
 class CrisisReference(StrictModel):
@@ -308,6 +360,90 @@ class CrisisPack:
             investigation.id: investigation for investigation in self.crisis.investigations
         }
 
+    @staticmethod
+    def _agreement_term_key(
+        term: AgreementTerm | CrisisOfferTermDefinition | AgreementTermRequirement | dict[str, Any],
+    ) -> tuple[str, str, str]:
+        if isinstance(term, dict):
+            return (
+                str(term.get("type", "")),
+                str(term.get("subject", "")),
+                str(term.get("value", "")),
+            )
+        return term.type.value, term.subject, term.value
+
+    def offer_terms_request(
+        self,
+        issuer_id: str,
+        recipient_id: str,
+        terms: list[AgreementTerm],
+    ) -> tuple[list[AgreementTerm] | None, str]:
+        if issuer_id not in self.actor_by_id or recipient_id not in self.actor_by_id:
+            return None, "invalid_offer_recipient"
+        if issuer_id == recipient_id or not terms:
+            return None, "invalid_offer_terms"
+        term_keys = [self._agreement_term_key(term) for term in terms]
+        if len(term_keys) != len(set(term_keys)) or any(not term.description.strip() for term in terms):
+            return None, "invalid_offer_terms"
+        parties = {issuer_id, recipient_id}
+        for term in terms:
+            if not any(
+                self._agreement_term_key(definition) == self._agreement_term_key(term)
+                and set(definition.party_ids) == parties
+                for definition in self.crisis.offer_terms
+            ):
+                return None, "offer_term_unavailable"
+        return terms, ""
+
+    def offer_term_affordances(self, actor_id: str) -> list[dict[str, Any]]:
+        entities = self.entity_by_id
+        actors = self.actor_by_id
+        affordances: list[dict[str, Any]] = []
+        for definition in self.crisis.offer_terms:
+            if actor_id not in definition.party_ids:
+                continue
+            recipient_id = next(
+                (party_id for party_id in definition.party_ids if party_id != actor_id),
+                "",
+            )
+            target = entities.get(definition.subject)
+            recipient = actors.get(recipient_id)
+            if target is None or recipient is None:
+                continue
+            affordances.append(
+                {
+                    "type": definition.type.value,
+                    "subject": {
+                        "id": target.id,
+                        "type": target.type.value,
+                        "display_name": target.display_name,
+                    },
+                    "value": definition.value,
+                    "description": definition.description,
+                    "recipient": {
+                        "id": recipient.id,
+                        "display_name": recipient.display_name,
+                    },
+                }
+            )
+        return affordances
+
+    def active_agreement_ids(
+        self,
+        projection: dict[str, Any],
+        requirement: AgreementTermRequirement,
+    ) -> list[str]:
+        return [
+            str(agreement["id"])
+            for agreement in projection.get("agreements", [])
+            if agreement.get("status") == AgreementStatus.ACTIVE.value
+            and set(agreement.get("parties", [])) == set(requirement.party_ids)
+            and any(
+                self._agreement_term_key(term) == self._agreement_term_key(requirement)
+                for term in agreement.get("terms", [])
+            )
+        ]
+
     def route_days(self, start: str, end: str) -> int | None:
         queue: list[tuple[int, str]] = [(0, start)]
         best: dict[str, int] = {start: 0}
@@ -364,6 +500,8 @@ class CrisisPack:
             entity = entities.get(target_id)
             if entity is None or entity.type not in target.entity_types:
                 return None, "invalid_operation_targets"
+            if target.allowed_entity_ids and target_id not in target.allowed_entity_ids:
+                return None, "invalid_operation_targets"
             if target.owned_by_actor and target_id not in actor.asset_ids:
                 return None, "operation_target_not_owned"
         for subject in definition.required_assets:
@@ -374,6 +512,11 @@ class CrisisPack:
             entity_id = self._operation_subject_entity_id(condition.subject, target_map)
             if self._entity_state(projection, entity_id) not in condition.states:
                 return None, "operation_precondition_unmet"
+        if any(
+            not self.active_agreement_ids(projection, requirement)
+            for requirement in definition.agreement_requirements
+        ):
+            return None, "agreement_precondition_unmet"
         for active in projection.get("operations", []):
             if active.get("status") not in {"PLANNED", "IN_PROGRESS"}:
                 continue
@@ -432,6 +575,10 @@ class CrisisPack:
                     entity.id
                     for entity in sorted(entities.values(), key=lambda item: item.id)
                     if entity.type in target.entity_types
+                    and (
+                        not target.allowed_entity_ids
+                        or entity.id in target.allowed_entity_ids
+                    )
                     and (not target.owned_by_actor or entity.id in actor.asset_ids)
                 ]
                 options_by_target.append(options)
@@ -671,6 +818,25 @@ class CrisisPack:
                 errors.append(
                     f"actor {actor.id}: unknown assets {', '.join(sorted(unknown_assets))}"
                 )
+
+        offer_term_keys: set[tuple[str, str, str, tuple[str, ...]]] = set()
+        for term in self.crisis.offer_terms:
+            if len(term.party_ids) != 2 or len(term.party_ids) != len(set(term.party_ids)):
+                errors.append("offer term: party ids must name exactly two unique actors")
+            unknown_parties = set(term.party_ids) - set(actor_ids)
+            if unknown_parties:
+                errors.append(
+                    "offer term "
+                    f"{term.type.value}/{term.subject}: unknown parties {', '.join(sorted(unknown_parties))}"
+                )
+            if term.subject not in known_entities:
+                errors.append(f"offer term {term.type.value}: unknown subject {term.subject}")
+            if not term.value or not term.description:
+                errors.append(f"offer term {term.type.value}/{term.subject}: value and description are required")
+            key = (*self._agreement_term_key(term), tuple(sorted(term.party_ids)))
+            if key in offer_term_keys:
+                errors.append("offer terms: type/subject/value/parties must be unique")
+            offer_term_keys.add(key)
         for route in self.crisis.routes:
             if route.from_location not in known_locations or route.to_location not in known_locations:
                 errors.append(f"route {route.id}: endpoint is not on the corridor")
@@ -690,6 +856,17 @@ class CrisisPack:
                 errors.append(f"operation {operation.id}: target ids must be unique and nonempty")
             if any(not target.entity_types for target in operation.targets):
                 errors.append(f"operation {operation.id}: target types are required")
+            for target in operation.targets:
+                if len(target.allowed_entity_ids) != len(set(target.allowed_entity_ids)):
+                    errors.append(
+                        f"operation {operation.id}: allowed target ids must be unique"
+                    )
+                unknown_allowed = set(target.allowed_entity_ids) - known_entities
+                if unknown_allowed:
+                    errors.append(
+                        "operation "
+                        f"{operation.id}: unknown allowed targets {', '.join(sorted(unknown_allowed))}"
+                    )
             if operation.duration_kind == OperationDurationKind.FIXED and operation.duration_days is None:
                 errors.append(f"operation {operation.id}: fixed duration requires duration_days")
             if operation.duration_kind == OperationDurationKind.ROUTE and operation.duration_days is not None:
@@ -723,6 +900,22 @@ class CrisisPack:
                 errors.append(
                     f"operation {operation.id}: unknown conflicts {', '.join(sorted(unknown_conflicts))}"
                 )
+            for label, requirements in (
+                ("agreement requirement", operation.agreement_requirements),
+                ("agreement fulfillment", operation.agreement_fulfillments),
+                ("agreement breach", operation.agreement_breaches),
+            ):
+                for requirement in requirements:
+                    key = (*self._agreement_term_key(requirement), tuple(sorted(requirement.party_ids)))
+                    if key not in offer_term_keys:
+                        errors.append(
+                            f"operation {operation.id}: unknown {label} "
+                            f"{requirement.type.value}/{requirement.subject}"
+                        )
+                    if not set(operation.actor_ids).issubset(requirement.party_ids):
+                        errors.append(
+                            f"operation {operation.id}: {label} parties must include operation actors"
+                        )
 
         investigation_ids = [investigation.id for investigation in self.crisis.investigations]
         if len(investigation_ids) != len(set(investigation_ids)):
@@ -844,6 +1037,7 @@ class CrisisPack:
             "entity_count": len(self.crisis.entities),
             "operation_count": len(self.crisis.operations),
             "investigation_count": len(self.crisis.investigations),
+            "offer_term_count": len(self.crisis.offer_terms),
             "horizon_days": self.crisis.checkpoint.safety_horizon_days,
             "maximum_tick": self.crisis.simulation_boundary.maximum_tick,
         }

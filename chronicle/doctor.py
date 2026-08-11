@@ -13,7 +13,14 @@ from .db import ChronicleDB, stable_hash
 from .hermes import PROFILE_NAMES, cli_version, probe, probe_mcp_tools, read_profile_memory
 from .scenario import ScenarioPack
 
-WORLD_TOOLS = ("communicate", "investigate", "operate", "schedule_revisit", "update_plan")
+WORLD_TOOLS = (
+    "communicate",
+    "investigate",
+    "manage_offer",
+    "operate",
+    "schedule_revisit",
+    "update_plan",
+)
 
 
 def doctor(config: AppConfig) -> dict[str, Any]:

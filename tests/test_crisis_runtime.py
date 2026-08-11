@@ -594,23 +594,23 @@ def test_operation_completion_changes_asset_state_then_enables_movement(app_conf
         def run_wake(self, actor_id, wake, perspective, world):
             from chronicle.crisis_runtime import ActorTurnResult
 
-            if actor_id != "dorgon":
+            if actor_id != "wu-sangui":
                 return ActorTurnResult("保持有限行动。")
             if wake["wake_type"] == "ORIENT":
                 world.operate(
                     "prepare_force",
-                    ["qing-expedition-force"],
-                    "先整备西征主力。",
-                    idempotency_key="prepare-west",
+                    ["wu-field-force"],
+                    "先整备关宁所部。",
+                    idempotency_key="prepare-wu",
                 )
             elif wake["wake_type"] == "OPERATION_RESULT" and any(
                 item["id"] == "move_force" for item in perspective["available_operations"]
             ):
                 world.operate(
                     "move_force",
-                    ["qing-expedition-force", "shanhaiguan"],
-                    "向山海关方向继续行军。",
-                    idempotency_key="move-west",
+                    ["wu-field-force", "yongping"],
+                    "向永平方向继续行军。",
+                    idempotency_key="move-wu",
                 )
             return ActorTurnResult("保持有限行动。")
 
@@ -619,17 +619,17 @@ def test_operation_completion_changes_asset_state_then_enables_movement(app_conf
     result = engine.run_until_idle(run_id)
 
     snapshot = engine.db.worldline_snapshot(run_id)["projection"]
-    assert snapshot["positions"]["dorgon"] == "shanhaiguan"
+    assert snapshot["positions"]["wu-sangui"] == "yongping"
     operations = snapshot["operations"]
     assert [operation["status"] for operation in operations] == ["COMPLETED", "COMPLETED"]
-    assert operations[0]["input_state"] == {"qing-expedition-force": "FORMING"}
-    assert operations[0]["result_state"] == {"qing-expedition-force": "READY"}
+    assert operations[0]["input_state"] == {"wu-field-force": "FORMING"}
+    assert operations[0]["result_state"] == {"wu-field-force": "READY"}
     assert operations[1]["input_state"] == {
-        "qing-expedition-force": "READY",
-        "shanhaiguan": "CONTESTED",
+        "wu-field-force": "READY",
+        "yongping": "OPEN",
     }
-    assert operations[1]["result_state"] == {"qing-expedition-force": "COMMITTED"}
-    assert snapshot["entities"]["qing-expedition-force"]["state"] == "COMMITTED"
+    assert operations[1]["result_state"] == {"wu-field-force": "COMMITTED"}
+    assert snapshot["entities"]["wu-field-force"]["state"] == "COMMITTED"
 
     prepare_started = next(
         event
@@ -669,11 +669,11 @@ def test_operation_completion_changes_asset_state_then_enables_movement(app_conf
 
     operation_wakes = [wake for wake in result["wakes"] if wake["wake_type"] == "OPERATION_RESULT"]
     assert {(wake["actor_id"], wake["tick"]) for wake in operation_wakes} == {
-        ("dorgon", 2),
-        ("dorgon", 4),
+        ("wu-sangui", 2),
+        ("wu-sangui", 4),
     }
     li_view = engine.actor_perspective(run_id, "li-zicheng")
-    assert "qing-expedition-force" not in {item["id"] for item in li_view["known_entities"]}
+    assert "wu-field-force" not in {item["id"] for item in li_view["known_entities"]}
     assert prepare_completed["id"] not in {
         item.get("event_id") for item in li_view["knowledge"] if isinstance(item, dict)
     }

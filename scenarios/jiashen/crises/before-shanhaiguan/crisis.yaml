@@ -61,7 +61,7 @@ actors:
       political_control: fragile
       field_force: available-but-dispersed
       courier_network: active
-    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
     asset_ids: [shun-eastern-force]
 
   - id: wu-sangui
@@ -80,7 +80,7 @@ actors:
       pass_control: contested-but-held
       field_force: cohesive-limited
       couriers: scarce
-    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
     asset_ids: [wu-field-force, shanhai-pass]
 
   - id: dorgon
@@ -99,7 +99,7 @@ actors:
       command: expeditionary-army
       mobility: high
       artillery: following-column
-    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
     asset_ids: [qing-expedition-force]
 
 playable_actor_ids: [wu-sangui, li-zicheng, dorgon]
@@ -135,10 +135,57 @@ operations:
     interruptibility: false
     conflicts: [prepare_force, move_force]
 
+  - id: enter-shanhai-pass
+    display_name: 通过山海关
+    description: 清军在获得有效通行约定且完成整备后，经山海关进入关内。
+    actor_ids: [dorgon]
+    targets:
+      - {id: force, entity_types: [FORCE], owned_by_actor: true}
+      - {id: destination, entity_types: [PLACE], allowed_entity_ids: [shanhaiguan]}
+    kind: MOVEMENT
+    duration_kind: ROUTE
+    movement_destination_target: destination
+    required_assets: [force]
+    preconditions:
+      - {subject: force, states: [READY]}
+    start_effects:
+      - {subject: force, state: MOVING}
+    completion_effects:
+      - {subject: force, state: COMMITTED}
+    agreement_requirements:
+      - {type: passage, subject: shanhai-pass, value: permitted, party_ids: [wu-sangui, dorgon]}
+    agreement_fulfillments:
+      - {type: passage, subject: shanhai-pass, value: permitted, party_ids: [wu-sangui, dorgon]}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [prepare_force, enter-shanhai-pass]
+
+  - id: secure-shanhai-pass
+    display_name: 封闭山海关通道
+    description: 吴三桂在所部完成整备后封闭山海关通道，阻止关外军队按既有通行安排进入。
+    actor_ids: [wu-sangui]
+    targets:
+      - {id: force, entity_types: [FORCE], owned_by_actor: true}
+      - {id: pass, entity_types: [ASSET], owned_by_actor: true, allowed_entity_ids: [shanhai-pass]}
+    kind: STATE_CHANGE
+    duration_kind: FIXED
+    duration_days: 1
+    required_assets: [force, pass]
+    preconditions:
+      - {subject: force, states: [READY]}
+      - {subject: pass, states: [CONTESTED, OPEN]}
+    completion_effects:
+      - {subject: pass, state: CLOSED}
+    agreement_breaches:
+      - {type: passage, subject: shanhai-pass, value: permitted, party_ids: [wu-sangui, dorgon]}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [prepare_force, secure-shanhai-pass]
+
   - id: move_force
     display_name: 调动兵力
     description: 让一支已经整备完成的自有兵力沿已知路线移动到另一处地点。
-    actor_ids: [li-zicheng, wu-sangui, dorgon]
+    actor_ids: [li-zicheng, wu-sangui]
     targets:
       - {id: force, entity_types: [FORCE], owned_by_actor: true}
       - {id: destination, entity_types: [PLACE]}
@@ -171,6 +218,13 @@ investigations:
       source_ids: [qing-shilu-shizu-4, mingji-beilue-20]
       reliability: MEDIUM
       related_assertion_ids: [c002, c012]
+
+offer_terms:
+  - type: passage
+    subject: shanhai-pass
+    value: permitted
+    description: 允许清军在约定条件下通过山海关通道。
+    party_ids: [wu-sangui, dorgon]
 
 corridor:
   - {id: beijing, display_name: 北京, order: 0}

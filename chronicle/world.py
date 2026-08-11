@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from .crisis import CrisisPack
+from .crisis import AgreementTerm, CrisisPack, OfferAction, OfferStatus
 from .db import ChronicleDB, stable_hash
 
 
@@ -321,6 +321,130 @@ class WorldAffordanceSession:
             )
         return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
 
+    def manage_offer(
+        self,
+        action: str,
+        *,
+        offer_id: str = "",
+        recipient: str = "",
+        terms: list[dict[str, Any]] | None = None,
+        message: str = "",
+        expires_after_days: int = 0,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "action": action.strip().upper() if isinstance(action, str) else "",
+            "offer_id": offer_id.strip() if isinstance(offer_id, str) else "",
+            "recipient": recipient.strip() if isinstance(recipient, str) else "",
+            "terms": terms if isinstance(terms, list) else [],
+            "message": message.strip() if isinstance(message, str) else "",
+            "expires_after_days": expires_after_days,
+        }
+        if "manage_offer" not in self._actor().world_authority:
+            result = {"status": "rejected", "code": "authority_denied"}
+            return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+        try:
+            offer_action = OfferAction(payload["action"])
+        except ValueError:
+            result = {"status": "rejected", "code": "invalid_offer_action"}
+            return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+        tick, projection = self._tick_and_projection()
+        actor_id = self.identity.actor_id
+        if offer_action in {OfferAction.PROPOSE, OfferAction.COUNTER}:
+            if not payload["message"] or len(payload["message"]) > 1200:
+                result = {"status": "rejected", "code": "invalid_offer_message"}
+                return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+            if len(payload["terms"]) > 4:
+                result = {"status": "rejected", "code": "invalid_offer_terms"}
+                return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+            try:
+                requested_terms = [AgreementTerm.model_validate(term) for term in payload["terms"]]
+            except (TypeError, ValueError):
+                result = {"status": "rejected", "code": "invalid_offer_terms"}
+                return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+        else:
+            requested_terms = []
+        if not isinstance(payload["expires_after_days"], int) or payload["expires_after_days"] < 0:
+            result = {"status": "rejected", "code": "invalid_offer_expiry"}
+            return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+        if offer_action == OfferAction.PROPOSE:
+            validated_terms, code = self.service.pack.offer_terms_request(
+                actor_id,
+                payload["recipient"],
+                requested_terms,
+            )
+            if validated_terms is None:
+                result = {"status": "rejected", "code": code}
+            else:
+                expires_tick = (
+                    tick + payload["expires_after_days"]
+                    if payload["expires_after_days"]
+                    else None
+                )
+                if expires_tick is not None and expires_tick >= self.service.pack.crisis.simulation_boundary.maximum_tick:
+                    result = {"status": "rejected", "code": "crosses_simulation_boundary"}
+                else:
+                    result = {
+                        "status": "accepted",
+                        "offer_id": f"offer-{uuid.uuid4().hex[:16]}",
+                        "created_tick": tick,
+                        "expires_tick": expires_tick,
+                    }
+        else:
+            offer = next(
+                (
+                    item
+                    for item in projection.get("offers", [])
+                    if item.get("id") == payload["offer_id"]
+                ),
+                None,
+            )
+            if offer is None:
+                result = {"status": "rejected", "code": "unknown_offer"}
+            elif offer.get("status") != OfferStatus.PROPOSED.value:
+                result = {"status": "rejected", "code": "offer_not_open"}
+            elif offer_action in {OfferAction.ACCEPT, OfferAction.REJECT} and offer.get("recipient") != actor_id:
+                result = {"status": "rejected", "code": "offer_response_denied"}
+            elif offer_action == OfferAction.WITHDRAW and offer.get("issuer") != actor_id:
+                result = {"status": "rejected", "code": "offer_withdrawal_denied"}
+            elif offer_action == OfferAction.COUNTER and offer.get("recipient") != actor_id:
+                result = {"status": "rejected", "code": "offer_response_denied"}
+            elif offer_action == OfferAction.COUNTER:
+                validated_terms, code = self.service.pack.offer_terms_request(
+                    actor_id,
+                    str(offer["issuer"]),
+                    requested_terms,
+                )
+                if validated_terms is None:
+                    result = {"status": "rejected", "code": code}
+                else:
+                    expires_tick = (
+                        tick + payload["expires_after_days"]
+                        if payload["expires_after_days"]
+                        else None
+                    )
+                    if (
+                        expires_tick is not None
+                        and expires_tick >= self.service.pack.crisis.simulation_boundary.maximum_tick
+                    ):
+                        result = {"status": "rejected", "code": "crosses_simulation_boundary"}
+                    else:
+                        result = {
+                            "status": "accepted",
+                            "offer_id": f"offer-{uuid.uuid4().hex[:16]}",
+                            "parent_offer_id": str(offer["id"]),
+                            "created_tick": tick,
+                            "expires_tick": expires_tick,
+                        }
+            elif offer_action == OfferAction.ACCEPT:
+                result = {
+                    "status": "accepted",
+                    "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}",
+                }
+            else:
+                result = {"status": "accepted"}
+        return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
+
     def update_plan(
         self,
         objective: str,
@@ -386,5 +510,12 @@ def world_tool_signatures() -> dict[str, inspect.Signature]:
 
     return {
         name: inspect.signature(getattr(WorldAffordanceSession, name))
-        for name in ("communicate", "investigate", "operate", "update_plan", "schedule_revisit")
+        for name in (
+            "communicate",
+            "investigate",
+            "manage_offer",
+            "operate",
+            "update_plan",
+            "schedule_revisit",
+        )
     }

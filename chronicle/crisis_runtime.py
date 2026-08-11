@@ -12,7 +12,14 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from .config import AppConfig
-from .crisis import CrisisPack, VolumeRegistry
+from .crisis import (
+    AgreementStatus,
+    AgreementTerm,
+    CrisisPack,
+    OfferAction,
+    OfferStatus,
+    VolumeRegistry,
+)
 from .db import ChronicleDB, content_hash, stable_hash
 from .decision import (
     DecisionInterpreter,
@@ -53,6 +60,8 @@ class CrisisWakeType(StrEnum):
     MESSAGE = "MESSAGE"
     OBSERVATION = "OBSERVATION"
     INVESTIGATION_RESULT = "INVESTIGATION_RESULT"
+    OFFER_CHANGE = "OFFER_CHANGE"
+    AGREEMENT_CHANGE = "AGREEMENT_CHANGE"
     OPERATION_RESULT = "OPERATION_RESULT"
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
@@ -330,6 +339,8 @@ class HermesActorDriver:
                     "communicate(recipient, content, idempotency_key)；"
                     "investigate(question, target, method, idempotency_key)，"
                     "可用调查及其 target/method 已在私有视野 available_investigations 中列出；"
+                    "manage_offer(action, offer_id, recipient, terms, message, expires_after_days, idempotency_key)，"
+                    "可用条件、待回应 Offer 与生效 Agreement 已在私有视野中列出；"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
@@ -349,6 +360,7 @@ class HermesActorDriver:
                         "available_world_tools": [
                             "communicate",
                             "investigate",
+                            "manage_offer",
                             "operate",
                             "update_plan",
                             "schedule_revisit",
@@ -474,6 +486,8 @@ class CrisisRunEngine:
             },
             "operations": [],
             "investigations": [],
+            "offers": [],
+            "agreements": [],
         }
         events = [
             self._event(
@@ -962,6 +976,8 @@ class CrisisRunEngine:
             return world.communicate(**values)
         if tool == "investigate":
             return world.investigate(**values)
+        if tool == "manage_offer":
+            return world.manage_offer(**values)
         if tool == "operate":
             return world.operate(**values)
         if tool == "update_plan":
@@ -1011,6 +1027,7 @@ class CrisisRunEngine:
             )
         )
         queued_wakes: list[dict[str, Any]] = []
+        commit_time_refusals: list[dict[str, Any]] = []
         operations = self.db.crisis_wake_operations(wake["id"])
         causal_parent_id = decision_event["id"]
         for operation in operations:
@@ -1049,6 +1066,7 @@ class CrisisRunEngine:
                 state,
                 events,
                 queued_wakes,
+                commit_refusals=commit_time_refusals,
                 source="human",
                 causal_parent_id=causal_parent_id,
             )
@@ -1083,6 +1101,12 @@ class CrisisRunEngine:
         for operation in operations:
             if operation["status"] == "PROPOSED":
                 self.db.update_crisis_wake_operation_status(operation["id"], "COMMITTED")
+            elif operation["status"] == "REJECTED":
+                self.db.update_crisis_wake_operation_status(
+                    operation["id"],
+                    "REJECTED",
+                    result=operation["result"],
+                )
         self.db.update_crisis_wake(
             wake["id"], status="COMPLETED", result={"summary": summary}
         )
@@ -1159,6 +1183,9 @@ class CrisisRunEngine:
             return True
         if self._investigations_due(projection, next_tick):
             self._commit_investigations(run_id, next_tick, projection)
+            return True
+        if self._offers_due(projection, next_tick):
+            self._expire_offers(run_id, next_tick, projection)
             return True
         if self._movements_due(projection, next_tick):
             self._commit_movements(run_id, next_tick, projection)
@@ -1275,6 +1302,12 @@ class CrisisRunEngine:
             if investigation["status"] == "IN_PROGRESS"
         )
         candidates.extend(
+            int(offer["expires_tick"])
+            for offer in snapshot["projection"].get("offers", [])
+            if offer.get("status") == OfferStatus.PROPOSED.value
+            and offer.get("expires_tick") is not None
+        )
+        candidates.extend(
             int(movement["arrival_tick"])
             for movement in snapshot["projection"].get("movements", [])
             if movement["status"] == "in_transit"
@@ -1344,6 +1377,7 @@ class CrisisRunEngine:
         events: list[dict[str, Any]] = []
         knowledge_by_actor: dict[str, list[Any]] = {}
         queued: set[tuple[str, str]] = set()
+        agreement_changes: set[tuple[str, str]] = set()
         for operation in due:
             definition = self.pack.operation_by_id[str(operation["definition_id"])]
             visible_actor_ids = self._operation_visible_actor_ids(operation)
@@ -1404,6 +1438,17 @@ class CrisisRunEngine:
                     f"{definition.display_name}已经完成，"
                     f"已抵达{self.pack.location_by_id[movement['to']].display_name}。"
                 )
+            agreement_events, agreement_triggers = self._operation_agreement_outcomes(
+                run_id,
+                tick,
+                projection,
+                operation,
+                definition,
+                visible_actor_ids=visible_actor_ids,
+                causal_parent_id=completed["id"],
+            )
+            events.extend(agreement_events)
+            agreement_changes.update(agreement_triggers)
             for actor_id in visible_actor_ids:
                 lifetime = self.db.worldline_lifetime(run_id, actor_id)
                 if lifetime is None:
@@ -1446,6 +1491,63 @@ class CrisisRunEngine:
                 tick,
                 trigger_event_id=trigger_event_id,
             )
+        for actor_id, trigger_event_id in sorted(agreement_changes):
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.AGREEMENT_CHANGE,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
+
+    def _operation_agreement_outcomes(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        operation: dict[str, Any],
+        definition: Any,
+        *,
+        visible_actor_ids: list[str],
+        causal_parent_id: str,
+    ) -> tuple[list[dict[str, Any]], set[tuple[str, str]]]:
+        events: list[dict[str, Any]] = []
+        queued: set[tuple[str, str]] = set()
+        agreements_by_id = {
+            str(agreement["id"]): agreement
+            for agreement in projection.get("agreements", [])
+        }
+        for event_type, status, requirements in (
+            ("AGREEMENT_FULFILLED", AgreementStatus.FULFILLED, definition.agreement_fulfillments),
+            ("AGREEMENT_BREACHED", AgreementStatus.BREACHED, definition.agreement_breaches),
+        ):
+            for requirement in requirements:
+                for agreement_id in self.pack.active_agreement_ids(projection, requirement):
+                    agreement = agreements_by_id[agreement_id]
+                    agreement["status"] = status.value
+                    visible_agreement_actor_ids = sorted(
+                        set(str(party_id) for party_id in agreement["parties"])
+                        .intersection(visible_actor_ids)
+                    )
+                    event = self._event(
+                        run_id,
+                        tick,
+                        event_type,
+                        {
+                            "agreement": agreement,
+                            "operation_id": operation["id"],
+                            "visibility": visible_agreement_actor_ids,
+                        },
+                        seat_id=operation["actor_id"],
+                        causal_parent_ids=[causal_parent_id],
+                    )
+                    agreement[f"{status.value.lower()}_event_id"] = event["id"]
+                    events.append(event)
+                    queued.update(
+                        (actor_id, event["id"])
+                        for actor_id in visible_agreement_actor_ids
+                    )
+        return events, queued
 
     @staticmethod
     def _investigations_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
@@ -1553,6 +1655,61 @@ class CrisisRunEngine:
                 run_id,
                 actor_id,
                 CrisisWakeType.INVESTIGATION_RESULT,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
+
+    @staticmethod
+    def _offers_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
+        return [
+            offer
+            for offer in projection.get("offers", [])
+            if offer.get("status") == OfferStatus.PROPOSED.value
+            and offer.get("expires_tick") is not None
+            and int(offer["expires_tick"]) == tick
+        ]
+
+    @staticmethod
+    def _offer_visible_actor_ids(offer: dict[str, Any]) -> list[str]:
+        return sorted({str(offer["issuer"]), str(offer["recipient"])})
+
+    def _expire_offers(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+    ) -> None:
+        due = self._offers_due(projection, tick)
+        projection["tick"] = tick
+        events: list[dict[str, Any]] = []
+        queued: set[tuple[str, str]] = set()
+        for offer in due:
+            visible_actor_ids = self._offer_visible_actor_ids(offer)
+            offer["status"] = OfferStatus.EXPIRED.value
+            expired = self._event(
+                run_id,
+                tick,
+                "OFFER_EXPIRED",
+                {"offer": offer, "visibility": visible_actor_ids},
+                seat_id=offer["issuer"],
+                causal_parent_ids=[offer["proposal_event_id"]]
+                if offer.get("proposal_event_id")
+                else [],
+            )
+            offer["expiry_event_id"] = expired["id"]
+            events.append(expired)
+            queued.update((actor_id, expired["id"]) for actor_id in visible_actor_ids)
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            snapshot=projection,
+        )
+        for actor_id, trigger_event_id in sorted(queued):
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.OFFER_CHANGE,
                 tick,
                 trigger_event_id=trigger_event_id,
             )
@@ -1767,6 +1924,7 @@ class CrisisRunEngine:
         actor_states: dict[str, dict[str, Any]] = {}
         actor_lifetimes: dict[str, dict[str, Any]] = {}
         queued_wakes: list[dict[str, Any]] = []
+        commit_time_refusals: list[dict[str, Any]] = []
         memory_audits: list[dict[str, Any]] = []
         for wake in sorted(wakes, key=lambda item: (item["actor_id"], item["id"])):
             lifetime = self.db.worldline_lifetime(run_id, wake["actor_id"])
@@ -1899,6 +2057,7 @@ class CrisisRunEngine:
                     state,
                     events,
                     queued_wakes,
+                    commit_refusals=commit_time_refusals,
                     causal_parent_id=causal_parent_id,
                 )
             for revisit in state["revisits"]:
@@ -2003,6 +2162,12 @@ class CrisisRunEngine:
                         audit["memory_before_text"],
                     )
             raise
+        for refusal in commit_time_refusals:
+            self.db.update_crisis_wake_operation_status(
+                refusal["operation_id"],
+                "REJECTED",
+                result=refusal["result"],
+            )
         for wake in wakes:
             result = results[wake["id"]]
             self.db.update_crisis_wake(
@@ -2113,6 +2278,7 @@ class CrisisRunEngine:
         events: list[dict[str, Any]],
         queued_wakes: list[dict[str, Any]],
         *,
+        commit_refusals: list[dict[str, Any]] | None = None,
         source: str | None = None,
         causal_parent_id: str = "",
     ) -> str:
@@ -2234,6 +2400,18 @@ class CrisisRunEngine:
             message["dispatch_event_id"] = dispatch["id"]
             events.append(dispatch)
             return dispatch["id"]
+        elif tool_name == "manage_offer":
+            return self._manage_offer(
+                run_id,
+                tick,
+                projection,
+                wake,
+                operation,
+                events,
+                queued_wakes,
+                commit_refusals=commit_refusals,
+                causal_parent_id=causal_parent_id,
+            )
         elif tool_name == "investigate":
             return self._start_investigation(
                 run_id,
@@ -2255,6 +2433,311 @@ class CrisisRunEngine:
                 causal_parent_id=causal_parent_id,
             )
         return causal_parent_id
+
+    def _manage_offer(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        queued_wakes: list[dict[str, Any]],
+        *,
+        commit_refusals: list[dict[str, Any]] | None,
+        causal_parent_id: str,
+    ) -> str:
+        actor_id = str(wake["actor_id"])
+        payload = operation["payload"]
+        result = operation["result"]
+        action = OfferAction(str(payload["action"]))
+        offers = projection.setdefault("offers", [])
+        if action == OfferAction.PROPOSE:
+            terms = [AgreementTerm.model_validate(term) for term in payload["terms"]]
+            validated_terms, code = self.pack.offer_terms_request(
+                actor_id,
+                str(payload["recipient"]),
+                terms,
+            )
+            if validated_terms is None:
+                return self._refuse_commit_time_offer(
+                    run_id,
+                    tick,
+                    wake,
+                    operation,
+                    events,
+                    commit_refusals,
+                    code,
+                    causal_parent_id=causal_parent_id,
+                )
+            offer = {
+                "id": result["offer_id"],
+                "issuer": actor_id,
+                "recipient": payload["recipient"],
+                "terms": [term.model_dump(mode="json") for term in validated_terms],
+                "message": payload["message"],
+                "created_tick": tick,
+                "expires_tick": result.get("expires_tick"),
+                "status": OfferStatus.PROPOSED.value,
+                "parent_offer_id": "",
+                "visibility": "PRIVATE",
+            }
+            offers.append(offer)
+            visible_actor_ids = self._offer_visible_actor_ids(offer)
+            proposed = self._event(
+                run_id,
+                tick,
+                "OFFER_PROPOSED",
+                {"offer": offer, "visibility": visible_actor_ids},
+                seat_id=actor_id,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            )
+            offer["proposal_event_id"] = proposed["id"]
+            events.append(proposed)
+            queued_wakes.append(
+                {
+                    "run_id": run_id,
+                    "actor_id": offer["recipient"],
+                    "wake_type": CrisisWakeType.OFFER_CHANGE,
+                    "tick": tick,
+                    "trigger_event_id": proposed["id"],
+                }
+            )
+            return proposed["id"]
+
+        offer = next(
+            (item for item in offers if item.get("id") == payload["offer_id"]),
+            None,
+        )
+        if offer is None:
+            return self._refuse_commit_time_offer(
+                run_id,
+                tick,
+                wake,
+                operation,
+                events,
+                commit_refusals,
+                "unknown_offer",
+                causal_parent_id=causal_parent_id,
+            )
+        if offer.get("status") != OfferStatus.PROPOSED.value:
+            return self._refuse_commit_time_offer(
+                run_id,
+                tick,
+                wake,
+                operation,
+                events,
+                commit_refusals,
+                "offer_not_open",
+                causal_parent_id=causal_parent_id,
+            )
+        visible_actor_ids = self._offer_visible_actor_ids(offer)
+        if action in {OfferAction.ACCEPT, OfferAction.REJECT, OfferAction.COUNTER} and (
+            offer.get("recipient") != actor_id
+        ):
+            return self._refuse_commit_time_offer(
+                run_id,
+                tick,
+                wake,
+                operation,
+                events,
+                commit_refusals,
+                "offer_response_denied",
+                causal_parent_id=causal_parent_id,
+            )
+        if action == OfferAction.WITHDRAW and offer.get("issuer") != actor_id:
+            return self._refuse_commit_time_offer(
+                run_id,
+                tick,
+                wake,
+                operation,
+                events,
+                commit_refusals,
+                "offer_withdrawal_denied",
+                causal_parent_id=causal_parent_id,
+            )
+        if action == OfferAction.COUNTER:
+            terms = [AgreementTerm.model_validate(term) for term in payload["terms"]]
+            validated_terms, code = self.pack.offer_terms_request(
+                actor_id,
+                str(offer["issuer"]),
+                terms,
+            )
+            if validated_terms is None:
+                return self._refuse_commit_time_offer(
+                    run_id,
+                    tick,
+                    wake,
+                    operation,
+                    events,
+                    commit_refusals,
+                    code,
+                    causal_parent_id=causal_parent_id,
+                )
+            offer["status"] = OfferStatus.COUNTERED.value
+            counter_offer = {
+                "id": result["offer_id"],
+                "issuer": actor_id,
+                "recipient": offer["issuer"],
+                "terms": [term.model_dump(mode="json") for term in validated_terms],
+                "message": payload["message"],
+                "created_tick": tick,
+                "expires_tick": result.get("expires_tick"),
+                "status": OfferStatus.PROPOSED.value,
+                "parent_offer_id": offer["id"],
+                "visibility": "PRIVATE",
+            }
+            offers.append(counter_offer)
+            countered = self._event(
+                run_id,
+                tick,
+                "OFFER_COUNTERED",
+                {
+                    "offer": offer,
+                    "counter_offer": counter_offer,
+                    "visibility": visible_actor_ids,
+                },
+                seat_id=actor_id,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            )
+            offer["counter_event_id"] = countered["id"]
+            counter_offer["proposal_event_id"] = countered["id"]
+            events.append(countered)
+            queued_wakes.append(
+                {
+                    "run_id": run_id,
+                    "actor_id": counter_offer["recipient"],
+                    "wake_type": CrisisWakeType.OFFER_CHANGE,
+                    "tick": tick,
+                    "trigger_event_id": countered["id"],
+                }
+            )
+            return countered["id"]
+
+        if action == OfferAction.ACCEPT:
+            offer["status"] = OfferStatus.ACCEPTED.value
+            accepted = self._event(
+                run_id,
+                tick,
+                "OFFER_ACCEPTED",
+                {"offer": offer, "visibility": visible_actor_ids},
+                seat_id=actor_id,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            )
+            offer["accept_event_id"] = accepted["id"]
+            events.append(accepted)
+            agreement = {
+                "id": result["agreement_id"],
+                "parties": visible_actor_ids,
+                "terms": list(offer["terms"]),
+                "effective_tick": tick,
+                "status": AgreementStatus.ACTIVE.value,
+                "source_offer_ids": self._offer_lineage_ids(offers, offer),
+                "visibility": "PRIVATE",
+            }
+            projection.setdefault("agreements", []).append(agreement)
+            created = self._event(
+                run_id,
+                tick,
+                "AGREEMENT_CREATED",
+                {"agreement": agreement, "visibility": visible_actor_ids},
+                seat_id=actor_id,
+                causal_parent_ids=[accepted["id"]],
+            )
+            agreement["creation_event_id"] = created["id"]
+            events.append(created)
+            for party_id in visible_actor_ids:
+                queued_wakes.append(
+                    {
+                        "run_id": run_id,
+                        "actor_id": party_id,
+                        "wake_type": CrisisWakeType.AGREEMENT_CHANGE,
+                        "tick": tick,
+                        "trigger_event_id": created["id"],
+                    }
+                )
+            return created["id"]
+
+        if action == OfferAction.REJECT:
+            offer["status"] = OfferStatus.REJECTED.value
+            event_type = "OFFER_REJECTED"
+            counterpart = offer["issuer"]
+        elif action == OfferAction.WITHDRAW:
+            offer["status"] = OfferStatus.WITHDRAWN.value
+            event_type = "OFFER_WITHDRAWN"
+            counterpart = offer["recipient"]
+        else:
+            raise CrisisRunError("unsupported accepted Offer action")
+        changed = self._event(
+            run_id,
+            tick,
+            event_type,
+            {"offer": offer, "visibility": visible_actor_ids},
+            seat_id=actor_id,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+        )
+        offer["status_event_id"] = changed["id"]
+        events.append(changed)
+        queued_wakes.append(
+            {
+                "run_id": run_id,
+                "actor_id": counterpart,
+                "wake_type": CrisisWakeType.OFFER_CHANGE,
+                "tick": tick,
+                "trigger_event_id": changed["id"],
+            }
+        )
+        return changed["id"]
+
+    def _refuse_commit_time_offer(
+        self,
+        run_id: str,
+        tick: int,
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        commit_refusals: list[dict[str, Any]] | None,
+        code: str,
+        *,
+        causal_parent_id: str,
+    ) -> str:
+        result = {"status": "rejected", "code": code}
+        operation["status"] = "REJECTED"
+        operation["result"] = result
+        if commit_refusals is not None:
+            commit_refusals.append({"operation_id": operation["id"], "result": result})
+        event_type = (
+            "HUMAN_REQUEST_REJECTED"
+            if wake["source"] == "human"
+            else "ACTOR_TOOL_REJECTED"
+        )
+        events.append(
+            self._event(
+                run_id,
+                tick,
+                event_type,
+                {
+                    "wake_id": wake["id"],
+                    "tool": operation["tool_name"],
+                    "code": code,
+                    "visibility": [wake["actor_id"]],
+                },
+                seat_id=wake["actor_id"],
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            )
+        )
+        return causal_parent_id
+
+    @staticmethod
+    def _offer_lineage_ids(offers: list[dict[str, Any]], offer: dict[str, Any]) -> list[str]:
+        by_id = {str(item["id"]): item for item in offers}
+        lineage: list[str] = []
+        current = offer
+        while current:
+            lineage.append(str(current["id"]))
+            parent_id = str(current.get("parent_offer_id") or "")
+            current = by_id.get(parent_id)
+        return list(reversed(lineage))
 
     def _start_investigation(
         self,
@@ -2522,6 +3005,19 @@ class CrisisRunEngine:
             projection,
             int(projection["tick"]),
         )
+        available_offer_terms = self.pack.offer_term_affordances(actor_id)
+        active_offers = [
+            offer
+            for offer in projection.get("offers", [])
+            if offer.get("status") == OfferStatus.PROPOSED.value
+            and actor_id in {offer.get("issuer"), offer.get("recipient")}
+        ]
+        active_agreements = [
+            agreement
+            for agreement in projection.get("agreements", [])
+            if agreement.get("status") == AgreementStatus.ACTIVE.value
+            and actor_id in agreement.get("parties", [])
+        ]
         known_entity_ids = {item["id"] for item in known_entities}
         investigation_target_ids = {
             affordance["target"]["id"] for affordance in available_investigations
@@ -2542,6 +3038,32 @@ class CrisisRunEngine:
                 }
             )
             known_entity_ids.add(target_id)
+        agreement_subject_ids = {
+            affordance["subject"]["id"] for affordance in available_offer_terms
+        }
+        agreement_subject_ids.update(
+            str(term["subject"])
+            for offer in active_offers
+            for term in offer.get("terms", [])
+        )
+        agreement_subject_ids.update(
+            str(term["subject"])
+            for agreement in active_agreements
+            for term in agreement.get("terms", [])
+        )
+        for subject_id in sorted(agreement_subject_ids):
+            subject = projected_entities.get(subject_id)
+            if subject is None or subject_id in known_entity_ids:
+                continue
+            known_entities.append(
+                {
+                    "id": subject_id,
+                    "type": subject["type"],
+                    "display_name": subject["display_name"],
+                    "state": subject["state"],
+                }
+            )
+            known_entity_ids.add(subject_id)
         constraints = [{"kind": "authority", "description": "只能使用当前职权内的行动。"}]
         if self.pack.crisis.routes:
             constraints.append(
@@ -2550,6 +3072,10 @@ class CrisisRunEngine:
         if available_investigations:
             constraints.append(
                 {"kind": "information", "description": "调查会在模拟时间后带回带来源和可靠性的观察。"}
+            )
+        if active_offers or active_agreements:
+            constraints.append(
+                {"kind": "agreement", "description": "已经提出或生效的条件会约束之后可采取的行动。"}
             )
         return {
             "contactable_actors": contactable_actors,
@@ -2561,8 +3087,9 @@ class CrisisRunEngine:
             "active_operations": active_operations,
             "available_investigations": available_investigations,
             "active_investigations": active_investigations,
-            "active_offers": [],
-            "active_agreements": [],
+            "available_offer_terms": available_offer_terms,
+            "active_offers": active_offers,
+            "active_agreements": active_agreements,
             "current_revisits": revisits,
             "meaningful_world_constraints": constraints,
         }
@@ -2645,6 +3172,8 @@ class CrisisRunEngine:
             "entities": list(projection.get("entities", {}).values()),
             "operations": list(projection.get("operations", [])),
             "investigations": list(projection.get("investigations", [])),
+            "offers": list(projection.get("offers", [])),
+            "agreements": list(projection.get("agreements", [])),
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
@@ -2688,6 +3217,14 @@ class CrisisRunEngine:
                     )
                 else:
                     result["reason"] = "这项调查未能开始"
+            elif operation["tool_name"] == "manage_offer":
+                action = str(operation["payload"].get("action") or "")
+                result["action"] = action
+                if operation["status"] == "COMMITTED":
+                    result["offer_id"] = operation["result"].get("offer_id", "")
+                    result["agreement_id"] = operation["result"].get("agreement_id", "")
+                else:
+                    result["reason"] = "这项条件未能进入世界"
             results.append(result)
         return results
 
@@ -2762,6 +3299,7 @@ class CrisisRunEngine:
             "active_operations": perspective["active_operations"],
             "available_investigations": perspective["available_investigations"],
             "active_investigations": perspective["active_investigations"],
+            "available_offer_terms": perspective["available_offer_terms"],
             "active_offers": perspective["active_offers"],
             "active_agreements": perspective["active_agreements"],
             "current_revisits": perspective["current_revisits"],
@@ -2841,6 +3379,15 @@ class CrisisRunEngine:
             "INVESTIGATION_STARTED": "一项调查已经开始",
             "INVESTIGATION_COMPLETED": "一项调查已经完成",
             "OBSERVATION_OBTAINED": "一条调查观察已经抵达",
+            "OFFER_PROPOSED": "一项条件已经提出",
+            "OFFER_COUNTERED": "一项条件被重新提出",
+            "OFFER_ACCEPTED": "一项条件已经接受",
+            "OFFER_REJECTED": "一项条件被拒绝",
+            "OFFER_WITHDRAWN": "一项条件被撤回",
+            "OFFER_EXPIRED": "一项条件已经失效",
+            "AGREEMENT_CREATED": "一项约定已经生效",
+            "AGREEMENT_FULFILLED": "一项约定已经履行",
+            "AGREEMENT_BREACHED": "一项约定已经被违背",
             "OPERATION_STARTED": "一项行动已经开始",
             "OPERATION_COMPLETED": "一项行动已经完成",
             "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
@@ -2930,6 +3477,39 @@ class CrisisRunEngine:
                 f"{observation['content']}"
                 f"（来源：{observation['source']}；可靠性：{observation['reliability']}）"
             )
+        if event["event_type"] in {
+            "OFFER_PROPOSED",
+            "OFFER_COUNTERED",
+            "OFFER_ACCEPTED",
+            "OFFER_REJECTED",
+            "OFFER_WITHDRAWN",
+            "OFFER_EXPIRED",
+        }:
+            offer = payload.get("counter_offer") or payload["offer"]
+            issuer = self.pack.actor_by_id[str(offer["issuer"])].display_name
+            recipient = self.pack.actor_by_id[str(offer["recipient"])].display_name
+            terms = "；".join(
+                f"{term['type']} {term['subject']}={term['value']}"
+                for term in offer.get("terms", [])
+            )
+            message = str(offer.get("message", ""))
+            detail = f"{issuer} → {recipient}：{terms}"
+            return f"{detail}。{message}" if message else detail
+        if event["event_type"] in {
+            "AGREEMENT_CREATED",
+            "AGREEMENT_FULFILLED",
+            "AGREEMENT_BREACHED",
+        }:
+            agreement = payload["agreement"]
+            parties = "、".join(
+                self.pack.actor_by_id[str(actor_id)].display_name
+                for actor_id in agreement["parties"]
+            )
+            terms = "；".join(
+                f"{term['type']} {term['subject']}={term['value']}"
+                for term in agreement.get("terms", [])
+            )
+            return f"{parties}：{terms}"
         if event["event_type"] in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
             operation = payload["operation"]
             definition = self.pack.operation_by_id.get(str(operation["definition_id"]))
@@ -2976,6 +3556,26 @@ class CrisisRunEngine:
                 "content": observation["content"],
                 "source": observation["source"],
                 "reliability": observation["reliability"],
+            }
+        if event["event_type"].startswith("OFFER_"):
+            offer = event["payload"].get("counter_offer") or event["payload"].get("offer", {})
+            return {
+                "type": wake["wake_type"],
+                "offer_id": offer.get("id", ""),
+                "issuer": offer.get("issuer", ""),
+                "recipient": offer.get("recipient", ""),
+                "terms": offer.get("terms", []),
+                "message": offer.get("message", ""),
+                "status": offer.get("status", ""),
+            }
+        if event["event_type"].startswith("AGREEMENT_"):
+            agreement = event["payload"].get("agreement", {})
+            return {
+                "type": wake["wake_type"],
+                "agreement_id": agreement.get("id", ""),
+                "parties": agreement.get("parties", []),
+                "terms": agreement.get("terms", []),
+                "status": agreement.get("status", ""),
             }
         return {"type": wake["wake_type"], "event_id": event["id"]}
 

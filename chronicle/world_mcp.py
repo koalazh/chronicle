@@ -59,6 +59,29 @@ def investigate(
 
 
 @mcp.tool()
+def manage_offer(
+    action: str,
+    idempotency_key: str,
+    offer_id: str = "",
+    recipient: str = "",
+    terms: list[dict[str, Any]] | None = None,
+    message: str = "",
+    expires_after_days: int = 0,
+) -> dict[str, Any]:
+    """Propose, counter, accept, reject, or withdraw one structured in-world offer."""
+
+    return _world().manage_offer(
+        action,
+        offer_id=offer_id,
+        recipient=recipient,
+        terms=terms,
+        message=message,
+        expires_after_days=expires_after_days,
+        idempotency_key=idempotency_key,
+    )
+
+
+@mcp.tool()
 def operate(
     operation_definition_id: str,
     targets: list[str],

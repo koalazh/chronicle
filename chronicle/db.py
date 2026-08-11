@@ -1965,11 +1965,23 @@ class ChronicleDB:
             record["sequence"] = int(cursor.lastrowid or 0)
         return self._decode_crisis_wake_operation(record)
 
-    def update_crisis_wake_operation_status(self, operation_id: str, status: str) -> None:
+    def update_crisis_wake_operation_status(
+        self,
+        operation_id: str,
+        status: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        updates: dict[str, Any] = {"status": status, "id": operation_id}
+        if result is not None:
+            updates["result_json"] = json.dumps(result, ensure_ascii=False, sort_keys=True)
+        assignments = ", ".join(
+            f"{key} = :{key}" for key in updates if key != "id"
+        )
         with self.transaction() as connection:
             changed = connection.execute(
-                "UPDATE crisis_wake_operations SET status = ? WHERE id = ?",
-                (status, operation_id),
+                f"UPDATE crisis_wake_operations SET {assignments} WHERE id = :id",
+                updates,
             )
             if changed.rowcount != 1:
                 raise KeyError(f"wake operation not found: {operation_id}")

@@ -182,6 +182,7 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
         lambda _config, _server: (
             "communicate",
             "investigate",
+            "manage_offer",
             "operate",
             "schedule_revisit",
             "update_plan",

@@ -37,6 +37,7 @@ def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
     crisis["entities"] = []
     crisis["operations"] = []
     crisis["investigations"] = []
+    crisis["offer_terms"] = []
     (root / "crisis.yaml").write_text(
         yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -199,6 +200,43 @@ def test_crisis_pack_rejects_an_investigation_without_known_provenance(tmp_path)
     with pytest.raises(
         CrisisValidationError,
         match="investigation shanhai-pass-report: unknown observation sources missing-source",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_offer_term_with_an_unknown_subject(tmp_path):
+    root = tmp_path / "invalid-offer-subject"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["offer_terms"][0]["subject"] = "missing-pass"
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(CrisisValidationError, match="offer term passage: unknown subject missing-pass"):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_operation_agreement_that_is_not_declared(tmp_path):
+    root = tmp_path / "invalid-operation-agreement"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["operations"][1]["agreement_requirements"][0]["value"] = "denied"
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="operation enter-shanhai-pass: unknown agreement requirement passage/shanhai-pass",
     ):
         CrisisPack.load(root)
 

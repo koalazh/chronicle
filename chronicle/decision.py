@@ -15,7 +15,14 @@ class DecisionInterpretationError(ValueError):
 
 
 class DecisionOperation(StrictModel):
-    tool: Literal["communicate", "investigate", "operate", "update_plan", "schedule_revisit"]
+    tool: Literal[
+        "communicate",
+        "investigate",
+        "manage_offer",
+        "operate",
+        "update_plan",
+        "schedule_revisit",
+    ]
     arguments: dict[str, Any]
 
 
@@ -83,6 +90,41 @@ class FixtureDecisionInterpreter:
                         },
                     )
                 )
+        offer_term = next(iter(perspective.get("available_offer_terms", [])), None)
+        if offer_term and any(term in text for term in ("通行", "放行")):
+            operations.append(
+                DecisionOperation(
+                    tool="manage_offer",
+                    arguments={
+                        "action": "PROPOSE",
+                        "recipient": offer_term["recipient"]["id"],
+                        "terms": [
+                            {
+                                "type": offer_term["type"],
+                                "subject": offer_term["subject"]["id"],
+                                "value": offer_term["value"],
+                                "description": offer_term["description"],
+                            }
+                        ],
+                        "message": text.strip(),
+                    },
+                )
+            )
+        incoming_offer = next(
+            (
+                offer
+                for offer in perspective.get("active_offers", [])
+                if offer.get("recipient") == perspective.get("actor_id")
+            ),
+            None,
+        )
+        if incoming_offer and any(term in text for term in ("接受", "同意")):
+            operations.append(
+                DecisionOperation(
+                    tool="manage_offer",
+                    arguments={"action": "ACCEPT", "offer_id": incoming_offer["id"]},
+                )
+            )
         if "整备" in text or "准备兵力" in text:
             prepare = next(
                 (
@@ -140,12 +182,15 @@ class ModelDecisionInterpreter:
                 "content": (
                     "你是 Chronicle 的 Human Decision Interpreter，不是历史主体，也不决定世界结果。"
                     "把用户一句自然语言决定解释成 0 到 8 个 World Affordance 请求。"
-                    "只可使用 communicate、investigate、operate、update_plan、schedule_revisit。"
+                    "只可使用 communicate、investigate、manage_offer、operate、update_plan、schedule_revisit。"
                     "不得伪造 actor_id/run_id/wake_id，不得加入用户没有表达的不可逆选择。"
                     "返回严格 JSON：{summary:string,operations:[{tool:string,arguments:object}]}。"
                     f"communicate 参数 recipient/content；{recipient_rule}"
                     "investigate 参数 question/target/method；"
                     "target 与 method 必须从 private_perspective.available_investigations 选择；"
+                    "manage_offer 参数 action/offer_id/recipient/terms/message/expires_after_days；"
+                    "PROPOSE 或 COUNTER 的 terms 必须从 private_perspective.available_offer_terms 选择；"
+                    "ACCEPT、REJECT、WITHDRAW 的 offer_id 必须从 private_perspective.active_offers 选择；"
                     "operate 参数 operation_definition_id/targets/description；"
                     "operation_definition_id 与 targets 必须从 private_perspective.available_operations 选择；"
                     "update_plan 参数 objective/steps/rationale/belief_updates/reconsider_when；"

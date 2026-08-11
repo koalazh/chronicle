@@ -12,6 +12,7 @@ from .hermes import HermesRuntimeError
 from .host import ChronicleHost
 from .models import WorldlineKind
 from .runtime import WorldlineConflict, WorldlineError
+from .volume_live import HermesVolumeActorDriver
 from .volume_runtime import VolumeRuntimeConflict, VolumeRuntimeError
 
 
@@ -562,13 +563,17 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         ]
 
     def resolve_agent_wakes(active: ChronicleHost, worldline_id: str) -> list[dict[str, Any]]:
-        """Keep fixture progression deterministic without inventing private cognition."""
+        """Resolve one frozen moment, using live Hermes only for live Volumes."""
 
         state = active.volume_runtime.worldline(worldline_id)
         pending = state["projection"].get("pending_moment")
         if not pending:
             return []
         events: list[dict[str, Any]] = []
+        live_driver = None
+        if state["worldline"].get("runtime_mode") == "live":
+            active.volume_runtime.ensure_live_runtime(worldline_id)
+            live_driver = HermesVolumeActorDriver(active.config, active.db)
         for wake_id in pending["wake_ids"]:
             wake = active.db.crisis_wake(wake_id)
             if wake is None or wake["status"] == "STAGED":
@@ -578,6 +583,12 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 worldline_id, str(wake["actor_id"])
             )
             if lifetime is None:
+                continue
+            if lifetime["controller"] != "AGENT":
+                continue
+            if live_driver is not None:
+                result = live_driver.run_wake(wake, wake["frozen_perspective"])
+                events.append({"wake_id": wake_id, **result})
                 continue
             staged = active.volume_runtime.stage_intent(
                 worldline_id,
@@ -641,6 +652,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                     active.volume_runtime.activate_crisis,
                     created["worldline"]["id"],
                     reference.id,
+                )
+            if request.live:
+                await asyncio.to_thread(
+                    active.volume_runtime.ensure_live_runtime,
+                    created["worldline"]["id"],
                 )
             return {
                 "worldline": public_worldline(active.db.worldline(created["worldline"]["id"]) or {}),

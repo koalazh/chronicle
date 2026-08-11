@@ -85,6 +85,7 @@ async def test_world_mcp_exposes_only_identity_free_crisis_tools():
     assert set(tools) == {
         "communicate",
         "investigate",
+        "logical_intent",
         "manage_offer",
         "operate",
         "update_plan",
@@ -100,6 +101,7 @@ async def test_world_mcp_exposes_only_identity_free_crisis_tools():
     assert "anyOf" in tools["operate"]["properties"]["targets"]["items"]
     assert "anyOf" in tools["manage_offer"]["properties"]["recipient"]
     assert "anyOf" in tools["update_plan"]["properties"]["belief_updates"]["anyOf"][0]["items"]
+    assert set(tools["logical_intent"]["required"]) == {"intent", "idempotency_key"}
 
 
 def test_eager_crisis_profiles_are_owned_and_world_tool_only(

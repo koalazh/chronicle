@@ -12,6 +12,7 @@ from .db import content_hash, stable_hash
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_continuity import LifetimeContextBuilder
 from .volume_boundary import VolumeBoundaryPolicy
+from .world import token_hash
 
 if TYPE_CHECKING:
     from .host import ChronicleHost
@@ -185,6 +186,7 @@ class VolumeRuntime:
             "volume_content_version": content_version,
             "volume_content_hash": volume_content_hash,
             "worldline_phase": "READY",
+            "runtime_phase": "BOOTSTRAPPING" if runtime_mode == "live" else "READY",
             "boundary_policy_id": "volume-global-clock",
             "safety_horizon_tick": self._volume_horizon(),
             "human_lifetime_id": "",
@@ -218,6 +220,8 @@ class VolumeRuntime:
             bindings = []
             for lifetime in lifetime_values:
                 metadata = lifetime["profile_metadata"]
+                profile_record = profile_records.get(lifetime["seat"], {})
+                world_token = str(profile_record.get("world_token", ""))
                 bindings.append(
                     self.db.create_agent_binding(
                         {
@@ -233,7 +237,7 @@ class VolumeRuntime:
                             "profile_name": lifetime["profile_name"],
                             "ownership_marker": metadata["ownership_marker"],
                             "distribution_version": "chronicle-actor-v5",
-                            "token_hash": "",
+                            "token_hash": token_hash(world_token) if world_token else "",
                         }
                     )
                 )
@@ -253,6 +257,27 @@ class VolumeRuntime:
             "projection": initial_projection,
             "profile_records": profile_records,
         }
+
+    def ensure_live_runtime(self, worldline_id: str) -> dict[str, Any]:
+        """Ensure the exact V5 Volume Gateway is ready before live cognition."""
+
+        from .gateway import GatewayController, GatewayRuntimeError
+
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        if row["runtime_mode"] != "live":
+            return row
+        if row["status"] != WorldlineStatus.ACTIVE.value:
+            raise VolumeRuntimeConflict("Volume Worldline is sealed")
+        try:
+            GatewayController(self.host.config).ensure(
+                worldline_id, str(row["runtime_epoch"])
+            )
+        except GatewayRuntimeError as exc:
+            self.db.set_volume_runtime_state(worldline_id, "FAILED", error_code=exc.code)
+            raise VolumeRuntimeError(f"V5 Hermes Gateway is not ready: {exc.code}") from exc
+        return self.db.set_volume_runtime_state(worldline_id, "READY")
 
     def worldline(self, worldline_id: str) -> dict[str, Any]:
         row = self._active_worldline(worldline_id)
@@ -366,6 +391,17 @@ class VolumeRuntime:
     def _cleanup_profiles_after_seal(self, row: dict[str, Any]) -> None:
         if row.get("runtime_mode") != "live":
             return
+        from .gateway import GatewayController, GatewayRuntimeError
+
+        try:
+            GatewayController(self.host.config).stop(
+                str(row["id"]), str(row["runtime_epoch"])
+            )
+        except GatewayRuntimeError as exc:
+            self.db.set_volume_runtime_state(
+                str(row["id"]), "CLEANUP_PENDING", error_code=exc.code
+            )
+            raise VolumeRuntimeError(f"V5 Hermes Gateway cleanup failed: {exc.code}") from exc
         lifetimes = self.db.worldline_lifetimes(str(row["id"]))
         profiles = [
             str(lifetime.get("profile_name") or hermes.lifetime_profile_name(row["id"], lifetime["seat"]))
@@ -1104,7 +1140,7 @@ class VolumeRuntime:
             raise VolumeRuntimeConflict(f"{seat} has no Wake in Pending Logical Moment")
         if wake["status"] == "COMPLETED":
             raise VolumeRuntimeConflict("this Wake has already completed")
-        if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "STAGED"}:
+        if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "RUNNING", "STAGED"}:
             raise VolumeRuntimeConflict(f"Wake is not stageable: {wake['status']}")
         if not isinstance(intent, dict) or str(intent.get("type", "wait")) not in {
             "wait",

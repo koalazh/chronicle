@@ -30,6 +30,27 @@ def _world():
     return service.session_for_current_token(token)
 
 
+def _volume_context():
+    """Return the bound V5 Volume context for the current MCP process."""
+
+    token = os.environ.get("CHRONICLE_WORLD_TOKEN", "")
+    if not token:
+        raise WorldAccessError("Chronicle world binding is missing")
+    config = load_config(environ=os.environ)
+    db = ChronicleDB(config.database_path)
+    binding = db.agent_binding_for_token_hash(token_hash(token))
+    if binding is None:
+        raise WorldAccessError("invalid Chronicle world binding")
+    worldline_id = str(binding["worldline_id"])
+    run = db.worldline(worldline_id)
+    if run is None or run["kind"] != "VOLUME" or run["status"] != "ACTIVE":
+        raise WorldAccessError("Chronicle Volume is unavailable")
+    wake = db.running_crisis_wake(worldline_id, str(binding["role"]))
+    if wake is None:
+        raise WorldAccessError("this Lifetime has no active V5 Wake")
+    return config, db, binding, wake
+
+
 @mcp.tool()
 def communicate(
     recipient: str | dict[str, Any],
@@ -136,6 +157,49 @@ def schedule_revisit(
         reason,
         idempotency_key=idempotency_key,
     )
+
+
+@mcp.tool()
+def logical_intent(intent: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+    """Stage one V5 logical intent without mutating the shared world."""
+
+    from .host import ChronicleHost
+
+    config, db, binding, wake = _volume_context()
+    existing = [
+        operation
+        for operation in db.crisis_wake_operations(wake["id"])
+        if operation["status"] == "PROPOSED"
+        and operation["payload"].get("moment_id") == wake["frozen_perspective"].get("moment_id")
+    ]
+    if existing:
+        operation = existing[0]
+        return {
+            "status": "accepted",
+            "moment_id": operation["payload"].get("moment_id", ""),
+            "operation_id": operation["id"],
+            "idempotent": True,
+        }
+    try:
+        staged = ChronicleHost(config).volume_runtime.stage_intent(
+            str(binding["worldline_id"]),
+            str(binding["role"]),
+            dict(intent),
+            source="agent",
+            idempotency_key=f"{wake['id']}:{idempotency_key or 'logical-intent'}",
+        )
+    except Exception as exc:
+        return {
+            "status": "rejected",
+            "code": type(exc).__name__,
+            "message": str(exc)[:400],
+        }
+    return {
+        "status": "accepted",
+        "moment_id": staged["moment_id"],
+        "operation_id": staged["operation"]["id"],
+        "idempotent": bool(staged["idempotent"]),
+    }
 
 
 def main() -> None:

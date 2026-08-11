@@ -1070,6 +1070,8 @@ class ChronicleDB:
             "current_tick": values["current_tick"],
             "runtime_epoch": values.get("runtime_epoch", ""),
             "runtime_mode": values.get("runtime_mode", "fixture"),
+            "runtime_phase": values.get("runtime_phase", "READY"),
+            "runtime_error_code": values.get("runtime_error_code", ""),
             "volume_id": values.get("volume_id", ""),
             "volume_content_version": int(values.get("volume_content_version", 0)),
             "volume_content_hash": values.get("volume_content_hash", ""),
@@ -1086,11 +1088,11 @@ class ChronicleDB:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO worldlines(id, scenario_id, kind, status, entry_id, controller_seat, current_tick, "
-                "runtime_epoch, runtime_mode, volume_id, volume_content_version, volume_content_hash, "
+                "runtime_epoch, runtime_mode, runtime_phase, runtime_error_code, volume_id, volume_content_version, volume_content_hash, "
                 "worldline_phase, boundary_policy_id, safety_horizon_tick, human_lifetime_id, "
                 "seal_reason, outcome, pending_confirmation_json, created_at, updated_at) "
                 "VALUES (:id, :scenario_id, :kind, :status, :entry_id, :controller_seat, :current_tick, "
-                ":runtime_epoch, :runtime_mode, :volume_id, :volume_content_version, :volume_content_hash, "
+                ":runtime_epoch, :runtime_mode, :runtime_phase, :runtime_error_code, :volume_id, :volume_content_version, :volume_content_hash, "
                 ":worldline_phase, :boundary_policy_id, :safety_horizon_tick, :human_lifetime_id, "
                 ":seal_reason, :outcome, :pending_confirmation_json, :created_at, :updated_at)",
                 worldline,
@@ -1405,6 +1407,35 @@ class ChronicleDB:
                 raise sqlite3.IntegrityError("sealed Run only supports cleanup")
             if row["status"] != "SEALED" and phase == "CLEANUP_PENDING":
                 raise sqlite3.IntegrityError("active Run cannot enter cleanup")
+            connection.execute(
+                "UPDATE worldlines SET runtime_phase = ?, runtime_error_code = ?, updated_at = ? "
+                "WHERE id = ?",
+                (phase, error_code, now_iso(), worldline_id),
+            )
+        return self.worldline(worldline_id) or {}
+
+    def set_volume_runtime_state(
+        self,
+        worldline_id: str,
+        phase: str,
+        *,
+        error_code: str = "",
+    ) -> dict[str, Any]:
+        """Update the live-runtime state of a V5 Volume Worldline."""
+
+        valid = {"BOOTSTRAPPING", "READY", "RECONCILING", "FAILED", "CLEANUP_PENDING"}
+        if phase not in valid:
+            raise ValueError(f"unknown volume runtime phase: {phase}")
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT kind, status FROM worldlines WHERE id = ?", (worldline_id,)
+            ).fetchone()
+            if row is None or row["kind"] != "VOLUME":
+                raise sqlite3.IntegrityError("VOLUME Worldline does not exist")
+            if row["status"] == "ACTIVE" and phase == "CLEANUP_PENDING":
+                raise sqlite3.IntegrityError("active Volume cannot enter cleanup")
+            if row["status"] != "SEALED" and phase == "CLEANUP_PENDING":
+                raise sqlite3.IntegrityError("only a sealed Volume can enter cleanup")
             connection.execute(
                 "UPDATE worldlines SET runtime_phase = ?, runtime_error_code = ?, updated_at = ? "
                 "WHERE id = ?",

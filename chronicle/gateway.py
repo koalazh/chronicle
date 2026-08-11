@@ -266,6 +266,13 @@ class GatewayController:
         while self._process_alive(pid) and self._monotonic() <= deadline:
             self._sleep(0.1)
         if self._process_alive(pid):
+            if self._process_start_marker(pid) != owner.get("process_start_marker"):
+                raise GatewayRuntimeError("runtime_owner_unknown")
+            self._kill(pid)
+            kill_deadline = self._monotonic() + min(self._start_timeout, 2.0)
+            while self._process_alive(pid) and self._monotonic() <= kill_deadline:
+                self._sleep(0.1)
+        if self._process_alive(pid):
             raise GatewayRuntimeError("runtime_gateway_stop_failed")
         self.owner_path.unlink(missing_ok=True)
 
@@ -304,6 +311,18 @@ class GatewayController:
         if pid <= 0:
             return False
         try:
+            result = subprocess.run(
+                ["ps", "-o", "state=", "-p", str(pid)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0 and result.stdout.strip().startswith("Z"):
+                return False
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
             os.kill(pid, 0)
         except ProcessLookupError:
             return False
@@ -330,6 +349,15 @@ class GatewayController:
     def _terminate(pid: int) -> None:
         try:
             os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except PermissionError as exc:
+            raise GatewayRuntimeError("runtime_gateway_stop_failed") from exc
+
+    @staticmethod
+    def _kill(pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             return
         except PermissionError as exc:

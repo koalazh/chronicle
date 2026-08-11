@@ -213,6 +213,11 @@ def test_nanjing_fixture_loop_reaches_recognition_aftermath_and_settlement(app_c
     assert outcome["settlement_type"] == "RESOLVED"
     assert outcome["resolution_kind"] == "RECOGNIZED_SETTLEMENT"
     assert outcome["resolution_variant"] == "FU_RECOGNIZED"
+    assert outcome["summary"] == next(
+        event["payload"]["result"]["summary"]
+        for event in result["events"]
+        if event["event_type"] == "RESOLUTION_APPLIED"
+    )
     assert projection["resolution"]["status"] == "APPLIED"
     assert projection["settlement"]["status"] == "SETTLED"
     assert projection["entities"]["fu-prince"]["state"] == "IN_NANJING"

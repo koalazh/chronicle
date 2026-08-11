@@ -150,6 +150,7 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
         "web/pages/volume.js",
         "web/pages/crisis.js",
         "web/pages/desk.js",
+        "web/pages/settlement.js",
         "web/components/letter.js",
         "web/components/ongoing.js",
         "web/components/agreement.js",
@@ -164,6 +165,26 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
     assert 'data-action="start-takeover" data-human-actor-id=' in source
     assert "before-shanhaiguan" not in source
     assert "wu-sangui" not in source
+
+
+def test_frontend_routes_automatic_settlement_to_a_restrained_outcome_page():
+    source = _frontend_source()
+    settlement = (ROOT / "web" / "pages" / "settlement.js").read_text(encoding="utf-8")
+
+    for required in (
+        "goSettlement",
+        "loadSettlement",
+        "currentRouteHash",
+        'result.run?.crisis_phase === "SETTLED"',
+        'api(`/api/runs/${encodeURIComponent(runId)}/outcome`)',
+        "open-settlement-replay",
+        "RESOLUTION_PENDING",
+    ):
+        assert required in source
+
+    assert "resolution_variant" not in settlement
+    assert "final_stakes" not in settlement
+    assert "#/settlement/${encodeURIComponent(state.settlementRunId)}" in source
 
 
 def test_frontend_desk_consumes_only_product_world_objects():

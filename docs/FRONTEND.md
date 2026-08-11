@@ -2,7 +2,7 @@
 
 本文合并页面产品约定与视觉约定。它回答“用户应该看到什么”，不把 Profile、Wake、数据库或技术日志当成用户心智；实现以 `web/` 下的 ES modules、`web/index.html`、`web/styles.css` 和当前 API 为准。
 
-> V4 状态：Phase 19 已实现 Volume Home、Crisis Cover、任意 playable Actor 入口、`SPATIAL` / `POLITICAL` Surface，以及由私有 Perspective 投影驱动的 Takeover Desk。Settlement、Replay/Compare 的 V4 细化仍由后续 Phase 完成；本文件不会把当前 fixture/API 或静态页面证据写成 live Hermes 验收。
+> V4 状态：Phase 20 已实现 Volume Home、Crisis Cover、任意 playable Actor 入口、`SPATIAL` / `POLITICAL` Surface、私有 Perspective 驱动的 Takeover Desk，以及从自动 Settlement 进入的 Outcome 页面。Replay/Compare 的 V4 细化仍由后续 Phase 完成；本文件不会把当前 fixture/API 或静态页面证据写成 live Hermes 验收。
 
 ## 首次打开
 
@@ -31,6 +31,14 @@ Crisis Cover 回答四件事：现在发生什么、真正未决的问题、谁�
 每一项都来自当前主体的私有 Perspective `desk` 投影：前端不读取 Ledger、不由世界全貌推断隐藏事件，也不将其它主体的私态拼成所谓“全局情况”。来信中的 Offer 先作为一封信呈现，并在正文下自然说明“对方希望你明确”；协议只在它仍真实约束当前主体时出现。
 
 决定区只问“你准备怎么处置”。用户可以输入一段自然语言，也可以不输入而点击“继续”；输入框初始为四行并随内容自然展开。提交前先捕获 textarea，再进入 busy 状态，不能因为重绘把文字清空成沉默。书案不展示“我的 Plan”任务管理器、内部 Event ID 或其它主体的私有活动。
+
+当 World 已进入 `RESOLUTION_PENDING`，书案不展示战斗面板或 Resolver factors；它只把右侧改成“局势已进入不可逆节点”，允许当前 Human 写下最后处置，或继续让世界形成局部答案。进入 `AFTERMATH` 后仍回到同一张书案，让新的结果、通信和有限后续行动安静地抵达。
+
+### Settlement
+
+只有由世界自动形成的 `SETTLED` 危局才进入 `#/settlement/{run_id}`。这页首先显示“某危局之后”，用 3–5 句确定性 Outcome 文本说明世界最终形成了什么、仍留下哪些真实条件，并明确 Chronicle 不会替后续整段历史编造命运；不展示分数、因子面板、Resolver ID 或 raw state。然后只给“回看这一局”和“回到甲申”。
+
+用户主动封存的未结算 Run 仍进入原有回看/卷册路径，不能伪装成一个世界已回答的 Settlement。若 live Run 的本地资源仍在收束，Settlement 先保留可回看 Outcome，再单独提供“再次收束”。
 
 ### 回看、卷册、史实和设置
 
@@ -61,7 +69,7 @@ Surface 在宽屏横向、手机按内容单列；信件显示“在途中”或
 
 live Run 的 `BOOTSTRAPPING`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP_PENDING` 用现有纸页、朱印与细蓝线显示为一张轻量的“待续页”。它只说明已知状态：正在建立、正在恢复、尚未准备好或已经封存；不显示假进度、倒计时或“主体正在思考”。建立、恢复、推进、决定和封存共享一个 mutation lock，书案在这段时间展示已提交文字的只读纸条。`FAILED` 只提供“重新准备”或封存，不允许继续输入。
 
-至少检查 1440、1280、768 和 390 宽度：没有横向溢出，Corridor 方向正确，Desk 文书在手机为单列，按钮、label、textarea 可键盘操作并有清晰 disabled 状态。浏览器截图只证明当时本地 API/fixture 的页面状态。
+至少检查 1440、1280、768 和 390 宽度：没有横向溢出，Corridor 方向正确，Desk 文书和 Settlement 行动在手机为单列，按钮、label、textarea 可键盘操作并有清晰 disabled 状态。浏览器截图只证明当时本地 API/fixture 的页面状态。
 
 ## 前后端接缝
 

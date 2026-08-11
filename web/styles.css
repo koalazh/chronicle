@@ -221,6 +221,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .decision-desk label { display: block; margin: 35px 0 9px; color: var(--ink-faint); font-size: 10px; letter-spacing: .12em; }
 .decision-desk textarea { width: 100%; min-height: 118px; resize: none; overflow: hidden; border: 1px solid var(--line); background: var(--paper-light); padding: 18px; color: var(--ink); font-family: var(--serif); line-height: 1.8; }
 
+.settlement-page { min-height: 68vh; display: grid; align-content: center; padding: 80px 0 96px; }
+.settlement-header { max-width: 760px; padding-bottom: 30px; border-bottom: 1px solid var(--line); }
+.settlement-header h1 { margin: 13px 0 0; font-family: var(--serif); font-size: clamp(48px, 7vw, 84px); font-weight: 500; line-height: 1.2; }
+.settlement-document { max-width: 700px; padding: 39px 0 35px; }
+.settlement-document p { margin: 0 0 17px; color: var(--ink-soft); font-family: var(--serif); font-size: 17px; line-height: 2; }
+.settlement-document p:first-child { color: var(--ink); font-size: 22px; }
+.settlement-actions { display: flex; gap: 13px; align-items: center; }
+.settlement-cleanup { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; max-width: 700px; margin: -8px 0 30px; color: var(--ink-faint); font-family: var(--serif); font-size: 12px; line-height: 1.7; }
+
 .page-header, .replay-header { padding: 50px 0 42px; border-bottom: 1px solid var(--line); }
 .page-header h1, .replay-header h1, .empty-page h1 { margin: 0 0 18px; font-family: var(--serif); font-size: clamp(42px, 6vw, 76px); font-weight: 500; line-height: 1.25; }
 .page-header > p:last-child, .replay-header > p:last-of-type { max-width: 600px; color: var(--ink-soft); line-height: 1.9; }
@@ -319,6 +328,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .assertion-register article:nth-child(even) { padding-left: 0; border-left: 0; }
   .archive-row { grid-template-columns: 1fr; gap: 5px; }
   .replay-list { margin-left: 6px; }
+  .settlement-page { padding-top: 50px; }
 }
 
 @media (max-width: 560px) {
@@ -348,6 +358,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .continue-bar small { display: none; }
   .desk-main { padding-top: 28px; }
   .decision-desk { padding: 28px 20px; margin: 0 -18px; }
+  .settlement-page { padding-top: 40px; }
+  .settlement-actions { align-items: stretch; flex-direction: column; }
+  .settlement-actions button { width: 100%; }
   .letter-sheet { padding: 20px; }
   .letter-sheet p { margin-right: 36px; }
   .ongoing-sheet { grid-template-columns: 1fr; gap: 9px; }

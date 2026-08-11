@@ -11,6 +11,8 @@ export const state = {
   world: null,
   archive: [],
   history: null,
+  settlement: null,
+  settlementRunId: "",
   replay: null,
   replayLens: "then",
   replayActor: "",

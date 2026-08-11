@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from fastapi.testclient import TestClient
+
+from chronicle.app import create_app
 from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 from chronicle.decision import DecisionOperation, InterpretedDecision
 
@@ -101,6 +104,7 @@ def test_resolution_flows_through_aftermath_before_a_negotiated_settlement(app_c
     assert run["settlement_reason"] == "resolution_stabilized"
     assert run["outcome_json"]["settlement_type"] == "RESOLVED"
     assert run["outcome_json"]["resolution_variant"] == "PASSAGE_IMPLEMENTED"
+    assert run["outcome_json"]["summary"] == resolved["payload"]["result"]["summary"]
     compatibility = {
         item["anchor_id"]: item["status"]
         for item in run["outcome_json"]["historical_compatibility"]
@@ -172,6 +176,22 @@ def test_resolution_flows_through_aftermath_before_a_negotiated_settlement(app_c
     assert "event-" not in json.dumps(layers, ensure_ascii=False)
     assert engine.db.worldline_events(run_id) == events_before_replay
     assert layers == CrisisRunEngine(app_config).replay(run_id)["layers"]
+
+
+def test_settled_outcome_api_exposes_the_deterministic_summary(app_config, tmp_path):
+    config = replace(app_config, database_path=tmp_path / "settled-outcome-api.db", dev=True)
+    engine = CrisisRunEngine(config, actor_driver=_NegotiatedSettlementDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    engine.run_until_idle(run_id)
+
+    response = TestClient(create_app(config)).get(f"/api/runs/{run_id}/outcome")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run"]["status"] == "SEALED"
+    assert payload["run"]["crisis_phase"] == "SETTLED"
+    assert payload["outcome"]["settlement_type"] == "RESOLVED"
+    assert payload["outcome"]["summary"] == payload["run"]["outcome"]
 
 
 class _OperationInterpreter:
@@ -310,6 +330,7 @@ def test_safety_horizon_seals_a_deferred_outcome_instead_of_failing(app_config):
     assert run["settlement_reason"] == "safety_horizon"
     assert run["outcome_json"]["settlement_type"] == "SAFETY_HORIZON"
     assert run["outcome_json"]["resolution_variant"] == "SAFETY_HORIZON"
+    assert run["outcome_json"]["summary"] == result["events"][-2]["payload"]["outcome"]["summary"]
     assert engine.world_view(run_id)["settlement"]["reason"] == "safety_horizon"
     assert [
         event["event_type"] for event in result["events"][-3:]

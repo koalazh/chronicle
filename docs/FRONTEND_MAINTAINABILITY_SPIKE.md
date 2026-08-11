@@ -29,11 +29,11 @@ web/
   router.js       hash 解析与跳转
   components/     无世界规则的可复用文书片段
   surfaces/       SPATIAL / POLITICAL 纯投影 renderer
-  pages/          Volume、Crisis Cover、Desk，后续逐页迁移
+  pages/          Volume、Crisis Cover、Desk、Settlement，后续逐页迁移
   app.js          暂时保留生命周期、加载、mutation lock 与事件委托
 ```
 
-模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 仍是生命周期 owner；Desk 已在保持相同 interaction contract 的前提下迁移，Settlement、Replay/Compare 留待后续逐页迁移。
+模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 仍是生命周期 owner；Desk 与 Settlement 已在保持相同 interaction contract 的前提下迁移，Replay/Compare 留待后续逐页迁移。
 
 ## Phase 18 迁移准则
 
@@ -55,3 +55,9 @@ web/
 Desk 没有建立新的前端状态模型：后端在当前 Actor 的 `product_perspective` 中提供一个小型 `desk` 投影，里面只有该主体已合法收到的 arrivals、真实需要判断的 unresolved、自己的 ongoing 世界对象和自己参与的 active agreements。`web/pages/desk.js` 与三个无状态文书组件只呈现该投影；`app.js` 保留请求互斥、输入捕获、未知结果核对和事件委托。
 
 递归静态测试拒绝旧的 `outgoing_messages` Desk 拼接，并覆盖新模块边界。fixture/API 测试证明私有调查回报、来信式 Offer、协议与 ongoing 行动不会跨 Perspective 泄漏。隔离临时 fixture 浏览器在 Takeover 桌面中观察到来信、未决条件、进行中行动、协议、Surface、提交后回信和自动扩展输入框；390 宽度无横向溢出。该浏览器过程没有创建真实 Hermes Profile，仍仅是本地 fixture/API/UI 证据。
+
+## Phase 20 验证结果
+
+Settlement 不另造世界状态：调度器原有 `SETTLEMENT` attention 和 sealed `outcome_json` 仍是唯一来源。`app.js` 只在 `/continue` 返回 `SEALED` / `SETTLED` 时转到可直达的 `#/settlement/{run_id}`，再经既有 Outcome API 加载；手动封存仍走 Replay。Outcome 追加的 `summary` 只是已执行的 deterministic Resolution Result 的持久化投影，不引入 LLM 或新的 Resolver 分支。
+
+fixture/API 测试证明山海关与南都的结算 Outcome 都保留该摘要，且一条隔离的自动结算 Run 可由 `GET /api/runs/{id}/outcome` 读取。静态合同覆盖自动跳转、Outcome 路由、不可逆节点文案和不呈现 raw resolution variant/factors。当前尚未为 Settlement 页面新增浏览器检查，也没有启动 Hermes；这两项不能由上述 fixture/API 证据替代。

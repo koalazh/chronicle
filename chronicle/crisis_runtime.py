@@ -1763,6 +1763,7 @@ class CrisisRunEngine:
             "settlement_type": "DEFERRED" if kind == ResolutionKind.DEFERRED.value else "RESOLVED",
             "resolution_kind": kind,
             "resolution_variant": str(result.get("variant") or ""),
+            "summary": str(result.get("summary") or "危局已经形成局部结果。"),
             "final_stakes": list(result.get("factors", [])),
             "actor_positions": [
                 {"actor_id": actor_id, "position": projection["positions"][actor_id]}
@@ -4128,6 +4129,7 @@ class CrisisRunEngine:
             "resolution_seed": run.get("resolution_seed", ""),
             "crisis_phase": run.get("crisis_phase", ""),
             "outcome_json": outcome_json,
+            "outcome": run.get("outcome", ""),
             "settlement_reason": run.get("settlement_reason", ""),
             "mode": "TAKEOVER" if "HUMAN" in controllers.values() else "WATCH",
             "status": run["status"],

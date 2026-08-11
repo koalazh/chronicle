@@ -2,8 +2,9 @@ import { api } from "./api.js";
 import { escapeHtml } from "./components/html.js";
 import { crisisCoverPage } from "./pages/crisis.js";
 import { deskPage as deskDocumentPage } from "./pages/desk.js";
+import { settlementPage as settlementDocumentPage } from "./pages/settlement.js";
 import { volumePage } from "./pages/volume.js";
-import { go, goCrisis, route } from "./router.js";
+import { go, goCrisis, goSettlement, route } from "./router.js";
 import { state } from "./state.js";
 import { surfaceMarkup } from "./surfaces/index.js";
 
@@ -306,6 +307,7 @@ function deskDecisionPanel() {
     .reverse()
     .find((item) => Number(item.tick) === Number(state.active.current_tick));
   const decisionState = decisionSlotState();
+  const resolutionPending = state.active?.crisis_phase === "RESOLUTION_PENDING";
   const decisionLocked = runMutationLocked() || decisionState !== "NONE";
   const busyCopy = activityText() || (runtimePending()
     ? ["这一局正在准备", "请等待这一页恢复为可落笔的状态。"]
@@ -331,8 +333,8 @@ function deskDecisionPanel() {
         <span class="activity-stamp" aria-hidden="true">卷</span>
         <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? `<small>${continueCopy}</small>` : ""}</div>
       </div>`
-    : `<label for="decision">命令、回信或等待的理由</label>
-        <textarea id="decision" rows="4" placeholder="写下此刻准备如何处置：可以谈条件、调查未知、启动行动，或决定等待。">${escapeHtml(state.draftDecision)}</textarea>
+    : `<label for="decision">${resolutionPending ? "最后的处置" : "命令、回信或等待的理由"}</label>
+        <textarea id="decision" rows="4" placeholder="${resolutionPending ? "若仍有最后处置，现在写下；随后世界会形成局部答案。" : "写下此刻准备如何处置：可以谈条件、调查未知、启动行动，或决定等待。"}">${escapeHtml(state.draftDecision)}</textarea>
         <button class="primary wide" data-action="submit-decision">送入这段历史</button>
         <button class="quiet wide" data-action="silence">暂不追加命令，继续</button>`;
   const deskContinue = decisionSlotCommitted()
@@ -342,9 +344,9 @@ function deskDecisionPanel() {
       </footer>`
     : "";
   return `<aside class="decision-desk">
-    <p class="kicker">处置</p>
-    <h2>${decisionSlotCommitted() ? "这一日已入卷" : "你准备怎么处置？"}</h2>
-    <p>可以写一封信、提出或回应条件、调查未知、启动行动，或选择等待。世界只会兑现你真正拥有的部分。</p>
+    <p class="kicker">${resolutionPending ? "不可逆节点" : "处置"}</p>
+    <h2>${decisionSlotCommitted() ? "这一日已入卷" : resolutionPending ? "局势已进入不可逆节点" : "你准备怎么处置？"}</h2>
+    <p>${resolutionPending ? "这场危局已无法只靠继续传信或等待表达。若仍有最后处置，应在此刻写下；随后世界会形成局部答案。" : "可以写一封信、提出或回应条件、调查未知、启动行动，或选择等待。世界只会兑现你真正拥有的部分。"}</p>
     ${decisionDesk}
     ${deskContinue}
   </aside>`;
@@ -354,16 +356,32 @@ function deskPage() {
   if (!state.active) return volumeHomePage();
   if (!state.crisis || state.crisis.summary.id !== state.active.crisis_id) return chrome(loadingBlock());
   const view = state.perspective;
+  const phaseLede = state.active.crisis_phase === "RESOLUTION_PENDING"
+    ? "局势已进入不可逆节点；若有最后处置，应在此刻写下。"
+    : state.active.crisis_phase === "AFTERMATH"
+      ? "局部结果已经进入世界；人物仍要活过它留下的后果。"
+      : "你只能看见进入自己视野的消息；其它主体仍会在视野之外行动。";
   return deskDocumentPage({
     chrome,
     header: runHeader(
       `${view?.actor?.display_name || "你的"}书案`,
-      "你只能看见进入自己视野的消息；其它主体仍会在视野之外行动。",
+      phaseLede,
     ),
     view,
     actorDisplayName,
     surfaceMarkup,
     decisionPanel: deskDecisionPanel(),
+  });
+}
+
+function settlementPage() {
+  const settlement = state.settlement;
+  if (!settlement || !state.crisis) return chrome(loadingBlock());
+  return settlementDocumentPage({
+    chrome,
+    crisis: state.crisis,
+    run: settlement.run,
+    outcome: settlement.outcome,
   });
 }
 
@@ -491,6 +509,7 @@ function render() {
     crisis: crisisPage,
     watch: watchPage,
     desk: deskPage,
+    settlement: settlementPage,
     replay: replayPage,
     archive: archivePage,
     history: historyPage,
@@ -547,12 +566,26 @@ async function loadRunView() {
   state.perspective = perspective;
 }
 
+async function loadSettlement(runId = state.settlementRunId) {
+  if (!runId) return null;
+  const settlement = await api(`/api/runs/${encodeURIComponent(runId)}/outcome`);
+  if (settlement.run.crisis_phase !== "SETTLED") {
+    throw new Error("这一局尚未形成可以展示的危局结算。");
+  }
+  await loadCrisis(settlement.run.crisis_id);
+  state.settlement = settlement;
+  state.settlementRunId = settlement.run.id;
+  state.crisisId = settlement.run.crisis_id;
+  return settlement;
+}
+
 async function loadPageData() {
   if (state.page === "crisis") await loadCrisis(state.crisisId);
   if (["watch", "desk"].includes(state.page) && state.active) {
     await loadCrisis(state.active.crisis_id);
   }
   if (state.page === "archive") state.archive = (await api("/api/archive")).runs;
+  if (state.page === "settlement") await loadSettlement();
   if (state.page === "history") {
     const crisisId = selectedCrisisId();
     state.history = crisisId ? await api(`/api/crises/${encodeURIComponent(crisisId)}/history`) : null;
@@ -642,6 +675,8 @@ async function startRun(mode, humanActorId = "") {
     body: JSON.stringify(payload),
   });
   state.active = result.run;
+  state.settlement = null;
+  state.settlementRunId = "";
   state.crisisId = result.run.crisis_id;
   state.config = await api("/api/config");
   state.lens = "world";
@@ -654,6 +689,11 @@ async function startRun(mode, humanActorId = "") {
 async function continueRun(seq = state.activity?.seq, resultNotice = "") {
   const previousTick = Number(state.active.current_tick);
   const result = await api(`/api/runs/${state.active.id}/continue`, { method: "POST", body: "{}" });
+  if (result.run?.status === "SEALED" && result.run?.crisis_phase === "SETTLED") {
+    state.draftDecision = "";
+    await openSettlement(result.run.id);
+    return;
+  }
   state.active = result.run;
   const committed = result.run?.human_decision;
   const currentTick = Number(result.run?.current_tick);
@@ -688,6 +728,8 @@ async function sealRun() {
     ? "卷册已经封存；本地资源仍在收束，可以稍后再次收束。"
     : "这一局已经封存，可以回看。";
   state.active = null;
+  state.settlement = null;
+  state.settlementRunId = "";
   state.replay = await api(`/api/runs/${runId}/replay`);
   state.crisisId = state.replay.run.crisis_id || state.crisisId;
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
@@ -704,6 +746,9 @@ async function retryCleanup(runId = state.replay?.run?.id) {
   });
   if (state.replay?.run?.id === runId) {
     state.replay = await api(`/api/runs/${runId}/replay`);
+  }
+  if (state.settlement?.run?.id === runId) {
+    state.settlement = await api(`/api/runs/${runId}/outcome`);
   }
   if (state.page === "archive") state.archive = (await api("/api/archive")).runs;
   state.notice = result.run.runtime_error_code
@@ -834,8 +879,32 @@ async function openReplay(runId) {
   await loadCrisis(state.crisisId);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || fallbackActorId();
+  state.settlement = null;
+  state.settlementRunId = "";
   state.page = "replay";
   go("replay");
+}
+
+async function openSettlement(runId) {
+  state.active = null;
+  state.perspective = null;
+  state.world = null;
+  state.replay = null;
+  state.settlementRunId = runId;
+  await loadSettlement(runId);
+  state.notice = "危局已经形成局部结果，可以先阅读这一页，再回看整局。";
+  state.page = "settlement";
+  goSettlement(runId);
+}
+
+function currentRouteHash() {
+  if (state.page === "settlement" && state.settlementRunId) {
+    return `#/settlement/${encodeURIComponent(state.settlementRunId)}`;
+  }
+  if (state.page === "crisis" && state.crisisId) {
+    return `#/crisis/${encodeURIComponent(state.crisisId)}`;
+  }
+  return `#/${state.page}`;
 }
 
 root.addEventListener("click", (event) => {
@@ -866,6 +935,8 @@ root.addEventListener("click", (event) => {
   }
   const replayId = event.target.closest("[data-replay-id]")?.dataset.replayId;
   if (replayId) return runAction(() => openReplay(replayId));
+  const settlementReplayId = event.target.closest("[data-settlement-replay-id]")?.dataset.settlementReplayId;
+  if (settlementReplayId) return runAction(() => openReplay(settlementReplayId));
   const cleanupId = event.target.closest("[data-cleanup-id]")?.dataset.cleanupId;
   if (cleanupId) return runAction(() => retryCleanup(cleanupId), { kind: "seal", phase: "reconciling" });
   const humanActorId = event.target.closest("[data-human-actor-id]")?.dataset.humanActorId || "";
@@ -928,7 +999,7 @@ root.addEventListener("input", (event) => {
 
 window.addEventListener("hashchange", () => {
   if (interactionLocked()) {
-    history.replaceState(null, "", `#/${state.page}`);
+    history.replaceState(null, "", currentRouteHash());
     render();
     return;
   }

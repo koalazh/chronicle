@@ -4,10 +4,15 @@ const productPages = new Set(["volume", "watch", "desk", "replay", "archive", "h
 
 export function route() {
   const value = location.hash.replace(/^#\/?/, "");
-  const [page, crisisId = ""] = value.split("/");
-  if (page === "crisis" && crisisId) {
+  const [page, resourceId = ""] = value.split("/");
+  if (page === "crisis" && resourceId) {
     state.page = "crisis";
-    state.crisisId = decodeURIComponent(crisisId);
+    state.crisisId = decodeURIComponent(resourceId);
+    return;
+  }
+  if (page === "settlement" && resourceId) {
+    state.page = "settlement";
+    state.settlementRunId = decodeURIComponent(resourceId);
     return;
   }
   if (page === "home") {
@@ -27,4 +32,8 @@ export function go(page) {
 
 export function goCrisis(crisisId) {
   location.hash = `#/crisis/${encodeURIComponent(crisisId)}`;
+}
+
+export function goSettlement(runId) {
+  location.hash = `#/settlement/${encodeURIComponent(runId)}`;
 }

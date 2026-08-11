@@ -82,6 +82,51 @@ def test_live_driver_stages_explicit_model_intent_without_default_wait(
     assert host.db.crisis_wake(wake["id"])["status"] == "STAGED"
 
 
+def test_live_driver_repairs_one_missing_tool_call_in_same_session(
+    app_config, monkeypatch, tmp_path: Path
+):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    seat = str(wake["actor_id"])
+    profile = f"chronicle-{worldline_id}-{seat}"
+    host.db.update_worldline_lifetime(worldline_id, seat, profile_name=profile)
+    memory = config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("", encoding="utf-8")
+
+    class FakeClient:
+        calls = 0
+
+        def __init__(self, _config):
+            pass
+
+        def create_fresh_session(self, _profile, _key, _wake_id):
+            return "fresh-session"
+
+        def chat(self, _profile, _key, messages, session_id, _memory_key):
+            self.calls += 1
+            if len(messages) == 1 and messages[0]["role"] == "user":
+                return '{"type":"wait"}', session_id
+            return "未提交协议意图。", session_id
+
+    monkeypatch.setattr("chronicle.volume_live.HermesClient", FakeClient)
+    monkeypatch.setattr("chronicle.volume_live.profile_api_key", lambda *_args: "profile-key")
+
+    HermesVolumeActorDriver(config, host.db).run_wake(wake, wake["frozen_perspective"])
+
+    operations = host.db.crisis_wake_operations(wake["id"])
+    assert len(operations) == 1
+    assert operations[0]["idempotency_key"] == f"{wake['id']}:model-response"
+    assert host.db.crisis_wake(wake["id"])["status"] == "STAGED"
+
+
 def test_live_driver_rejects_unstructured_model_output(app_config, monkeypatch, tmp_path: Path):
     config = replace(app_config, hermes_home=tmp_path / "hermes-home")
     host = ChronicleHost(config)

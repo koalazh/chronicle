@@ -88,6 +88,39 @@ class HermesVolumeActorDriver:
 
         operation = self._logical_operation(str(wake["id"]), perspective)
         if operation is None:
+            try:
+                repair_text, repaired_session = client.chat(
+                    profile,
+                    key,
+                    self._repair_messages(),
+                    session_id,
+                    f"{wake['worldline_id']}:{actor_id}",
+                )
+            except Exception as exc:
+                self._fail_wake(
+                    wake, actor_id, profile, before_text, before_hash, before_existed
+                )
+                raise VolumeActorDriverError(f"live V5 Wake repair failed for {actor_id}") from exc
+            response_text = repair_text or response_text
+            returned_session = repaired_session or returned_session
+            repaired_text, repaired_hash = read_profile_memory(self.config, profile)
+            if repaired_hash != before_hash:
+                self._rollback_memory(
+                    wake,
+                    actor_id,
+                    profile,
+                    before_text,
+                    before_hash,
+                    before_existed,
+                    repaired_text,
+                    repaired_hash,
+                )
+                self._fail_wake(wake, actor_id)
+                raise VolumeActorDriverError(
+                    f"repair V5 Wake attempted a durable Memory mutation for {actor_id}"
+                )
+            operation = self._logical_operation(str(wake["id"]), perspective)
+        if operation is None:
             self._stage_fallback(wake, response_text)
             operation = self._logical_operation(str(wake["id"]), perspective)
         if operation is None:
@@ -129,6 +162,7 @@ class HermesVolumeActorDriver:
                     "确有必要让消息进入世界时提交 message。不要调用 communicate、operate、investigate 或旧危局工具。"
                     "update_plan 的 belief_updates 只能引用冻结视角中可见的 evidence event_id；没有证据就留空。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
+                    "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
                 ),
             },
             {
@@ -153,6 +187,19 @@ class HermesVolumeActorDriver:
                     ensure_ascii=False,
                 ),
             },
+        ]
+
+    @staticmethod
+    def _repair_messages() -> list[dict[str, str]]:
+        return [
+            {
+                "role": "user",
+                "content": (
+                    "上一条输出没有提交任何逻辑意图。现在只做协议修复：必须调用一次 logical_intent，"
+                    "提交一个 wait、message 或 update_plan；如果工具确实不可用，只返回一个符合 schema 的 JSON 意图对象。"
+                    "不要解释、不要返回自然语言、不要调用 memory。"
+                ),
+            }
         ]
 
     def _logical_operation(

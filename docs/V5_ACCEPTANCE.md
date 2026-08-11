@@ -141,6 +141,8 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 这证明 Hermes 基础运行资源和一条真实 V5 Agent Wake 在隔离目录可工作，并实际经过 V5 MCP staging 与原子 Logical Moment commit。它仍没有证明 Human↔Hermes continuity、跨 Subject 行为差异、Learning、完整 message/settlement braid 或 Volume Ending。
 
+随后在独立临时 Volume 上尝试 P0 候选链（同一 Wu Sangui Profile 的 `AGENT → HUMAN → AGENT → HUMAN`）。真实模型连续两次没有提交 `logical_intent`；驱动执行一次同一 fresh Session 的协议修复后仍 fail-closed，未生成隐式 `wait`，随后精确 Gateway stop 通过。该次是负向运行证据：说明协议边界有效，但不构成 P0 通过。
+
 ### 隔离边界
 
 以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（真实 Wake 使用 `18647`，product API 使用 `18648`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
@@ -149,7 +151,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
-| P0 Subject Proof | **NOT PROVEN** | 尚无同一 Lifetime 的完整真实 `Hermes → Human → Hermes → Human`；单 Wake 已证明 same Profile 可创建 fresh Session 并提交意图，但尚未证明 handoff 后 obligations/plans/revisits 与新 evidence 的连续行为。 |
+| P0 Subject Proof | **NOT PROVEN** | 同一 Lifetime 的 P0 候选运行因真实模型未提交 `logical_intent` 而 fail-closed；单 Wake 已证明 same Profile 可创建 fresh Session 并提交意图，但尚未证明完整 `Hermes → Human → Hermes → Human`、handoff 后 obligations/plans/revisits 与新 evidence 的连续行为。 |
 | P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
 | P2 Temporal Proof | **PARTIAL / NOT COMPLETE** | 单 Wake live 与 deterministic message transit/delivery 已有证据；尚无真实 `A sends → B decides before arrival → arrival → B reconsiders`，也尚无 Human/Agent 同 slice 的 live order-independence proof。 |
 | P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |

@@ -1923,6 +1923,7 @@ class ChronicleDB:
         outcome_json: str | None = None,
         settlement_reason: str | None = None,
         current_tick: int | None = None,
+        worldline_phase: str | None = None,
     ) -> dict[str, Any]:
         """Seal a Worldline, its event ledger, and all branch lifetimes atomically."""
 
@@ -1967,13 +1968,26 @@ class ChronicleDB:
             if current_tick is not None:
                 crisis_sql += ", current_tick = ?"
                 crisis_args += (current_tick,)
+            worldline_phase_sql = ", worldline_phase = ?" if worldline_phase is not None else ""
+            worldline_phase_args: tuple[Any, ...] = (
+                (worldline_phase,) if worldline_phase is not None else ()
+            )
             updated = connection.execute(
                 "UPDATE worldlines SET status = 'SEALED', seal_reason = ?, outcome = ?, "
                 "pending_confirmation_json = ''"
+                + worldline_phase_sql
                 + runtime_sql
                 + crisis_sql
                 + ", updated_at = ? WHERE id = ? AND status = 'ACTIVE'",
-                (reason, outcome, *runtime_args, *crisis_args, now_iso(), worldline_id),
+                (
+                    reason,
+                    outcome,
+                    *worldline_phase_args,
+                    *runtime_args,
+                    *crisis_args,
+                    now_iso(),
+                    worldline_id,
+                ),
             )
             if updated.rowcount != 1:
                 raise sqlite3.IntegrityError("worldline is no longer active")

@@ -10,6 +10,11 @@ export function route() {
     state.selectedLifetime = decodeURIComponent(resourceId);
     return;
   }
+  if (page === "archive" && resourceId) {
+    state.page = "archive";
+    state.selectedArchive = decodeURIComponent(resourceId);
+    return;
+  }
   if (page === "home") {
     state.page = "volume";
     return;

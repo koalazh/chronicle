@@ -11,6 +11,7 @@ from .crisis import CrisisPack, VolumePack
 from .db import content_hash, stable_hash
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_continuity import LifetimeContextBuilder
+from .volume_boundary import VolumeBoundaryPolicy
 
 if TYPE_CHECKING:
     from .host import ChronicleHost
@@ -264,6 +265,122 @@ class VolumeRuntime:
             "crisis_instances": self.db.crisis_instances(worldline_id),
             "projection": snapshot["projection"],
         }
+
+    def boundary(self, worldline_id: str) -> dict[str, Any]:
+        """Evaluate the Volume boundary without turning it into an auto-ending tick."""
+
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        snapshot = self.db.worldline_snapshot(worldline_id, int(row["current_tick"]))
+        if snapshot is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        next_tick = self.next_tick(worldline_id) if row["status"] == WorldlineStatus.ACTIVE.value else None
+        due_wakes = [
+            wake
+            for wake in self.db.subject_wakes(worldline_id, tick=int(row["current_tick"]))
+            if wake["status"] in {"QUEUED", "WAITING_HUMAN", "STAGED"}
+        ]
+        required_field_event_ids = tuple(
+            str(item.get("id"))
+            for item in self.pack.world.historical_field
+            if str(item.get("id", "")) == "north-south-recognition-bridge"
+        )
+        decision = VolumeBoundaryPolicy().evaluate(
+            current_tick=int(row["current_tick"]),
+            projection=snapshot["projection"],
+            events=self.db.worldline_events(worldline_id),
+            instances=self.db.crisis_instances(worldline_id),
+            due_wakes=due_wakes,
+            next_tick=next_tick,
+            safety_horizon_tick=row.get("safety_horizon_tick"),
+            required_field_event_ids=required_field_event_ids,
+        )
+        return {"worldline": row, "boundary": decision.as_dict()}
+
+    def seal(self, worldline_id: str, reason: str = "volume_boundary") -> dict[str, Any]:
+        """Seal a Volume only after its structural boundary has been reached."""
+
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        if row["status"] == WorldlineStatus.SEALED.value:
+            self._cleanup_profiles_after_seal(row)
+            event = next(
+                (
+                    item
+                    for item in reversed(self.db.worldline_events(worldline_id))
+                    if item["event_type"] == "VOLUME_SEALED"
+                ),
+                None,
+            )
+            return {"worldline": self.db.worldline(worldline_id), "event": event, "idempotent": True}
+        if row["status"] != WorldlineStatus.ACTIVE.value:
+            raise VolumeRuntimeConflict("Volume Worldline cannot be sealed from its current state")
+
+        boundary = self.boundary(worldline_id)["boundary"]
+        if not boundary["ready"]:
+            raise VolumeRuntimeConflict(boundary["message"])
+        tick = int(row["current_tick"])
+        snapshot = self.db.worldline_snapshot(worldline_id, tick)
+        if snapshot is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        projection = snapshot["projection"]
+        projection["volume_state"] = {
+            "status": "SEALED",
+            "boundary_policy_id": VolumeBoundaryPolicy.id,
+            "boundary": boundary,
+        }
+        events = self.db.worldline_events(worldline_id)
+        parent_ids = [str(events[-1]["id"])] if events else []
+        event = self._event(
+            worldline_id,
+            tick,
+            "VOLUME_SEALED",
+            {
+                "volume_id": self.volume_id,
+                "boundary_policy_id": VolumeBoundaryPolicy.id,
+                "boundary": boundary,
+                "reason": reason,
+            },
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=parent_ids,
+            event_id=f"{worldline_id}:sealed",
+            runtime_epoch=row["runtime_epoch"],
+        )
+        committed = self.db.commit_worldline_seal(
+            worldline_id,
+            event,
+            reason=reason,
+            outcome="VOLUME_ARCHIVED",
+            snapshot=projection,
+            revoke_agent_bindings=True,
+            cancel_queued_wakes=True,
+            current_tick=tick,
+            worldline_phase="ARCHIVED",
+        )
+        sealed = self.db.worldline(worldline_id) or {}
+        self._cleanup_profiles_after_seal(sealed)
+        return {"worldline": sealed, "event": committed, "boundary": boundary, "idempotent": False}
+
+    def _cleanup_profiles_after_seal(self, row: dict[str, Any]) -> None:
+        if row.get("runtime_mode") != "live":
+            return
+        lifetimes = self.db.worldline_lifetimes(str(row["id"]))
+        profiles = [
+            str(lifetime.get("profile_name") or hermes.lifetime_profile_name(row["id"], lifetime["seat"]))
+            for lifetime in lifetimes
+        ]
+        server_names = [
+            hermes.lifetime_world_server_name(row["id"], str(lifetime["seat"]))
+            for lifetime in lifetimes
+        ]
+        hermes.cleanup_volume_runtime(
+            self.host.config,
+            str(row["id"]),
+            profiles,
+            server_names=server_names,
+        )
 
     def lifetime_context(
         self, worldline_id: str, lifetime_id: str, *, wake_id: str | None = None

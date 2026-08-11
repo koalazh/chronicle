@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .editorial import volume_attention
@@ -71,6 +71,18 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             if lifetime["id"] == lifetime_id or lifetime["seat"] == lifetime_id:
                 return str(lifetime["seat"])
         return lifetime_id
+
+    def volume_state(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
+        row = volume_row(active, worldline_id)
+        snapshot = active.db.worldline_snapshot(worldline_id, int(row["current_tick"]))
+        if snapshot is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        return {
+            "worldline": row,
+            "lifetimes": active.db.worldline_lifetimes(worldline_id),
+            "crisis_instances": active.db.crisis_instances(worldline_id),
+            "projection": snapshot["projection"],
+        }
 
     def location_name(active: ChronicleHost, location_id: str) -> str:
         for location in active.volume_runtime.pack.world.locations:
@@ -148,7 +160,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         return surface
 
     def public_world(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
-        state = active.volume_runtime.worldline(worldline_id)
+        state = volume_state(active, worldline_id)
         row = state["worldline"]
         projection = state["projection"]
         pack = active.volume_runtime.pack
@@ -226,7 +238,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         }
 
     def public_lifetimes(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
-        state = active.volume_runtime.worldline(worldline_id)
+        state = volume_state(active, worldline_id)
         return {
             "worldline": public_worldline(state["worldline"]),
             "lifetimes": [
@@ -236,7 +248,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         }
 
     def public_follow(active: ChronicleHost, worldline_id: str, lifetime_id: str) -> dict[str, Any]:
-        state = active.volume_runtime.worldline(worldline_id)
+        state = volume_state(active, worldline_id)
         lifetime = next(
             (item for item in state["lifetimes"] if item["seat"] == lifetime_id), None
         )
@@ -276,6 +288,238 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 item["declaration"] = str(payload.get("content", ""))
             trace.append(item)
         return {"worldline": public_worldline(state["worldline"]), "lifetime": public, "trace": trace}
+
+    replay_labels = {
+        "WORLDLINE_CREATED": "卷册展开",
+        "WORLD_INITIALIZED": "共同世界成形",
+        "LIFETIME_GENESIS_ESTABLISHED": "一段人生进入卷册",
+        "CRISIS_ACTIVATED": "一处局势开始收紧",
+        "CRISIS_CHECKPOINT_ENTERED": "一个未决节点进入视野",
+        "CRISIS_PRESSURE_APPLIED": "外部压力改变了局面",
+        "FIELD_EVENT_APPLIED": "公共历史向前推进",
+        "MESSAGE_DISPATCHED": "一项声明发出",
+        "MESSAGE_DELIVERED": "一项消息抵达",
+        "LIFETIME_INHABITED": "有人接过这段人生",
+        "LIFETIME_LEFT": "这段人生暂时交还世界",
+        "PLAN_UPDATED": "计划发生变化",
+        "BELIEF_UPDATED": "一个判断留下证据",
+        "HUMAN_INTENT_STAGED": "一个决定被提出",
+        "AGENT_INTENT_STAGED": "一个决定被提出",
+        "CRISIS_SETTLED": "一处局势留下结果",
+        "MOMENT_COMMITTED": "一个时刻完成落笔",
+        "VOLUME_SEALED": "卷册到达结构边界",
+    }
+
+    def replay_event_text(active: ChronicleHost, event: dict[str, Any]) -> str:
+        event_type = str(event["event_type"])
+        payload = event.get("payload", {})
+        if event_type == "CRISIS_ACTIVATED":
+            crisis = active.volume_runtime.pack.packs.get(str(payload.get("crisis_id", "")))
+            return crisis.crisis.title if crisis else "一处局势开始收紧"
+        if event_type == "CRISIS_CHECKPOINT_ENTERED":
+            crisis = active.volume_runtime.pack.packs.get(str(payload.get("crisis_id", "")))
+            return crisis.crisis.subtitle if crisis else "一个未决节点进入视野"
+        if event_type == "FIELD_EVENT_APPLIED":
+            field = payload.get("field_event", {})
+            if field.get("id") == "north-south-recognition-bridge":
+                return "北方军情公开记录进入南京可接触的公开范围"
+            return str(field.get("title") or field.get("id") or "公共历史向前推进")
+        if event_type == "CRISIS_PRESSURE_APPLIED":
+            pressure = payload.get("pressure", {})
+            return str(pressure.get("title") or "外部压力改变了局面")
+        if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
+            source = str(payload.get("source", ""))
+            if source == "historical_field":
+                return str(payload.get("content", "一项公开军情抵达"))
+            return "一项消息抵达" if event_type == "MESSAGE_DELIVERED" else "一项声明发出"
+        if event_type == "CRISIS_SETTLED":
+            outcome = payload.get("outcome", {})
+            return str(outcome.get("summary") or "事情已经成为这样。")
+        if event_type in {"PLAN_UPDATED", "HUMAN_INTENT_STAGED", "AGENT_INTENT_STAGED"}:
+            plan = payload.get("plan") or payload.get("intent") or {}
+            return str(plan.get("objective") or replay_labels[event_type])
+        if event_type == "BELIEF_UPDATED":
+            return str(payload.get("assessment") or replay_labels[event_type])
+        return replay_labels.get(event_type, "一项世界事实发生了变化")
+
+    def public_replay_event(active: ChronicleHost, event: dict[str, Any]) -> dict[str, Any] | None:
+        event_type = str(event["event_type"])
+        payload = event.get("payload", {})
+        if event_type == "CRISIS_PRESSURE_APPLIED":
+            visibility = str(payload.get("pressure", {}).get("visibility", ""))
+            if visibility not in {"PUBLIC", "SHARED"}:
+                return None
+        if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
+            if str(payload.get("source", "")) != "historical_field":
+                return None
+        if event_type not in {
+            "WORLDLINE_CREATED",
+            "WORLD_INITIALIZED",
+            "LIFETIME_GENESIS_ESTABLISHED",
+            "CRISIS_ACTIVATED",
+            "CRISIS_CHECKPOINT_ENTERED",
+            "CRISIS_PRESSURE_APPLIED",
+            "FIELD_EVENT_APPLIED",
+            "MESSAGE_DISPATCHED",
+            "MESSAGE_DELIVERED",
+            "LIFETIME_INHABITED",
+            "LIFETIME_LEFT",
+            "CRISIS_SETTLED",
+            "MOMENT_COMMITTED",
+            "VOLUME_SEALED",
+        }:
+            return None
+        item = {
+            "id": str(event["id"]),
+            "tick": int(event["tick"]),
+            "kind": replay_labels.get(event_type, "世界事实"),
+            "text": replay_event_text(active, event),
+        }
+        if event_type == "CRISIS_SETTLED":
+            item["meaning"] = True
+        return item
+
+    def lifetime_replay_event(
+        active: ChronicleHost, event: dict[str, Any], lifetime_id: str
+    ) -> dict[str, Any] | None:
+        public = public_replay_event(active, event)
+        if public is not None:
+            return public
+        payload = event.get("payload", {})
+        event_type = str(event["event_type"])
+        visible = event.get("seat_id") == lifetime_id
+        visible = visible or payload.get("sender") == lifetime_id
+        visible = visible or payload.get("recipient") == lifetime_id
+        explicit_visibility = payload.get("visibility")
+        visible = visible or isinstance(explicit_visibility, list) and lifetime_id in explicit_visibility
+        if not visible or event_type not in replay_labels:
+            return None
+        return {
+            "id": str(event["id"]),
+            "tick": int(event["tick"]),
+            "kind": replay_labels[event_type],
+            "text": replay_event_text(active, event),
+            "private_to_lifetime": True,
+        }
+
+    def lifetime_replay(
+        active: ChronicleHost,
+        state: dict[str, Any],
+        lifetime: dict[str, Any],
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        lifetime_id = str(lifetime["seat"])
+        items = [
+            item
+            for event in events
+            if (item := lifetime_replay_event(active, event, lifetime_id)) is not None
+        ]
+        dispatches = {
+            str(event.get("payload", {}).get("id", "")): event
+            for event in events
+            if event.get("event_type") == "MESSAGE_DISPATCHED"
+            and event.get("payload", {}).get("recipient") == lifetime_id
+        }
+        deliveries = {
+            str(event.get("payload", {}).get("message_id", "")): event
+            for event in events
+            if event.get("event_type") == "MESSAGE_DELIVERED"
+            and event.get("payload", {}).get("recipient") == lifetime_id
+        }
+        later_known = []
+        unknown_at_time = []
+        known_at_time = []
+        for message_id, dispatch in dispatches.items():
+            delivery = deliveries.get(message_id)
+            if delivery is None:
+                unknown_at_time.append(
+                    {
+                        "event_id": str(dispatch["id"]),
+                        "happened_tick": int(dispatch["tick"]),
+                        "known_tick": None,
+                        "text": "一封消息在卷册结束时仍未抵达。",
+                    }
+                )
+                continue
+            delivery_item = lifetime_replay_event(active, delivery, lifetime_id)
+            if delivery_item is None:
+                continue
+            delivery_item = {**delivery_item, "known_at_tick": int(delivery["tick"])}
+            known_at_time.append(delivery_item)
+            if int(dispatch["tick"]) < int(delivery["tick"]):
+                later_known.append(
+                    {
+                        "event_id": str(dispatch["id"]),
+                        "known_event_id": str(delivery["id"]),
+                        "happened_tick": int(dispatch["tick"]),
+                        "known_tick": int(delivery["tick"]),
+                        "text": delivery_item["text"],
+                    }
+                )
+                unknown_at_time.append(
+                    {
+                        "event_id": str(dispatch["id"]),
+                        "happened_tick": int(dispatch["tick"]),
+                        "known_tick": int(delivery["tick"]),
+                        "text": "一封消息在抵达之前仍处于在途状态。",
+                    }
+                )
+        return {
+            "id": lifetime_id,
+            "display_name": public_lifetime(
+                active, state["worldline"], state["projection"], lifetime
+            )["display_name"],
+            "items": items,
+            "known_at_time": known_at_time,
+            "later_known": later_known,
+            "unknown_at_time": unknown_at_time,
+        }
+
+    def volume_archive(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
+        state = volume_state(active, worldline_id)
+        events = active.db.worldline_events(worldline_id)
+        public_items = [
+            item
+            for event in events
+            if (item := public_replay_event(active, event)) is not None
+        ]
+        ledger = []
+        for event in events:
+            public_item = public_replay_event(active, event)
+            ledger.append(
+                {
+                    **(
+                        public_item
+                        or {
+                            "id": str(event["id"]),
+                            "tick": int(event["tick"]),
+                            "kind": "主体内部记录",
+                            "text": "一项未向公共世界公开的主体记录。",
+                        }
+                    ),
+                    "public": public_item is not None,
+                }
+            )
+        sealed_event = next(
+            (event for event in reversed(events) if event["event_type"] == "VOLUME_SEALED"),
+            None,
+        )
+        boundary = (sealed_event or {}).get("payload", {}).get("boundary") or {}
+        return {
+            "available": True,
+            "worldline": public_worldline(state["worldline"]),
+            "volume": {
+                "id": active.volume_runtime.pack.volume.id,
+                "title": active.volume_runtime.pack.volume.title,
+                "subtitle": active.volume_runtime.pack.volume.subtitle,
+            },
+            "world": public_world(active, worldline_id),
+            "boundary": boundary,
+            "events": ledger,
+            "replay": {
+                "public": {"items": public_items},
+            },
+        }
 
     def public_desk(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
         row = volume_row(active, worldline_id)
@@ -594,24 +838,43 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             raise classify_error(exc) from exc
 
     @router.get("/worldlines/{worldline_id}/archive")
-    async def archive(worldline_id: str) -> dict[str, Any]:
+    async def archive(
+        worldline_id: str,
+        lifetime_id: str | None = Query(default=None, max_length=128),
+    ) -> dict[str, Any]:
         active = active_host()
         row = active.db.worldline(worldline_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Worldline not found")
         if row["kind"] != WorldlineKind.VOLUME.value:
             return await asyncio.to_thread(active.worldline_runtime.debrief, worldline_id)
-        return {
-            "worldline": public_worldline(row),
-            "events": [
-                {
-                    "id": event["id"],
-                    "tick": int(event["tick"]),
-                    "kind": str(event["event_type"]),
-                }
-                for event in active.db.worldline_events(worldline_id)
-            ],
-        }
+        if row["status"] != "SEALED":
+            raise HTTPException(status_code=409, detail="卷册尚未到达封存边界")
+        try:
+            result = volume_archive(active, worldline_id)
+            if lifetime_id is not None:
+                state = volume_state(active, worldline_id)
+                lifetime = next(
+                    (
+                        item
+                        for item in state["lifetimes"]
+                        if item["seat"] == lifetime_id or item["id"] == lifetime_id
+                    ),
+                    None,
+                )
+                if lifetime is None:
+                    raise HTTPException(status_code=404, detail="Lifetime not found")
+                result["replay"]["lifetime"] = lifetime_replay(
+                    active,
+                    state,
+                    lifetime,
+                    active.db.worldline_events(worldline_id),
+                )
+            return result
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise classify_error(exc) from exc
 
     @router.post("/worldlines/{worldline_id}/seal")
     async def seal(worldline_id: str, request: ProductSealRequest) -> dict[str, Any]:
@@ -620,7 +883,12 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         if row is None:
             raise HTTPException(status_code=404, detail="Worldline not found")
         if row["kind"] == WorldlineKind.VOLUME.value:
-            raise HTTPException(status_code=409, detail="卷册尚未到达封存边界")
+            try:
+                return await asyncio.to_thread(
+                    active.volume_runtime.seal, worldline_id, request.reason
+                )
+            except Exception as exc:
+                raise classify_error(exc) from exc
         try:
             return await asyncio.to_thread(
                 active.worldline_runtime.seal, worldline_id, request.reason

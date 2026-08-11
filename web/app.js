@@ -16,6 +16,7 @@ function itemText(item) {
     item.content
     || item.description
     || item.title
+    || item.text
     || item.value?.objective
     || item.value?.content
     || item.message_id
@@ -205,18 +206,43 @@ function deskPage() {
 
 function archivePage() {
   const rows = state.archive || [];
+  const detail = state.archiveDetail;
+  if (detail) {
+    const replay = detail.replay?.public?.items || [];
+    const boundary = detail.boundary || {};
+    return chrome(`
+      <section class="actor-title">
+        <p class="kicker">Volume Ending · ${text(detail.volume?.native_period || "甲申")}</p>
+        <h1>这一卷已经成为过去。</h1>
+        <p>${text(boundary.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
+        <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回封存卷册</button></div>
+      </section>
+      <section class="world-section archive-replay">
+        <div class="section-heading"><span>Public Replay</span><h2>世界留下的轨迹</h2></div>
+        <ol class="trace-list">${replay.map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind)}</strong><p>${text(event.text)}</p></div></li>`).join("") || `<li class="empty-copy">没有可公开回看的事件。</li>`}</ol>
+      </section>
+      <section class="world-section">
+        <div class="section-heading"><span>Lifetime Replay</span><h2>从一段人生回看</h2></div>
+        <div class="people-grid">${(detail.world?.people || []).map((person) => `<article class="person-card"><div><span class="column-label">${text(person.display_name)}</span><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
+        ${state.selectedReplayLifetime && detail.replay?.lifetime ? `<div class="known-strip"><span>${text(detail.replay.lifetime.display_name)} · 后知事实</span>${listMarkup(detail.replay.lifetime.later_known, "desk-list")}</div>` : ""}
+      </section>
+    `, { compact: true });
+  }
   return chrome(`
     <section class="actor-title">
       <p class="kicker">Archive</p><h1>封存卷册</h1>
       <p>封存只发生在整卷历史到达边界之后。当前卷册仍在展开时，世界与人生都保持可回到的状态。</p>
     </section>
     <section class="archive-list">
-      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(row.kind || "WORLDLINE")}</span><h2>${text(row.id)}</h2><p>${text(row.status || "已封存")}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经封存的卷册。</p>${state.active ? `<button class="secondary" data-page="world">返回世界</button>` : ""}</div>`}
+      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(row.kind || "WORLDLINE")}</span><h2>${text(row.volume_id || row.id)}</h2><p>${text(row.status || "已封存")}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p><button class="secondary" data-action="open-archive" data-worldline-id="${text(row.id)}">打开回看</button></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经封存的卷册。</p>${state.active ? `<button class="secondary" data-page="world">返回世界</button>` : ""}</div>`}
     </section>
   `, { compact: true });
 }
 
 function endingPage() {
+  if (state.archiveDetail) {
+    return chrome(`<section class="empty-page inline"><p class="kicker">Volume Ending</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.boundary?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
+  }
   return chrome(`
     <section class="empty-page inline"><p class="kicker">Volume Ending</p><h1>这一卷仍未走到边界。</h1><p class="empty-copy">局部结果会先留在世界中；整卷封存与后知事实将在卷册真正结束时出现。</p><button class="secondary" data-page="world">返回世界</button></section>
   `, { compact: true });
@@ -253,6 +279,9 @@ async function loadDesk() {
 
 async function loadArchive() {
   state.archive = (await api("/api/worldlines")).worldlines || [];
+  if (state.selectedArchive) {
+    state.archiveDetail = await api(`/api/worldlines/${encodeURIComponent(state.selectedArchive)}/archive`);
+  }
 }
 
 async function loadPageData() {
@@ -260,6 +289,7 @@ async function loadPageData() {
   if (state.page === "follow") await loadFollow();
   if (state.page === "desk") await loadDesk();
   if (state.page === "archive") await loadArchive();
+  if (state.page === "ending" && state.selectedArchive) await loadArchive();
 }
 
 async function refreshActive() {
@@ -336,6 +366,27 @@ async function submitDecision() {
   await loadDesk();
 }
 
+async function openArchive(worldlineId) {
+  state.selectedArchive = worldlineId;
+  state.selectedReplayLifetime = "";
+  state.archiveDetail = await api(`/api/worldlines/${encodeURIComponent(worldlineId)}/archive`);
+  render();
+}
+
+async function openLifetimeReplay(lifetimeId) {
+  if (!state.selectedArchive) return;
+  state.selectedReplayLifetime = lifetimeId;
+  state.archiveDetail = await api(`/api/worldlines/${encodeURIComponent(state.selectedArchive)}/archive?lifetime_id=${encodeURIComponent(lifetimeId)}`);
+  render();
+}
+
+function clearArchive() {
+  state.selectedArchive = "";
+  state.selectedReplayLifetime = "";
+  state.archiveDetail = null;
+  render();
+}
+
 async function run(action) {
   if (state.busy) return;
   state.busy = true;
@@ -361,6 +412,9 @@ root.addEventListener("click", (event) => {
   if (action === "continue-volume") return run(() => { go("world"); return loadPageData(); });
   if (action === "continue-world") return run(continueWorld);
   if (action === "leave-life") return run(leaveLife);
+  if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId));
+  if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId));
+  if (action === "clear-archive") return clearArchive();
   if (action === "follow") {
     state.selectedLifetime = event.target.closest("[data-lifetime-id]").dataset.lifetimeId;
     return run(() => { goFollow(state.selectedLifetime); return loadFollow(); });

@@ -1,156 +1,159 @@
-# Chronicle V4 架构（实施中）
+# Chronicle V5 架构
 
-本文是唯一的系统架构入口。它把 Run、主体状态、Hermes 和迁移放在同一条因果链里；产品旅程见 [产品说明](../PRODUCT.md)，页面约定见 [前端合同](FRONTEND.md)，历史边界见 [历史与视野](HISTORY.md)，现场操作见 [运维与验收](OPERATIONS.md)。
+本文是当前 V5 的架构入口。产品旅程见 [PRODUCT.md](../PRODUCT.md)，页面合同见 [FRONTEND.md](FRONTEND.md)，运行与验收见 [OPERATIONS.md](OPERATIONS.md) 和 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。旧 V3/V4 文档、旧 `/api/runs` 和 legacy router 只描述兼容边界，不再作为新 V5 的设计来源。
 
-## 先看一条链
+## 一条因果链
 
 ```text
-Crisis Pack
-    ↓ 创建
-Run + Life State
-    ↓ 找到下一个 trigger
-Scheduler
-    ↓ 冻结每个主体自己的 Perspective
-Hermes Actor / Human Decision
-    ↓ 通过同一组 World tools 提出请求
-WorldService
-    ↓ 校验并原子提交
-Ledger + Snapshot + 下一时刻
+VolumePack
+  ├─ shared World / Global World Tick
+  ├─ persistent Lifetimes
+  └─ Crisis envelopes
+          ↓
+Volume Worldline
+          ↓
+deterministic Host / VolumeRuntime
+          ↓
+frozen Perspective + Pending Logical Moment
+          ↓
+Human or Hermes intent staging
+          ↓
+Host validation + atomic commit
+          ↓
+append-only Ledger + Snapshot/Projection
+          ↓
+public World / private Life Desk / Archive
 ```
 
-Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有一个中央模型替 Decision Actor 决定；Hermes 负责长期主体和 Agent loop，Chronicle 负责模拟世界和所有可验证效果。
+Host 拥有现实：时间、来源、位置、路线、消息抵达、权限、资源、状态效果、幂等和最终提交。Lifetime 拥有主体性：解释可见上下文、等待、通信、更新计划、安排有限的下一步和选择长期经验。没有一个中央模型替所有 Lifetime 决定世界结局。
 
-## 四个词足够理解产品
+## V5 核心对象
 
-| 词 | 含义 | 用户看到的说法 |
+| 对象 | 唯一职责 | 持久边界 |
 | --- | --- | --- |
-| Crisis | 一段有来源、有地点、有停止边界的历史切片 | 这场危局 |
-| Run | 从 checkpoint 开始的一次可推进经历 | 这一局 |
-| Actor | 在 Run 中拥有私有状态并自己做选择的主体 | 这一危局中的关键主体 |
-| Perspective | 某个主体在某一刻合法能使用的信息 | 这个人的视野 |
+| `VolumePack` | Volume 的来源、Lifetime、共享 World、Field Event、Crisis 引用和 boundary 条件 | `scenarios/jiashen` |
+| `Volume Worldline` | 一次完整卷册经历的生命周期根 | `worldlines.kind = VOLUME` |
+| `Lifetime` | 跨 Crisis、Session、controller 和离席持续的主体身份与 Life State | `worldline_id + lifetime_id` |
+| `Crisis Instance` | 一个局部 causal knot 的 activation、phase、参与者和 settlement | 属于 Volume Worldline |
+| `Profile` | Lifetime 的执行资源和认知 home | 同一 Volume 内复用；不同 Worldline 永不共享 |
+| `Global World Tick` | 所有 Crisis、消息、Operation、Field Event 和 Ledger 的唯一时间排序 | Volume Worldline |
+| `Logical Moment` | 同一 tick 的冻结上下文、主体 intents 和原子 commit 单元 | Pending projection + Ledger |
+| `Archive` | 封存后的公共 replay 和选定 Lifetime replay | 只读；不重跑过去 |
 
-`Run`、`Actor` 和 `Perspective` 是实现名；主产品只需要让用户理解“一场危局、一局经历、一个人的视野”。
+V5 当前数据库保留迁移后的旧物理表和兼容字段，当前 schema version 是 `10`；物理表名不等于产品概念。增量迁移、未知表保留和旧数据安全边界见 [V5_MIGRATION.md](V5_MIGRATION.md)。
 
 ## 状态分层
 
-一个主体的状态不能和世界事实混在一起：
+```text
+Truth / Projection
+        ↓ visibility rules
+Knowledge of one Lifetime
+        ↓ interpretation
+Belief / expectation
+        ↓ deliberate planning
+Plan / obligation / revisit
+        ↓ optional long-term reflection
+Memory
+```
 
-| 层 | 保存什么 | 谁能更新 |
-| --- | --- | --- |
-| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Investigation/Observation、Offer/Agreement、Operation、Pressure、移动和世界效果 | Host 的确定性提交路径 |
-| Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
-| Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
-| Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
+- Truth 是 Host 已提交的世界事实；Projection 是当前 tick 的可读派生状态。
+- Visibility 决定某事实是否进入某个主体的合法上下文。
+- Knowledge 只包含已经抵达或被合法观察到的事实；发出消息不等于收件人知道。
+- Belief 和 Plan 是主体状态，不能被公共 World 当成事实。
+- Memory 不是全量人生 dump；它只保存明确值得长期保留的主体经验。
 
-Knowledge 不是 Truth 的副本，Belief 不是史实定论，Plan/Revisit 也不是聊天记录。事件发生、消息发出、消息抵达分别记录；只有抵达后，消息才进入收件人的 Knowledge。
+产品读取时遵守三条边界：公共 `/world` 只读 public projection；`/follow` 只读选定 Lifetime 的可见入口；`/desk` 只读当前 Human Lifetime 的 private context。Host 不依赖前端隐藏来做权限控制。
 
-## Run 生命周期
+## Volume 生命周期
 
 ### 创建
 
-同一时间最多一局可玩的 ACTIVE Run。Host 从 Crisis Pack 读取 checkpoint、主体、实体、走廊、路线、初始信息和在途消息，建立 Projection 与每个主体的 Life State，并原子写入创建/checkpoint/entity 初始化事件。fixture Run 随后直接授权 Agent binding 和 `ORIENT` Wake。
+`VolumeRuntime.create()` 在一个新 `VOLUME` Worldline 中建立：
 
-Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将该 Crisis 指定的一个 playable Actor 设为 Human，其余 Actor 均为 Agent。live Run 先以 `BOOTSTRAPPING` 持久化同一局的主体 identity，再按 identity 幂等建立所需 Profile、当前局唯一的 root MCP allowlist 和私有 Gateway child，最后才在一个事务里授权 binding 和排入 `ORIENT` Wake。初始 `ORIENT` 必须通过 World MCP 留下 committed `update_plan`；否则 Run 保持同一 identity 并进入 `FAILED`，不会伪装成 memory-only 的合法 no-op。
+1. Volume genesis、所有 Lifetime genesis 和初始 Projection；
+2. shared World、historical Field Event 和 Crisis Instance 的来源引用；
+3. Profile binding 的持久 metadata；
+4. 世界 tick 从 `0` 开始的 append-only Ledger/Snapshot。
 
-### 推进
+正式产品路由随后激活 VolumePack 中的 Crisis references。Crisis 激活只建立局部实例和触发条件，不创建新的 World、Profile 或时钟。
 
-Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、Offer 到期、Pressure trigger、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+### Crisis settlement
 
-`advance_one()` 保留给 `/api/dev/*` 与确定性测试。产品的 `/continue` 则使用 `advance_to_attention()`：Takeover 会先保留初始 Human 决断，并在收信、调查结果、行动结果、条件/约定变化、可见 Pressure 或 Revisit 真正进入该主体视野时才停下；Watch 会跨过 Plan、Wake 重试和 checkpoint 投递等内部噪音，只在可见的信件、条件、行动、调查结果、移动或 Pressure 改变世界时停下。两种模式之间被跳过的 moment 仍完整写入 Ledger 和各自的私有 Perspective，不会为了产品节奏被丢弃。
+Crisis 的 `SETTLED` 或 `SUPPRESSED` 只写入 Instance outcome、world effects 和 `CRISIS_SETTLED` Meaning。它不会写 `VOLUME_SEALED`，不会撤销 Lifetime binding，也不会清理 Profile。其他 Crisis 或 shared Field Event 仍可让同一卷册继续向前。
 
-`ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
+### Volume boundary
 
-一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（依次包括 Operation completion、Investigation result、Offer expiry 与 Pressure）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Offer/Agreement、Operation、Investigation、移动和观察排入未来时刻。
+`VolumeBoundaryPolicy` 只在结构性条件满足时返回 ready。当前规则同时要求：
 
-因此模型返回顺序不能改变世界语义；拒绝、等待、沉默和 no-op 都是合法结果；消息不能在同 tick 递归唤醒收件人。
+- 没有 Pending Logical Moment、queued/staged wake 或到期 wake；
+- 没有在途消息和待应用 historical field；
+- 没有后续 `next_tick`；
+- 每个 Crisis Instance 都是 `SETTLED` 或 `SUPPRESSED`；
+- required historical field 已实际应用。
 
-### 封存
+安全 horizon 可以说明“尚未收束”的 fallback，却不能把未满足条件的卷册伪装成产品 Ending。Seal event 会记录 boundary policy、evidence event/assertion IDs 和 reason，之后才允许 Archive。
 
-用户主动封存，或危局达到最大模拟日/需要进入大规模交战裁定时，Run 不再允许继续推进并应被封存。一次 seal 事务同时写入 `RUN_SEALED`、封存 Life State、撤销所有 Agent binding，并取消尚未开始的 Wake；之后只能读 Replay、Archive 和 History。
+### Seal 与清理
 
-Profile、root MCP 条目和 Gateway child 是执行资源，不是历史的一部分。seal 之后的物理清理可重试：先停止可证明归属的 child，再移除本局 MCP/env 条目，最后删除带 marker 的 Profile。`CLEANUP_PENDING` 与空失败码表示已收束；有失败码时，下一次 `chronicle start` 或新开局前只重试这次清理。旧资源永远不会加入新局 allowlist，sealed Run 也不能被重入。
+Volume seal 的原子边界是：
 
-### 运行资源与重启
+```text
+VOLUME_SEALED
+→ worldline status = SEALED / phase = ARCHIVED
+→ Lifetime/Profile bindings revoked
+→ queued wakes cancelled
+→ live-owned Profiles and World MCP entries cleaned
+```
 
-`runtime_phase` 不是新的产品概念，而是 ACTIVE Run 恢复资源时的最小持久化线索。它只使用 `BOOTSTRAPPING`、`READY`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP_PENDING` 六个值；历史 status 仍是 `ACTIVE`/`SEALED`。
+物理清理是 seal 之后的可重试动作，不是历史的一部分。清理只能删除 marker 明确属于该 Worldline 的 Profile 和 server；不能接管未知进程、删除别的 Worldline 资源或覆盖用户的 Hermes Home。已经 sealed 的请求再次执行只重试清理并返回 idempotent 结果。
 
-`chronicle start` 在启动页面服务时检查 active Run。它只会恢复同一 Run：已存在的 Profile 必须带有相同 Run/Actor/epoch marker，root MCP allowlist 和 Profile 工具配置也必须仍然完整；已存在 binding/Wake 必须与该 identity 完全一致。每个 Agent Wake 使用稳定的 `chronicle-<wake_id>` Session 标识；World 操作的持久化幂等键由 Host 根据 wake、工具和调用槽计算。重启遇到 `RUNNING`/`STAGED` Wake 时不会猜测外部调用是否完成，也不会直接重排；该 Wake 进入受控失败，用户只能封存这一局。
+## Global Clock 与 Logical Moment
 
-GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项目私有 child：owner record 不含密钥，并与 Hermes `gateway.pid`、PID 启动时间、私有 Home 和当前 root 配置指纹交叉核验。缺失、PID 复用、指纹不符或未知端口都 fail closed；Chronicle 不会停止、复用或覆盖未知进程。
+一个 Volume Worldline 只有一个 authoritative world tick。Crisis 的 `local_tick` 是从 activation tick 派生的显示值，不能改变 Ledger 的排序。
 
-## Perspective 与隐私
+推进步骤固定为：
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、可提出的结构化条件、自己作为当事人的未决 Offer/生效 Agreement、已发生且对其可见的 Pressure、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束。Offer 与 Agreement 只在当事人合法知道时出现；未发生或不可见的 Pressure 不会预告给主体。
+1. 应用该 tick 到期的 deterministic effects、消息和历史 Field Event；
+2. 把所有需要主体处理的 wake 冻结为一个 Pending Logical Moment；
+3. 为每个 Lifetime 构造当时合法的 Perspective；
+4. Human 与 Agent 各自 stage intent，commit 前互不可见；
+5. Host 统一校验、按稳定顺序提交并写入 causal parents；
+6. 排入未来 tick 的消息、wake、Operation、revisit 或其他效果。
 
-人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
+Human/Agent 执行顺序、网络 wall time 和模型响应快慢都不能改写同一 moment 的世界语义。相同 idempotency key 重试必须返回既有结果，而不是产生第二个世界效果。
 
-## World tools
+## Runtime 与 Hermes 边界
 
-Hermes Agent 与 Human Decision Interpreter 共用同一组六种请求：
+### Fixture
 
-| 工具 | 主体表达什么 | Host 至少校验什么 |
+`runtime_mode = fixture` 只在 `CHRONICLE_DEV=true` 或自动化中开放。当前产品 router 的 `resolve_agent_wakes()` 为 Agent wake 生成确定性 `wait`，用于验证 Host、消息、时钟、隐私、Pending Moment 和 Archive；它不是 Hermes 认知证明。
+
+### Live（当前已实现的部分）
+
+`runtime_mode = live` 会调用 `materialize_lifetime_profiles()`，按 `worldline_id + lifetime_id` 安装或校验 6 个 Lifetime Profile，写入 marker、Profile env、Volume-specific MCP configuration 和 durable binding metadata。真实 live preflight 已在隔离临时 Home 中验证 Profile routing、`memory`-only toolset、key isolation、fresh Session 和一次 chat。
+
+### Live（当前未接通的部分）
+
+当前 V5 product router 在继续/决定时仍走 deterministic `wait` seam；它没有把真实 `HermesActorDriver`、fresh Session、World MCP operation、Memory lineage 和 V5 Pending Logical Moment 连接成一条完整 live V5 业务链。V4 的旧 `CrisisRunEngine`/`LiveRuntimeManager` 仍保留其兼容路径，但不能代替 V5 live acceptance。具体 blocker 见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+
+这一区分很重要：Profile materialization、Gateway health、一次 chat 和 Doctor 都不能单独证明 P0 Subject continuity、P1 Multi-Subject、P2 Temporal、P3 Learning、P4 Game 或 P5 30-minute product proof。
+
+## API ownership
+
+正式 V5 路由集中在 `chronicle/product_api.py`：
+
+| 层 | 入口 | 返回边界 |
 | --- | --- | --- |
-| `communicate(recipient, content, idempotency_key)` | 给另一主体发送一封信 | 收件人、内容、路线和抵达日 |
-| `investigate(question, target, method, idempotency_key)` | 对当前可用对象启动一项受来源限制的调查 | authority、目标、方法、所需 asset、时程、边界和同一调查是否已经进行 |
-| `manage_offer(action, offer_id, recipient, terms, message, expires_after_days, idempotency_key)` | 提出、还价、接受、拒绝或撤回一个有世界后果的条件 | authority、当事人、Crisis 声明的 term、Offer 状态、到期、回应权和幂等键 |
-| `operate(operation_definition_id, targets, description, idempotency_key)` | 启动 Crisis Pack 声明、需要模拟时间的行动 | authority、目标类型/归属、Asset 状态、冲突、路线、时程、边界和现实前提 |
-| `update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)` | 更新目标、方法、重新判断条件和必要的 Belief | 内容完整性、信念格式、语义 no-op 和幂等键 |
-| `schedule_revisit(after_days, reason, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、原因、边界和幂等键 |
+| Volume | `/api/worldlines`, `/active` | Volume metadata、public world、Lifetime list |
+| Public World | `/{id}/world` | knots、public positions、公开状态和公共 attention |
+| Follow | `/{id}/follow/{lifetime_id}` | selected Lifetime 的可见入口，不含其他私态 |
+| Life Desk | `/{id}/desk` | 当前 inhabited Lifetime 的 private context |
+| Mutation | `inhabit`, `leave`, `continue`, `decision` | Host-validated state transition |
+| Archive | `/{id}/archive[?lifetime_id=...]` | public replay；可选一个 selected Lifetime replay |
+| Ending | `/{id}/seal` | 仅 boundary ready 时写入 `VOLUME_SEALED` |
 
-工具参数不接受 actor、run 或 wake 身份。Agent 身份来自 Profile 私有 token，Human 身份来自当前控制者。调用先落为 `PROPOSED` 或 `REJECTED`，Wake 成功时才与 Ledger、Projection、Life State 一起提交；重复幂等键返回第一次结果，超过 8 次被拒绝。
+`entry_id` 传入 `/api/worldlines` 时才进入 V4 compatibility branch。`/api/runs`、旧 Compare 和旧 replay 继续用于 legacy 数据，但新 V5 UI 不依赖它们。
 
-已接受的 `operate` 会写入 `OPERATION_STARTED` 与必要的起始 Asset state effect，随后以 `IN_PROGRESS` 留在 Projection，直到确定的 complete tick 才写入 `OPERATION_COMPLETED`、完成 effect 和对可见主体的 Observation/Wake。第一轮山海关 Operation 只实现启动与完成；取消和中断会在对应 Crisis 真实需要这些后果时再进入同一 lifecycle，而不是把 `interruptibility` 伪装成已经可用的按钮。
+## V5 不做的架构扩张
 
-已接受的 `investigate` 会写入 `INVESTIGATION_STARTED` 并以 `IN_PROGRESS` 留在 Projection；到达 Crisis Pack 固定的 result tick 后，Host 写入 `INVESTIGATION_COMPLETED` 与 `OBSERVATION_OBTAINED`，再把 Observation 交给可见主体并排入 `INVESTIGATION_RESULT` Wake。Observation 记录内容、来源、source IDs、可靠性、获得时刻与相关断言；它可以是部分或相互冲突的证据，绝不是即时的 `truth_lookup()`。当前山海关报告为私有观察，其他 Actor 不会因 Ledger 中存在该记录而自动得知。
-
-已接受的 `manage_offer` 先写入一个私有当事人可见的 Offer；Offer 可以被还价、接受、拒绝、撤回或在声明的模拟时刻到期。接受会把 Offer 的结构化 terms 和完整 source-offer lineage 写为 `ACTIVE` Agreement。Agreement 是 Projection 中的世界事实，不是任何一方的私有 Belief；当前山海关只声明“允许通过山海关”这一 `passage` term，不构建通用政治 DSL。
-
-同一 logical moment 内两个主体可能都依据冻结的合法视野操作同一 Offer。若先提交的世界变化已使后一个请求不再可用，Host 将后者记录为 `offer_not_open` 等 World refusal，而不是让 Run 崩溃、回滚已经发生的现实，或把拒绝伪装成成功。
-
-Crisis Operation 可以声明它需要某个 `ACTIVE` Agreement；因此已接受的通行条件会让多尔衮随后合法获得“通过山海关”的行动 affordance。相反，吴三桂仍可实际封闭关口；Host 不用一个 `betray()` 按钮替代现实行为，而是在该 Operation 完成时写入 `AGREEMENT_BREACHED`。只有同时是协议当事人且能合法看见该现实行动的主体会收到这一结论；其他人最多看见公开的关口变化，不会获得私下协议。没有 Trust Score，背约后的后果仍由主体依据自己收到的世界事实判断。
-
-Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler 对象。它只有 `EXOGENOUS`（固定时刻、无 actor-state 前提）与 `CONDITIONAL`（固定时刻检查小型 Entity state 前提）两种；每个对象都声明 effect、可见范围、provenance 与 assertion IDs，写入 `PENDING → APPLIED/SKIPPED` Ledger/Projection lifecycle。Pack validator 拒绝把带有 Decision Actor 的 post-checkpoint historical anchor 作为 Pressure 来源，因此真实历史后续不能成为 Canon Conveyor。山海关当前的“京东通行窗口收紧”明确是基于距离与时序的 `scenario_assumption`，不是任何一方的预设行动：它使新的东向调动不再可开始，而已经发生的行动和主体选择仍按各自的世界状态结算。
-
-## Resolution Contract
-
-每场 Crisis 引用一个已注册、版本固定的 Resolution Contract。当前 `shanhaiguan-v1` 位于 `chronicle/resolution/`：它只读取 Snapshot Projection 中的兵力投入、位置、通行/关口控制、Agreement 与已完成调查等 World Truth；不会读取 Actor 的私有 Plan/Belief/Memory、历史后续锚点，也不会调用 LLM。它先说明局势是否已经进入可结算节点，再以自然语言因素和结构化 Entity/Agreement effects 产出直接冲突、协商通行、退出或延期四类局部结果。
-
-只有当已建模条件落在真正的歧义带时，Contract 才使用 Run 已 pin 的 seed；同一 Projection、Contract version 与 seed 必须得到字节一致的结果。Resolver 本身不跳转到 Ending Page：Scheduler 将 Run 从 `OPEN` 写入 `RESOLUTION_PENDING`，再把纯结果写成 `RESOLUTION_APPLIED`、Entity/Agreement effects 和 Snapshot Projection，进入 `AFTERMATH`。
-
-结果不会自动进入所有主体视野。Contract 为可立即知情的主体显式列出 actor IDs；其余主体收到一条带模拟到达时刻的 resolution report。每位主体至少经历一次 `RESOLUTION_RESULT` Wake 后，Engine 才检查未完成的 Operation、Investigation、通信、Offer、报告和 Wake；局部现实稳定时，`CRISIS_SETTLED` 与 `RUN_SEALED` 在同一 Ledger commit 中生成 `outcome_json`。仅在内部 Safety Horizon 被耗尽时，才以 `SAFETY_HORIZON` 的延期 Outcome 封存，而不是以固定日期作为产品结局。
-
-## Historical Compatibility
-
-`REFERENCE_ONLY` 历史锚点可以声明少量显式的 Compatibility Preconditions：当前只支持 Entity state、Actor position，或明确标为 `UNMODELED` 的必要前提。Compatibility 逐条将 Snapshot World Truth 判为满足、仍待定、已矛盾或模型未知，再汇总为 `COMPATIBLE`、`CONTINGENT`、`INVALIDATED` 或 `UNKNOWN` 并写入 `outcome_json`。它只回答“这局世界是否仍保留已知后续的必要前提”，绝不替主体决定未来行动，也不模拟或断言之后的整段历史。
-
-## Replay Projection
-
-V4 的 `/replay` 在原有逐条 Ledger 回放之外提供四层确定性投影：World Outcome、Takeover 的“你真正改变了什么”（或 Watch 的“几条 Life 如何互相改变”）、按当时 visibility 重新揭示的隐藏世界，以及 Historical Compatibility。结算时，`outcome_json.material_causal_roots` 从 Resolution 的真实因果父链中压缩少量可读起点；它不保存或展示 Event ID。
-
-Replay 的每条因果链仅保留能通向 Settlement 的关键通信、调查、条件、协议、行动、世界状态与 Resolution。Takeover 只从 Human Decision 追链；Watch 从各主体的有效世界起点追链。全部读取既有 append-only Ledger、Snapshot 与 Outcome，既不调用 LLM，也不会在回看时改变过去的世界。
-
-## Hermes 边界
-
-| Hermes 负责 | Chronicle 负责 |
-| --- | --- |
-| Profile、模型请求、Agent loop、fresh Session | Run、模拟时间、停止边界、Perspective |
-| Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Revisit、Resource、Authority |
-| 模型判断与工具调用 | 路线、消息送达、Offer/Agreement、Operation 与 Pressure lifecycle、权限、世界效果和 Ledger |
-
-Watch 在 live Run 建立后为全部 Agent-controlled Actor 运行 Profile；Takeover 只为非 Human-controlled Actor 运行 Profile。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
-
-每次 Agent Wake 使用 fresh Session。普通 Wake 不得改变 durable Memory；只有 `REFLECTION` Wake 可以写入长期经验，也可以选择 `NO_CHANGE`。Plan、Belief、Revisit 和未送达消息属于 Chronicle Life State，不写进 Memory。Reflection 的 native Memory、Life State、Ledger 事件和 lineage version 必须作为同一个 SQLite moment 提交，失败时恢复 native 文件。
-
-## Human Decision Interpreter
-
-Takeover 中被选中的 Human Actor 没有 Hermes Actor Profile。Interpreter 只把用户文字解释成最多 8 个与 Agent 相同的 World tool 请求，再交给同一个 `WorldService` 校验和提交。它不决定行动是否成功，不替其他主体作决定，也不能从 private perspective 之外补充信息；live 解释失败不会回退成 regex 或 fixture。
-
-## 迁移与旧数据
-
-V2 的正式路径是 `Canon → Entry → Human Seat → Branch/Worldline → Debrief`；V3 改为 `Crisis Checkpoint → Run → 多主体推进 → Seal → Replay`。V2 的 Source Pack、Ledger、Snapshot、Perspective 边界、Profile 管理、Memory guard、旧表和旧 API 继续保留给迁移、History 和回归，但不再是首页入口。
-
-schema v9 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`、v8→`.pre-v9.*`。v9 新增 Volume/Crisis 内容与 Resolution pin、`crisis_phase`、`outcome_json`、`settlement_reason` 和 `revisits_json`；旧 `commitments_json` 保留为 legacy replay field。迁移时仍会把旧 active `BRANCH` 写为 `LEGACY_V2_SEALED`；active V3 `CRISIS` 则写入 `LEGACY_V3_SEALED` 并封存，不把旧 9 日/Commitment 语义热迁移成 V4。旧 live Crisis 会标为 `CLEANUP_PENDING`，由既有受限清理路径处理；ACTIVE Canon 或已经封存的旧行不会被重复包装。V2 细节见 [V2 归档](archive/v2/V2_MIGRATION.md)。
-
-## 不要把证据混在一起
-
-确定性测试证明本地协议和失败路径，Doctor 证明 Gateway/Profile/MCP 前置能力，浏览器证明页面状态，live business Run 才证明真实 Profile、fresh Session、World tools、持久状态、后续 Wake、消息送达和封存能在同一局中关联。完整记录见 [验收记录](ACCEPTANCE.md)。
+当前架构不引入 generic history DSL、universal visualization DSL、Agent Director、Agent Team coordinator、free A2A mind-to-mind、relationship score/trust meter、Theory-of-Mind graph、skill extraction、cross-Lifetime skill sharing、cross-Worldline Profile sharing、daily forced tick、Agent observability dashboard、LLM World Master/Judge 或完整战斗模拟器。

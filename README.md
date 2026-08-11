@@ -1,36 +1,45 @@
-# Chronicle · 甲申
+# Chronicle · 甲申 V5
 
-> 一个世界，几个人；每个人只活在自己收到的消息里。
+> 一个卷册，几段人生；每个人只活在自己收到的世界里。
 
-Chronicle 是一场有边界的历史主体实验。它让李自成、吴三桂和多尔衮在同一段尚未决定的时间里各自生活：他们有自己的责任、消息、判断和计划，世界事实则由一个确定性的 Host 记录、推进和裁定。
+Chronicle V5 把一段历史做成可回到的卷册：先看同一世界，再跟随其中一段已经发生过的人生；进入时只接过当前 Life 的下一步，离席后卷册继续推进，最终在结构性边界处封存并回看。
 
-它不是历史聊天机器人，不是策略游戏，也不是让一个中央模型替所有人写结局。第一版只做一件事：把“谁知道什么、谁选择了什么、消息何时抵达”讲清楚。
+正式产品旅程是：
 
-## 当前危局
+```text
+Volume → World → Follow → Inhabit → Life Desk → Leave → Archive / Volume Ending
+```
 
-正式入口只有一场 Crisis，叫“山海关之前”。起点使用史料能够支撑的相对时间窗，而不强行换算成未经复核的现代公历日期。
+当前默认内容是 `jiashen` Volume「甲申」，包含 6 条 Volume Lifetime 和 3 个 Crisis knot。Crisis 是同一卷册中的局部因果密度，不再是正式产品的根目录。
 
-| 项目 | 当前定义 |
+## 当前状态
+
+Phase 0–11 已按 V5 计划完成并分别提交；当前仓库已经有 V5 Volume、Global World Tick、Lifetime、Inhabit/Leave、Pending Logical Moment、Volume Boundary、Archive 和 Volume Ending 的 fixture/API 合同。Phase 12 的 Acceptance 与文档在 [V5 验收记录](docs/V5_ACCEPTANCE.md) 中逐项区分证据层。
+
+这不等于“V5 的真实 Hermes 产品证明已经完成”。当前可以确认：
+
+- Source Pack、Scenario Pack、Volume Pack、Python/JS 静态检查和确定性测试通过；
+- 隔离临时目录中，Hermes v0.20.0 可以 materialize 6 个 Lifetime Profile，并通过私有 Gateway、Profile 路由和一次真实 chat preflight；
+- V5 产品路由当前仍由确定性 Host 处理 Agent wake 的 `wait` seam，尚未把真实 Hermes cognition 接入同一条 V5 Logical Moment；
+- P0–P5 行为性验收、新 Archive/Ending 浏览器流程和 1440/1280/768/390 响应式证据尚未通过，因此不宣称 Definition of Done。
+
+## 用户看到什么
+
+| 入口 | 用户要回答的问题 |
 | --- | --- |
-| 主体 | 李自成、吴三桂、多尔衮 |
-| 起点 | 顺治元年四月中旬前；吴三桂首封求助信已发出，但尚未抵达多尔衮 |
-| 走廊 | 北京 → 永平 → 山海关 → 辽西行军路 |
-| 主体可以提出 | 通信、等待、有限准备、有限移动、更新计划、安排未来复查 |
-| 本场结算 | 当关口、兵力与协议形成可裁定的局部现实后进入 Resolution；30 日只是一条内部安全上限 |
+| Volume | 这卷历史从哪里展开？ |
+| World | 此刻哪些局势正在变得重要？ |
+| Follow | 如果只跟着这段人生，我能看到什么？ |
+| Inhabit | 我是否要接过这段人生的下一步？ |
+| Life Desk | 当前人物收到什么、知道什么、还承担什么？ |
+| Leave | 我是否把这段人生交还给世界？ |
+| Archive / Volume Ending | 这卷历史如何结束，又如何回看？ |
 
-这些定义不是“完整复原明清战争”。起点、路线时长、在途信件和后续历史锚点都在 [历史与视野](docs/HISTORY.md) 中标出史实、争议和建模假设。
+用户不需要理解 Profile、Wake、Session、Memory 或 Runtime。它们是执行边界，不是页面心智模型。
 
-## 两种进入方式
+## 本地运行
 
-**Watch · 旁观**：三位主体都由 Hermes 运行。你可以在世界视野和三个人物视野之间切换，观察同一件事如何在不同主体那里变成不同的知识、判断和计划。点击“继续”会推进到下一个有意义的模拟时刻，而不是机械地加一天。
-
-**Takeover · 成为吴三桂**：李自成和多尔衮继续自主运行，吴三桂由你控制。活动期间你只能看到吴三桂已经收到的信息；你的自然语言会被解释成有限的世界请求，再经过与 Agent 相同的权限、路线、资源、边界和原子提交检查。空文本加“继续”就是沉默。
-
-两种模式使用同一个 Run Engine。Watch 不能在中途变成 Takeover；想亲自做一次决定，就从同一个 Crisis checkpoint 新开一局。
-
-## 本地启动
-
-### 安装与确定性检查
+先做不触碰业务状态的确定性检查：
 
 ```bash
 uv sync
@@ -40,44 +49,68 @@ uv run chronicle crisis validate
 uv run pytest -q
 uv run ruff check .
 node --check web/app.js
+node --check web/router.js
+node --check web/state.js
+git diff --check
 ```
 
-### 启动正式体验
+开发模式只在明确的临时数据库中开放 fixture：
 
 ```bash
-uv run chronicle start
+CHRONICLE_DEV=true \
+CHRONICLE_DATABASE_URL=sqlite:////tmp/chronicle-v5-dev.db \
+CHRONICLE_HERMES_HOME=/tmp/chronicle-v5-hermes-home \
+uv run chronicle serve --host 127.0.0.1 --port 8711
 ```
 
-打开 <http://127.0.0.1:8711>。`start` 是正式入口：它启动 Chronicle，并在启动时核对或恢复尚未封存的一局。Chronicle 只绑定本机回环地址，当前没有登录层，不要把它暴露到局域网或公网。
+正式页面向 `POST /api/worldlines` 发送 `live: true`；开发模式才发送 `live: false`。不要把开发数据库、Hermes Home 或含 Secret 的 runtime 文件提交到 Git。`chronicle` 当前只允许 loopback 绑定，没有登录层，不要暴露到局域网或公网。
 
-`uv run chronicle serve` 保留给前端和 API 开发；它不承担正式入口的启动时恢复职责。
+## V5 API 入口
 
-首次使用，在“设置”填写模型服务地址、API Key、模型和接口类型，点击“保存并核对”。原始 Key 只写入被忽略的 `.chronicle/runtime.env`，接口不会把它返回给浏览器。
+正式 V5 API 使用 `/api/worldlines`，并以 Volume Worldline 为根：
 
-正式页面只创建 live Run。模型服务未配置、Provider 不可用或 Hermes 前置条件未满足时，入口会说明下一步并停止；不会静默改成 fixture。
+```text
+POST /api/worldlines
+GET  /api/worldlines/active
+GET  /api/worldlines
+GET  /api/worldlines/{id}/world
+GET  /api/worldlines/{id}/lifetimes
+GET  /api/worldlines/{id}/follow/{lifetime_id}
+GET  /api/worldlines/{id}/desk
+POST /api/worldlines/{id}/inhabit
+POST /api/worldlines/{id}/leave
+POST /api/worldlines/{id}/continue
+POST /api/worldlines/{id}/decision
+GET  /api/worldlines/{id}/archive[?lifetime_id=...]
+POST /api/worldlines/{id}/seal
+```
 
-### 创建、重启与封存
+`/world` 与 `/follow` 是公共可见投影；`/desk` 只返回当前 inhabited Lifetime 的私有上下文；Archive 默认只返回安全的公共回看，只有明确选择一个 Lifetime 时才增加该 Lifetime 的 selected replay。未送达消息、其他 Lifetime 的私有计划/信念和 Profile/runtime 内部字段不应通过产品 API 泄漏。
 
-在页面创建 Watch 或 Takeover 后，Chronicle 会为这一局建立所需主体，启动项目私有运行资源，并完成第一轮可验证的定向行动。页面会以卷页状态说明“正在建立”“正在恢复”或“尚未准备好”；用户不需要再打开第二个终端，也不需要手动运行 Gateway。
+## 兼容边界
 
-重启 Chronicle 时，仍使用 `uv run chronicle start`。系统只会恢复同一局及其可证明属于本项目的本地资源；遇到无法确认归属的服务，会停止这一局而不会接管或终止别的项目。封存后，历史立即可回看；旧主体会被撤销并清理，下一次“再开一局”总是新的经历，不会重用旧 Profile 或会话。
+旧 `/api/runs`、`entry_id` 分支和 V4 Compare/legacy replay 仍保留用于已有数据和回归；它们不是 V5 产品 source of truth。V5 新建请求不应再以 Crisis/Run/Takeover 作为产品入口。迁移约束见 [V5 Migration](docs/V5_MIGRATION.md)。
 
-`uv run chronicle doctor` 是诊断命令，不是正常使用的必经步骤。它可以帮助排查配置和隔离问题，但也不能单独证明一次真实历史推进已经完成。完整边界见 [运维与验收](docs/OPERATIONS.md)，历史现场记录见 [验收记录](docs/ACCEPTANCE.md)。
+## 证据边界
+
+fixture、自动化测试、浏览器检查、Doctor、Hermes readiness 和真实业务 Run 是不同证据层：
+
+- 测试通过只证明当前代码合同和失败路径；
+- Doctor/Probe 只证明环境或路由可用；
+- 浏览器截图只证明当时页面状态；
+- 真实 chat preflight 不等于 V5 Subject continuity；
+- 只有同一 live V5 Run 中可关联的 Profile、fresh Session、Perspective、World operation、消息因果、后续 Wake、Archive 和清理，才可支持真实产品结论。
+
+完整矩阵、当前 blocker 和本轮命令证据见 [docs/V5_ACCEPTANCE.md](docs/V5_ACCEPTANCE.md)。
 
 ## 文档导航
 
-| 你要解决的问题 | 从这里开始 |
+| 目标 | 文档 |
 | --- | --- |
-| 第一次了解产品 | 本页 → [产品说明](PRODUCT.md) |
-| 明确用户旅程和范围 | [产品说明](PRODUCT.md) |
-| 明确页面行为、文案和视觉 | [前端合同](docs/FRONTEND.md) |
-| 理解 Run、主体、调度、Hermes 和迁移 | [架构](docs/ARCHITECTURE.md) |
-| 理解史料、争议和信息盲区 | [历史与视野](docs/HISTORY.md) |
-| 启动、迁移、排障和验收 | [运维与验收](docs/OPERATIONS.md) → [验收记录](docs/ACCEPTANCE.md) |
-| 了解 V2 如何退出正式路径 | [V2 迁移归档](docs/archive/v2/V2_MIGRATION.md) |
-
-## 证据和安全边界
-
-fixture、自动化测试、浏览器检查、Doctor 和真实 Hermes 业务 Run 是不同证据层。页面能动、测试通过或 Doctor 为 `READY`，都不能单独写成“真实 Agent 业务已打通”。
-
-不要提交 `.env`、`.chronicle/`、SQLite 数据库、完整模型正文、Profile 私钥或带凭据的日志。迁移和实验都使用副本或新路径，不要删除真实数据库或 Hermes Home 来“重置”。
+| 产品旅程和范围 | [PRODUCT.md](PRODUCT.md) |
+| Volume/Lifetime/Host/Archive 架构 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 页面、文案、隐私和 API 接缝 | [docs/FRONTEND.md](docs/FRONTEND.md) |
+| 启动、隔离、迁移和排障 | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| V5 验收矩阵与证据边界 | [docs/V5_ACCEPTANCE.md](docs/V5_ACCEPTANCE.md) |
+| V5 迁移原则 | [docs/V5_MIGRATION.md](docs/V5_MIGRATION.md) |
+| 历史来源与信息盲区 | [docs/HISTORY.md](docs/HISTORY.md) |

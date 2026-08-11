@@ -1,18 +1,19 @@
-# Chronicle V3 运维与验收
+# Chronicle V5 运维与验收
 
-这是本地 runbook。先把服务安全地跑起来，再分别验证确定性合同、fixture、Doctor、浏览器和真实业务；健康检查从来不等于业务成功。
+这是 V5 的本地 runbook。它把“服务能启动”“代码合同通过”“Hermes 环境可用”“真实 V5 业务成立”和“浏览器体验合格”分开记录。任何一层都不能替代另一层。
 
 ## 1. 安全边界
 
-- Chronicle 只绑定 `127.0.0.1`、`::1` 或 `localhost`；当前没有登录层，不得暴露到局域网或公网；
-- Provider URL 不得嵌入凭据，不得指向私网、metadata、link-local、保留或组播地址；远程 Provider 必须使用 HTTPS；
-- Secret 只写入被忽略且权限为 `0600` 的 `.chronicle/runtime.env`、Profile `.env` 和项目私有 Hermes Home；
-- 不提交 `.env`、`.chronicle/`、SQLite、完整模型正文、Profile 私钥或带凭据的日志；
-- 迁移和试验使用副本或新路径，不删除真实数据库或 Hermes Home 来“重置”。
+- 只绑定 `127.0.0.1`、`localhost` 或其他明确的 loopback 地址；当前没有登录层，不得暴露到局域网或公网；
+- Provider URL 不嵌入凭据，不指向私网、link-local、metadata、reserved 或 multicast 地址；
+- API Key 只写入被忽略且权限为 `0600` 的 runtime env/Profile env；日志和文档不记录 key、token、完整模型正文或 private response；
+- V5 live acceptance 使用新临时 SQLite、新 Hermes Home 和独立 loopback 端口；不覆盖项目 `data/`、`.chronicle/`、全局 Hermes Home 或其他正在运行的服务；
+- 不用 SQL 直接制造 `SEALED`、`READY` 或 successful outcome；不以删除目录“修复”未知归属；
+- Profile/MCP/Gateway 清理只能在 Volume 已原子 seal 且 marker/owner 可证明属于该 Worldline 时执行。
 
 ## 2. 确定性检查
 
-修改源码、Scenario 或前端后运行：
+每次源码、内容或前端变更后先运行：
 
 ```bash
 uv sync
@@ -21,73 +22,118 @@ uv run chronicle scenario validate
 uv run chronicle crisis validate
 uv run pytest -q
 uv run ruff check .
+uv run python -m compileall -q chronicle tests
 node --check web/app.js
+node --check web/router.js
+node --check web/state.js
 git diff --check
 ```
 
-启动正式体验：
+本轮结果：Source Pack `4 sources / 36 assertions / 36 events`、Scenario Pack `36 canon events`、`jiashen` Volume `3 crises` 通过；完整 pytest、ruff、compileall、JS syntax 和 diff check 通过。测试中的依赖 deprecation warnings 不被升级成 V5 failure，但也不隐藏。
+
+## 3. 本地服务与 fixture
+
+CLI 入口：
 
 ```bash
-uv run chronicle start
+uv run chronicle --help
+uv run chronicle serve --host 127.0.0.1 --port 8711
+uv run chronicle start --host 127.0.0.1 --port 8711
+uv run chronicle doctor
 ```
 
-服务默认在 <http://127.0.0.1:8711>。`start` 会在页面服务启动时恢复同一局的本地运行资源；`serve` 仅用于开发，不承担这次启动时恢复。设置页的“保存并核对”先请求 Provider 的 `/models`，通过后才把配置写入 runtime env；原始 API Key 不回显。正式页面只创建 live Run，不能把未配置或失败的 live 请求静默改成 fixture。
+`serve` 适合开发；`start` 保留启动时的旧兼容 runtime reconcile 行为。二者都只绑定 loopback。V5 页面通过 `/api/worldlines` 工作，正式环境要求 `live: true`；只有 `CHRONICLE_DEV=true` 才允许 `live: false` fixture 创建。
 
-## 3. 正常使用的本地生命周期
+开发 fixture 必须使用临时状态：
 
-用户只需要运行 `uv run chronicle start` 并打开页面。创建 live Run 时，Chronicle 先持久化同一局的历史和主体身份，再建立该局的 Profile、写入当前局唯一的 MCP allowlist、启动项目私有 Gateway child，并完成初始 `ORIENT`。只有 `ORIENT` 已提交真实 World operation，页面才把这一局显示为可继续。
+```bash
+V5_TMP="$(mktemp -d -t chronicle-v5-dev.XXXXXX)"
+CHRONICLE_DEV=true \
+CHRONICLE_DATABASE_URL="sqlite:///$V5_TMP/chronicle.db" \
+CHRONICLE_HERMES_HOME="$V5_TMP/hermes-home" \
+uv run chronicle serve --host 127.0.0.1 --port 18711
+```
 
-重启后，`start` 只恢复尚未封存的同一局；它不会新建 Profile、Wake、epoch 或复制旧 Session。运行资源的唯一持久化状态是下列 `runtime_phase`；Run 的历史状态仍然只有 `ACTIVE` 或 `SEALED`。
+fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message delivery、Perspective、Pending Logical Moment、permission、idempotency、Ledger 和 Archive 代码。关闭服务后只清理由当前命令创建的临时目录，不删除广泛路径。
 
-| 阶段 | 用户看到什么 | 系统做什么 |
+## 4. 当前 V5 live 边界
+
+当前 `POST /api/worldlines` 的 `live: true` 路径会执行 Lifetime Profile materialization，并写入 marker、Profile env、Volume MCP 配置和 binding metadata。当前 V5 product router 的 Agent wake 仍由 deterministic `wait` seam 完成；它不会自动把真实 Hermes chat、World MCP operation、fresh Session 和 Memory lineage 接入 V5 Logical Moment。
+
+因此下面三件事必须分开：
+
+| 检查 | 能证明什么 | 不能证明什么 |
 | --- | --- | --- |
-| `BOOTSTRAPPING` | 正在建立主体 | 验证或补齐同一局的资源，尚不允许推进或落笔。 |
-| `READY` | 可以继续或落笔 | binding、初始行动和项目私有 child 都已通过当前局的核验。 |
-| `RECONCILING` | 正在恢复这一局 | 重启后只核验同一局；未确认的运行中 Wake 不会盲目重投。 |
-| `FAILED` | 可以重新准备或封存 | 保留同一局和无密钥失败码，不新建身份；无法核对的 Wake 只允许封存，不会重投。 |
-| `SEALING` | 正在封存卷册 | 等待正在结束的时刻终结，拒绝新的写入。 |
-| `CLEANUP_PENDING` | 已封存，可回看 | binding 已原子撤销；本地资源清理可安全重试。空失败码表示已经收束。 |
+| `chronicle doctor` | 配置、素材、数据库、Hermes CLI 和前置路由状态 | 一次 V5 业务因果链 |
+| Hermes Probe / direct chat | Gateway、Profile、key isolation、fresh Session 和真实模型调用 | Human↔Hermes continuity、World operation、P0–P5 |
+| fixture/API tests | Host/DB/隐私/时钟/封存合同 | 真实模型是否产生正确主体行为 |
 
-封存的原子边界先写入历史 seal、封存 Life State、撤销 binding 并取消尚未开始的 Wake；然后才停止 child、移除本局 root MCP/env 条目和带归属 marker 的 Profile。清理失败不会让旧主体回到新局 allowlist；下一次 `start` 或新开局前会重试。想重新选择时，先封存上一局，再创建全新的 Run/Profile/epoch，不能重入旧主体。
+`chronicle start` 的旧 `LiveRuntimeManager` 不应被当作 V5 live bridge；V4 compatibility path 和 V5 product path 目前仍需分别验收。
 
-封存请求会立即打开回看；如果本地资源仍处于 `CLEANUP_PENDING`，封存卷册和回看页都提供“再次收束”，不会把清理失败藏在页面之外。
+## 5. 实际 preflight 记录（2026-08-12）
 
-Chronicle 只复用或停止同时满足 owner record、项目私有 Hermes Home 的 PID metadata、进程启动时间和当前配置指纹的 child。记录不含密钥。任何一项无法确认、PID 已复用或端口被未知服务占用时，系统会失败关闭：不接管、不停止、不覆盖未知服务，并在页面保留“重新准备”入口。
+在独立临时 SQLite、临时 Hermes Home、`127.0.0.1:18642` 上执行了真实 Hermes preflight：
 
-## 4. 诊断与真实业务证据
+- 运行环境：Hermes Agent v0.20.0；
+- V5 `live` 创建 materialized 6 个 Lifetime Profile；
+- 私有 Gateway health：通过；
+- 6 个 Profile route：均返回 `200`；
+- 6 个 Profile toolset：均为 `memory`；
+- valid Profile key：`200`；cross-profile key：`401`；
+- fresh Session：成功；真实 chat：成功（只记录摘要 hash，不保存正文）；
+- 项目工作树、项目数据库和默认 Hermes Home：未作为目标；
+- teardown：测试 harness 的 `GatewayController.stop` 返回 `runtime_gateway_stop_failed`，随后端口不再监听且临时目录在 harness 退出后消失；停止路径仍需独立修复/复测，不能标为清理通过。
 
-`uv run chronicle doctor` 是故障诊断，不是正常页面流程的一步。它检查 Source、Scenario、Crisis Pack、数据库、Profile identity、密钥隔离和基础 Gateway/Profile 路由；它可以帮助定位配置问题，但不能替代当前 child 的业务调用证明。
+这是一条真实 Hermes 基础能力证据，不是 V5 live acceptance。它没有证明真实 V5 `continue` 会调用 Hermes、不会证明多个 Subject 形成不同 action，也不会证明 settlement 后仍可继续到下一 Crisis。
 
-运行时的 `READY` 比 Doctor 更窄也更实际：它要求当前局初始 `ORIENT` 已经留下 `update_plan` 的 committed World operation。这样可以阻止 memory-only 会话被当作成功启动。它仍不证明后续消息送达、长期推进或最终封存已经完成。
+## 6. Volume 运行生命周期
 
-## 5. 数据迁移
-
-schema v9 是 additive migration。对已有数据库，backup 后缀按源版本选择：v1→`.pre-v2.*`、v2→`.pre-v3.*`、v3→`.pre-v4.*`、v4/v5/v6→`.pre-v7.*`、v7→`.pre-v8.*`、v8→`.pre-v9.*`。系统保留已知和未知旧表；旧 active V2 `BRANCH` 封存为 `LEGACY_V2_SEALED`，旧 active V3 `CRISIS` 封存为 `LEGACY_V3_SEALED`，不把旧 Commitment/9 日语义伪装成 V4。v9 为 Crisis Run 增加内容/Resolution pin、`crisis_phase`、`outcome_json`、`settlement_reason` 与独立的 `revisits_json`；旧 `commitments_json` 不删除。迁移到 v9 的旧 live Crisis Run 标为 `CLEANUP_PENDING`，仍只会走已验证归属的既有清理路径，不会被静默当作已就绪。
-
-验证迁移时先复制数据库：
-
-```bash
-CHRONICLE_DATABASE_URL=sqlite:////absolute/copy.db uv run chronicle doctor
+```text
+VOLUME ACTIVE
+  → Crisis Instance SETTLED/SUPPRESSED（Volume 仍 ACTIVE）
+  → structural boundary ready
+  → VOLUME_SEALED / ARCHIVED
+  → revoke bindings + cancel queued wakes
+  → cleanup owned Profiles/MCP entries
 ```
 
-检查 backup、legacy seal、未知表和第二次打开的幂等性。不要在真实用户数据库上用 SQL 改写状态来制造验收结果。
+封存前必须通过 boundary policy：没有 pending moment、due wake、在途消息、待应用 Field Event 或 next tick，且所有 Crisis Instance 已有结果。Seal 失败只返回领域冲突，不改变状态。Seal 后的重复请求应为 idempotent，并只重试属于本卷册的清理。
 
-## 6. Fixture 烟测
+如果清理失败：
 
-fixture 只在 `CHRONICLE_DEV=1` 的开发/自动化环境开放，只替代模型输出，不替代 scheduler、WorldService、Ledger、Life State 或权限校验。
+1. 保留 sealed Worldline、Ledger、Snapshot 和 Archive；
+2. 不把旧 Profile 加入下一卷册；
+3. 记录可重试的 owner/cleanup 状态，不猜测未知进程归属；
+4. 下一次明确的 recovery 操作只针对同一 Worldline。
 
-最小 smoke 应覆盖：创建 `WATCH` fixture Run；连续调用 `/api/runs/{id}/continue`，确认无 trigger 不 Wake、显式创建的未来 Revisit 会到期、信件会抵达；切换三位主体 perspective，确认未送达信息不泄漏；创建 fixture Takeover，确认活动期间 `/world` 和其他主体 perspective 返回 403；提交多动作决定和空文本沉默；seal 后读取 Replay、Archive 和 History。
+## 7. 迁移与数据库
 
-fixture 通过只能写成“确定性合同通过”，不能写成“真实 Hermes 已通过”。
+当前 schema version 为 `10`。V5 migration 继续 additive、先备份、保留未知表和旧字段；旧 V3/V4 Crisis 只走 legacy archive/replay，不热迁移成 V5 Volume。
 
-## 7. 真实业务验收
+对副本做检查：
 
-真实验收使用隔离的临时 SQLite，不覆盖用户数据。必须在同一 live Watch Run 中关联三条 identity binding、三个 Agent Profile、`ORIENT` 与后续 Wake 的 fresh Session、真实 World MCP 请求及其 operation/Ledger 记录、Plan/Revisit/Memory lineage、消息 transit 与 delivery、拒绝后修正或合法 no-op、cross-profile key/perspective isolation，以及 seal 后的 binding revocation 和 Replay/Archive。
+```bash
+CHRONICLE_DATABASE_URL=sqlite:////absolute/copy.db \
+CHRONICLE_HERMES_HOME=/absolute/temp/hermes-home \
+uv run chronicle doctor
+```
 
-健康探针、Doctor、fixture、截图和一段模型最终文本都不能替代这条关联链。安全报告只记录 Run ID、Profile 名、Session 是否独立、工具名、事件类型、tick、状态和计数，不记录 token、API Key 或完整模型正文。
+不要在真实数据库上直接改 `status`、`runtime_phase`、`outcome_json` 或 binding 来制造验收结果。迁移规则、旧数据边界和 repeat-open 约束见 [V5_MIGRATION.md](V5_MIGRATION.md)。
 
-## 8. 浏览器验收
+## 8. 浏览器检查
 
-至少检查 1440、1280、768 和 390 宽度：首页、Watch、Takeover Desk、回看、卷册、史实背景和设置均可达；桌面 Corridor 横向、手机 Corridor 纵向，无横向溢出；Takeover 文本在 busy rerender 前被捕获，多动作不会变成 silence；活动 Takeover 不显示世界全局或其他主体私态；Desk 四个区域持久可见，手机为单列；回看默认 lens、自然语言 cause、console 和内部词泄漏符合 [前端合同](FRONTEND.md)。
+浏览器验收至少覆盖 1440、1280、768 和 390 宽度：
 
-截图只证明当时本地 API/fixture 下的视觉与交互。业务证据和已知边界见 [验收记录](ACCEPTANCE.md)。
+- Volume、World、Follow、Inhabit、Desk、Leave、Archive、Ending 都能到达；
+- 无横向溢出，World/Follow/Desk/Archive 在手机可读；
+- Follow 和 public replay 不泄漏 private state；
+- textarea 在 rerender 前被捕获，busy mutation 不能 double-submit；
+- 页面不出现 Agent/Profile/Session/Memory、crisis dashboard、meter 或 AI thinking animation。
+
+Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；本轮没有把 Phase 11 Archive/Ending 和四种 viewport 重新浏览器化，因此这部分保持未验证。
+
+## 9. 证据归档
+
+每次 acceptance 记录只保留可复核且不含 Secret 的信息：commit、命令、退出码、validator 摘要、临时资源范围、Profile/Session 数量、事件类型、tick、状态和失败边界。不要保存 API key、Profile token、完整模型 response、private prompt 或原始 `runtime.env`。
+
+逐项矩阵和 P0–P5 当前结果见 [docs/V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。

@@ -151,6 +151,7 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
         "web/pages/crisis.js",
         "web/pages/desk.js",
         "web/pages/settlement.js",
+        "web/pages/compare.js",
         "web/components/letter.js",
         "web/components/ongoing.js",
         "web/components/agreement.js",
@@ -165,6 +166,32 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
     assert 'data-action="start-takeover" data-human-actor-id=' in source
     assert "before-shanhaiguan" not in source
     assert "wu-sangui" not in source
+
+
+def test_frontend_compares_two_settled_runs_without_a_worldline_tree():
+    source = _frontend_source()
+    compare = (ROOT / "web" / "pages" / "compare.js").read_text(encoding="utf-8")
+
+    for required in (
+        "goCompare",
+        "loadCompare",
+        "/api/compare?left=",
+        "compareLeftRunId",
+        "compareRightRunId",
+        "compareSelectedRunId",
+        "first_material_divergence",
+        "consequence_paths",
+        "outcome_difference",
+        "data-compare-run-id",
+        "data-compare-replay-id",
+        "#/compare/${encodeURIComponent(leftRunId)}/${encodeURIComponent(rightRunId)}",
+    ):
+        assert required in source
+
+    assert "Worldline Tree" not in compare
+    assert "resolution_variant" not in compare
+    assert "final_stakes" not in compare
+    assert "event-" not in compare
 
 
 def test_frontend_routes_automatic_settlement_to_a_restrained_outcome_page():

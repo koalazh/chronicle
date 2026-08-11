@@ -28,7 +28,7 @@ from .decision import (
     FixtureDecisionInterpreter,
     ModelDecisionInterpreter,
 )
-from .replay_projection import material_causal_roots, replay_layers
+from .replay_projection import compare_material_runs, material_causal_roots, replay_layers
 from .resolution import get_resolution_contract
 from .resolution.base import ResolutionGateStatus, ResolutionKind
 from .world import WorldAffordanceSession, WorldService, token_hash
@@ -4759,6 +4759,399 @@ class CrisisRunEngine:
             cancel_queued_wakes=True,
         )
         return self.run_summary(run_id)
+
+    def compare(self, left_run_id: str, right_run_id: str) -> dict[str, Any]:
+        """Project two settled versions of one Crisis without creating a branch tree."""
+
+        if left_run_id == right_run_id:
+            raise CrisisRunConflict(
+                "请从同一危局的两卷不同封存记录中各选择一局。",
+                code="compare_runs_must_differ",
+            )
+        left_row = self._activate_run_pack(left_run_id)
+        right_row = self.db.worldline(right_run_id)
+        if right_row is None or right_row["kind"] != "CRISIS":
+            raise CrisisRunError("Run not found")
+        if left_row["crisis_id"] != right_row["crisis_id"]:
+            raise CrisisRunConflict(
+                "只能对照同一场危局的两卷记录。",
+                code="compare_crisis_mismatch",
+            )
+        if str(left_row.get("crisis_hash") or "") != str(right_row.get("crisis_hash") or ""):
+            raise CrisisRunConflict(
+                "这两卷使用的危局版本不同，不能把不同的规则当作同一场对照。",
+                code="compare_content_mismatch",
+            )
+        left = self.run_summary(left_run_id)
+        right = self.run_summary(right_run_id)
+        for summary in (left, right):
+            if summary["status"] != "SEALED" or summary["crisis_phase"] != "SETTLED":
+                raise CrisisRunConflict(
+                    "只有已经形成 Outcome 的封存危局才能参与对照。",
+                    code="compare_outcome_not_ready",
+                    state=str(summary["crisis_phase"] or "OPEN"),
+                    tick=int(summary["current_tick"]),
+                )
+
+        comparison = compare_material_runs(
+            self.db.worldline_events(left_run_id),
+            self.db.worldline_events(right_run_id),
+            project_event=self._comparison_event_projection,
+        )
+        comparison["outcome_difference"] = self._comparison_outcome_difference(
+            left["outcome_json"], right["outcome_json"]
+        )
+        return {
+            "crisis": {
+                "id": self.pack.crisis.id,
+                "title": self.pack.crisis.title,
+                "subtitle": self.pack.crisis.subtitle,
+            },
+            "runs": {
+                "left": self._comparison_run(left),
+                "right": self._comparison_run(right),
+            },
+            **comparison,
+        }
+
+    def _comparison_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        human_actor_id = str(run.get("human_actor") or "")
+        actor = self.pack.actor_by_id.get(human_actor_id)
+        return {
+            "id": run["id"],
+            "mode": run["mode"],
+            "human_actor": actor.display_name if actor is not None else "",
+            "current_tick": int(run["current_tick"]),
+        }
+
+    def _comparison_outcome_difference(
+        self, left: dict[str, Any], right: dict[str, Any]
+    ) -> dict[str, Any]:
+        same = self._comparison_outcome_signature(left) == self._comparison_outcome_signature(right)
+        return {
+            "same": same,
+            "summary": (
+                "两局的路径虽有不同，但在当前已建模的最终现实中尚未分开。"
+                if same
+                else "两局最终形成了不同的局部现实。"
+            ),
+            "left": self._comparison_outcome_card(left),
+            "right": self._comparison_outcome_card(right),
+        }
+
+    @staticmethod
+    def _comparison_outcome_signature(outcome: dict[str, Any]) -> str:
+        def terms(value: Any) -> list[dict[str, str]]:
+            return sorted(
+                [
+                    {
+                        "type": str(term.get("type", "")),
+                        "subject": str(term.get("subject", "")),
+                        "value": str(term.get("value", "")),
+                    }
+                    for term in value
+                    if isinstance(term, dict)
+                ]
+                if isinstance(value, list)
+                else [],
+                key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+            )
+
+        return json.dumps(
+            {
+                "settlement_type": str(outcome.get("settlement_type", "")),
+                "resolution_kind": str(outcome.get("resolution_kind", "")),
+                "resolution_variant": str(outcome.get("resolution_variant", "")),
+                "actor_positions": sorted(
+                    [
+                        {
+                            "actor_id": str(item.get("actor_id", "")),
+                            "position": str(item.get("position", "")),
+                        }
+                        for item in outcome.get("actor_positions", [])
+                        if isinstance(item, dict)
+                    ],
+                    key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+                ),
+                "critical_assets": sorted(
+                    [
+                        {
+                            "id": str(item.get("id", "")),
+                            "state": str(item.get("state", "")),
+                        }
+                        for item in outcome.get("critical_assets", [])
+                        if isinstance(item, dict)
+                    ],
+                    key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+                ),
+                "agreements": sorted(
+                    [
+                        {
+                            "parties": sorted(
+                                str(party) for party in item.get("parties", [])
+                            ),
+                            "terms": terms(item.get("terms", [])),
+                            "status": str(item.get("status", "")),
+                        }
+                        for item in outcome.get("agreements", [])
+                        if isinstance(item, dict)
+                    ],
+                    key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+                ),
+                "major_operations": sorted(
+                    [
+                        {
+                            "definition_id": str(item.get("definition_id", "")),
+                            "actor_id": str(item.get("actor_id", "")),
+                            "status": str(item.get("status", "")),
+                            "result_state": {
+                                str(key): str(value)
+                                for key, value in sorted(item.get("result_state", {}).items())
+                            },
+                        }
+                        for item in outcome.get("major_operations", [])
+                        if isinstance(item, dict)
+                    ],
+                    key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+                ),
+                "historical_compatibility": sorted(
+                    [
+                        {
+                            "anchor_id": str(item.get("anchor_id", "")),
+                            "status": str(item.get("status", "")),
+                        }
+                        for item in outcome.get("historical_compatibility", [])
+                        if isinstance(item, dict)
+                    ],
+                    key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+                ),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    def _comparison_outcome_card(self, outcome: dict[str, Any]) -> dict[str, Any]:
+        critical_realities = [
+            self._comparison_entity_state(
+                str(asset.get("id", "")), str(asset.get("state", ""))
+            )
+            for asset in outcome.get("critical_assets", [])
+            if isinstance(asset, dict)
+        ]
+        agreements = [
+            self._comparison_agreement_text(agreement)
+            for agreement in outcome.get("agreements", [])
+            if isinstance(agreement, dict)
+        ]
+        anchors = {anchor.id: anchor.title for anchor in self.pack.crisis.anchors}
+        compatibility_labels = {
+            "COMPATIBLE": "仍保有必要前提",
+            "CONTINGENT": "仍取决于额外前提",
+            "INVALIDATED": "已失去必要前提",
+            "UNKNOWN": "模型无法替后续选择断言",
+        }
+        compatibility = [
+            {
+                "title": anchors.get(str(item.get("anchor_id", "")), "一项后续史实"),
+                "status": compatibility_labels.get(str(item.get("status", "")), "尚未可判定"),
+            }
+            for item in outcome.get("historical_compatibility", [])
+            if isinstance(item, dict)
+        ]
+        settlement_labels = {
+            "RESOLVED": "已形成局部结果",
+            "DEFERRED": "以延期现实结算",
+            "SAFETY_HORIZON": "在建模边界处结算",
+        }
+        return {
+            "summary": str(outcome.get("summary") or "危局已经形成局部结果。"),
+            "settlement": settlement_labels.get(
+                str(outcome.get("settlement_type", "")), "危局已经封存"
+            ),
+            "critical_realities": list(dict.fromkeys(critical_realities))[:4],
+            "agreements": list(dict.fromkeys(agreements))[:3],
+            "historical_compatibility": compatibility[:3],
+        }
+
+    def _comparison_event_projection(self, event: dict[str, Any]) -> dict[str, Any]:
+        event_type = str(event["event_type"])
+        payload = event["payload"]
+        actor_name = self._comparison_actor_name(str(event.get("seat_id") or ""))
+        category = "世界变化"
+        text = "一项可验证的世界事实发生了变化。"
+        if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
+            sender = self._comparison_actor_name(str(payload.get("sender", "")))
+            recipient = self._comparison_actor_name(str(payload.get("recipient", "")))
+            category = "通信"
+            text = (
+                f"{sender}向{recipient}发出一封信。"
+                if event_type == "MESSAGE_DISPATCHED"
+                else f"{sender}的信抵达{recipient}。"
+            )
+        elif event_type in {"INVESTIGATION_STARTED", "INVESTIGATION_COMPLETED"}:
+            investigation = payload.get("investigation", {})
+            definition = self.pack.investigation_by_id.get(
+                str(investigation.get("definition_id", ""))
+            )
+            category = "调查"
+            name = definition.display_name if definition is not None else "一项调查"
+            actor = self._comparison_actor_name(
+                str(investigation.get("actor_id", event.get("seat_id") or ""))
+            )
+            text = (
+                f"{actor}开始{name}。"
+                if event_type == "INVESTIGATION_STARTED"
+                else f"{actor}完成{name}。"
+            )
+        elif event_type == "OBSERVATION_OBTAINED":
+            observation = payload.get("observation", {})
+            category = "信息"
+            text = (
+                f"{actor_name}获得观察：{str(observation.get('content', '一条新的观察已经抵达。'))}"
+            )
+        elif event_type.startswith("OFFER_"):
+            offer = payload.get("counter_offer") if event_type == "OFFER_COUNTERED" else payload.get("offer", {})
+            issuer = self._comparison_actor_name(str(offer.get("issuer", "")))
+            recipient = self._comparison_actor_name(str(offer.get("recipient", "")))
+            terms = self._comparison_terms_text(offer.get("terms", []))
+            category = "条件"
+            verb = {
+                "OFFER_PROPOSED": "提出条件",
+                "OFFER_COUNTERED": "重新提出条件",
+                "OFFER_ACCEPTED": "接受条件",
+                "OFFER_REJECTED": "拒绝条件",
+                "OFFER_WITHDRAWN": "撤回条件",
+                "OFFER_EXPIRED": "失去时效",
+            }.get(event_type, "改变条件")
+            text = f"{issuer}向{recipient}{verb}：{terms}"
+        elif event_type.startswith("AGREEMENT_"):
+            agreement = payload.get("agreement", {})
+            category = "约定"
+            text = self._comparison_agreement_text(agreement)
+        elif event_type in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
+            operation = payload.get("operation", {})
+            definition = self.pack.operation_by_id.get(str(operation.get("definition_id", "")))
+            category = "行动"
+            name = definition.display_name if definition is not None else "一项行动"
+            actor = self._comparison_actor_name(
+                str(operation.get("actor_id", event.get("seat_id") or ""))
+            )
+            text = (
+                f"{actor}开始{name}。"
+                if event_type == "OPERATION_STARTED"
+                else f"{actor}完成{name}。"
+            )
+        elif event_type in {"MOVEMENT_STARTED", "MOVEMENT_ARRIVED"}:
+            destination = self.pack.location_by_id.get(str(payload.get("to", "")))
+            destination_name = destination.display_name if destination is not None else "新的位置"
+            category = "移动"
+            text = (
+                f"{actor_name}开始向{destination_name}移动。"
+                if event_type == "MOVEMENT_STARTED"
+                else f"{actor_name}抵达{destination_name}。"
+            )
+        elif event_type in {"PRESSURE_APPLIED", "PRESSURE_SKIPPED"}:
+            pressure = payload.get("pressure", {})
+            definition = self.pack.pressure_by_id.get(str(pressure.get("id", "")))
+            category = "外部压力"
+            name = definition.title if definition is not None else "一项外部压力"
+            text = (
+                f"{name}进入危局。"
+                if event_type == "PRESSURE_APPLIED"
+                else f"{name}在当前条件下没有发生。"
+            )
+        elif event_type == "ENTITY_STATE_CHANGED":
+            category = "世界变化"
+            text = f"{self._comparison_entity_name(str(payload.get('entity_id', '')))}的状态发生变化。"
+        elif event_type == "RESOLUTION_ENTITY_EFFECT":
+            category = "危局结果"
+            text = str(payload.get("description") or "危局结果改变了一项关键现实。")
+        elif event_type == "RESOLUTION_AGREEMENT_EFFECT":
+            category = "危局结果"
+            text = str(payload.get("description") or "危局结果改变了一项既有约定。")
+        elif event_type == "RESOLUTION_APPLIED":
+            category = "危局结果"
+            text = str(payload.get("result", {}).get("summary") or "危局形成局部结果。")
+        elif event_type in {"RESOLUTION_REPORT_DISPATCHED", "RESOLUTION_REPORT_DELIVERED"}:
+            category = "信息"
+            report = payload.get("report", {})
+            recipient = self._comparison_actor_name(
+                str(report.get("recipient", event.get("seat_id") or ""))
+            )
+            text = (
+                f"危局结果正在传往{recipient}。"
+                if event_type == "RESOLUTION_REPORT_DISPATCHED"
+                else f"危局结果已经传到{recipient}。"
+            )
+        elif event_type == "CRISIS_SETTLED":
+            category = "结算"
+            text = "危局已经形成局部结算。"
+        return {"tick": int(event["tick"]), "category": category, "text": text}
+
+    def _comparison_actor_name(self, actor_id: str) -> str:
+        actor = self.pack.actor_by_id.get(actor_id)
+        return actor.display_name if actor is not None else "一位主体"
+
+    def _comparison_entity_name(self, entity_id: str) -> str:
+        entity = self.pack.entity_by_id.get(entity_id)
+        return entity.display_name if entity is not None else "一项关键现实"
+
+    def _comparison_entity_state(self, entity_id: str, state: str) -> str:
+        entity = self.pack.entity_by_id.get(entity_id)
+        if entity is None:
+            return "一项关键现实已经改变"
+        generic_labels = {
+            "OPEN": "开放",
+            "CONTESTED": "尚未定局",
+            "CLOSED": "关闭",
+            "DISPERSED": "尚未集结",
+            "FORMING": "正在整备",
+            "READY": "已经整备",
+            "MOVING": "正在移动",
+            "COMMITTED": "已经投入",
+            "DEGRADED": "投入能力受损",
+            "WITHDRAWN": "已经退出",
+            "QING_CONTROL": "清方取得局部控制",
+        }
+        label = entity.state_labels.get(state) or generic_labels.get(state) or "状态已经确定"
+        return f"{entity.display_name}：{label}"
+
+    def _comparison_terms_text(self, terms: Any) -> str:
+        if not isinstance(terms, list):
+            return "一项可执行条件"
+        descriptions: list[str] = []
+        for term in terms:
+            if not isinstance(term, dict):
+                continue
+            matching = next(
+                (
+                    definition
+                    for definition in self.pack.crisis.offer_terms
+                    if definition.type.value == str(term.get("type", ""))
+                    and definition.subject == str(term.get("subject", ""))
+                    and definition.value == str(term.get("value", ""))
+                ),
+                None,
+            )
+            descriptions.append(
+                matching.description if matching is not None else "一项可执行条件"
+            )
+        return "；".join(dict.fromkeys(descriptions)) or "一项可执行条件"
+
+    def _comparison_agreement_text(self, agreement: dict[str, Any]) -> str:
+        parties = "、".join(
+            self._comparison_actor_name(str(actor_id))
+            for actor_id in agreement.get("parties", [])
+        )
+        status = {
+            "ACTIVE": "仍然生效",
+            "FULFILLED": "已经履行",
+            "BREACHED": "已经被违背",
+            "TERMINATED": "已经终止",
+            "EXPIRED": "已经失效",
+        }.get(str(agreement.get("status", "")), "已经改变")
+        subject = parties or "有关主体"
+        return f"{subject}的约定{status}：{self._comparison_terms_text(agreement.get('terms', []))}"
 
     def replay(self, run_id: str) -> dict[str, Any]:
         self._activate_run_pack(run_id)

@@ -1,10 +1,11 @@
 import { api } from "./api.js";
 import { escapeHtml } from "./components/html.js";
+import { comparePage as comparisonDocumentPage } from "./pages/compare.js";
 import { crisisCoverPage } from "./pages/crisis.js";
 import { deskPage as deskDocumentPage } from "./pages/desk.js";
 import { settlementPage as settlementDocumentPage } from "./pages/settlement.js";
 import { volumePage } from "./pages/volume.js";
-import { go, goCrisis, goSettlement, route } from "./router.js";
+import { go, goCompare, goCrisis, goSettlement, route } from "./router.js";
 import { state } from "./state.js";
 import { surfaceMarkup } from "./surfaces/index.js";
 
@@ -171,6 +172,7 @@ function chrome(content, { compact = false } = {}) {
         <button data-page="volume" ${state.page === "volume" ? 'aria-current="page"' : ""} ${disabled}>甲申</button>
         <button data-page="history" ${state.page === "history" ? 'aria-current="page"' : ""} ${disabled}>史实背景</button>
         <button data-page="archive" ${state.page === "archive" ? 'aria-current="page"' : ""} ${disabled}>封存卷册</button>
+        <button data-page="compare" ${state.page === "compare" ? 'aria-current="page"' : ""} ${disabled}>两卷对照</button>
       </nav>
       <button class="setup-link" data-page="setup" ${disabled}>设置</button>
     </header>
@@ -385,6 +387,10 @@ function settlementPage() {
   });
 }
 
+function comparePage() {
+  return comparisonDocumentPage({ chrome, comparison: state.compare });
+}
+
 function replayPage() {
   if (!state.replay) return chrome(`<section class="empty-page"><p class="kicker">回看</p><h1>先从封存卷册选择一局</h1><button class="secondary" data-page="archive">打开卷册</button></section>`);
   const visibleItems = state.replay.items.filter(
@@ -432,18 +438,33 @@ function replayPage() {
 }
 
 function archivePage() {
+  const selected = state.archive.find((run) => run.id === state.compareSelectedRunId) || null;
   const runs = state.archive.length
     ? state.archive
         .map(
-          (run) => `<article class="archive-row">
+          (run) => {
+            const comparable = run.mode !== "LEGACY_V2" && run.crisis_phase === "SETTLED";
+            const sameCrisis = !selected || (
+              selected.crisis_id === run.crisis_id && selected.crisis_hash === run.crisis_hash
+            );
+            const compareAction = !comparable
+              ? ""
+              : selected?.id === run.id
+                ? `<button class="quiet" data-compare-run-id="${escapeHtml(run.id)}">取消对照</button>`
+                : `<button class="quiet" data-compare-run-id="${escapeHtml(run.id)}" ${sameCrisis ? "" : "disabled"}>与此卷对照</button>`;
+            return `<article class="archive-row">
             <div><span>${run.mode === "WATCH" ? "旁观" : run.mode === "TAKEOVER" ? "成为关键主体" : "旧版留存"}</span><h2>${run.mode === "LEGACY_V2" ? "甲申旧卷" : escapeHtml(crisisDisplayName(run.crisis_id))}</h2></div>
             <p>危局已历 ${run.current_tick} 日<br><small>${escapeHtml(run.seal_reason || "已经结束")}</small></p>
-            ${run.mode !== "LEGACY_V2" ? `<div class="archive-actions"><button class="secondary" data-replay-id="${escapeHtml(run.id)}">打开回看</button>${run.runtime_phase === "CLEANUP_PENDING" && run.runtime_error_code ? `<button class="quiet" data-action="retry-cleanup" data-cleanup-id="${escapeHtml(run.id)}">再次收束</button>` : ""}</div>` : '<span class="legacy-mark">仅作历史留存</span>'}
-          </article>`,
+            ${run.mode !== "LEGACY_V2" ? `<div class="archive-actions"><button class="secondary" data-replay-id="${escapeHtml(run.id)}">打开回看</button>${compareAction}${run.runtime_phase === "CLEANUP_PENDING" && run.runtime_error_code ? `<button class="quiet" data-action="retry-cleanup" data-cleanup-id="${escapeHtml(run.id)}">再次收束</button>` : ""}</div>` : '<span class="legacy-mark">仅作历史留存</span>'}
+          </article>`;
+          },
         )
         .join("")
     : '<div class="empty-page inline"><h2>卷册仍是空的</h2><p>封存一局后，它会留在这里。</p></div>';
-  return chrome(`<header class="page-header"><p class="kicker">卷册</p><h1>封存卷册</h1><p>结束并不抹去当时的未知。每一局都保留自己的路。</p></header><section class="archive-list">${runs}</section>`);
+  const compareHint = selected
+    ? `<p class="archive-compare-hint">已选一卷：请从同一危局、同一内容版本的另一卷中继续选择。</p>`
+    : "";
+  return chrome(`<header class="page-header"><p class="kicker">卷册</p><h1>封存卷册</h1><p>结束并不抹去当时的未知。每一局都保留自己的路。</p>${compareHint}</header><section class="archive-list">${runs}</section>`);
 }
 
 function historyPage() {
@@ -511,6 +532,7 @@ function render() {
     desk: deskPage,
     settlement: settlementPage,
     replay: replayPage,
+    compare: comparePage,
     archive: archivePage,
     history: historyPage,
     setup: setupPage,
@@ -579,6 +601,27 @@ async function loadSettlement(runId = state.settlementRunId) {
   return settlement;
 }
 
+async function loadCompare(
+  leftRunId = state.compareLeftRunId,
+  rightRunId = state.compareRightRunId,
+) {
+  if (!leftRunId || !rightRunId) return null;
+  if (
+    state.compare?.runs?.left?.id === leftRunId
+    && state.compare?.runs?.right?.id === rightRunId
+  ) {
+    return state.compare;
+  }
+  const comparison = await api(
+    `/api/compare?left=${encodeURIComponent(leftRunId)}&right=${encodeURIComponent(rightRunId)}`,
+  );
+  state.compare = comparison;
+  state.compareLeftRunId = comparison.runs.left.id;
+  state.compareRightRunId = comparison.runs.right.id;
+  state.crisisId = comparison.crisis.id;
+  return comparison;
+}
+
 async function loadPageData() {
   if (state.page === "crisis") await loadCrisis(state.crisisId);
   if (["watch", "desk"].includes(state.page) && state.active) {
@@ -586,6 +629,7 @@ async function loadPageData() {
   }
   if (state.page === "archive") state.archive = (await api("/api/archive")).runs;
   if (state.page === "settlement") await loadSettlement();
+  if (state.page === "compare") await loadCompare();
   if (state.page === "history") {
     const crisisId = selectedCrisisId();
     state.history = crisisId ? await api(`/api/crises/${encodeURIComponent(crisisId)}/history`) : null;
@@ -677,6 +721,10 @@ async function startRun(mode, humanActorId = "") {
   state.active = result.run;
   state.settlement = null;
   state.settlementRunId = "";
+  state.compare = null;
+  state.compareLeftRunId = "";
+  state.compareRightRunId = "";
+  state.compareSelectedRunId = "";
   state.crisisId = result.run.crisis_id;
   state.config = await api("/api/config");
   state.lens = "world";
@@ -881,6 +929,9 @@ async function openReplay(runId) {
   state.replayActor = state.replay.run.human_actor || fallbackActorId();
   state.settlement = null;
   state.settlementRunId = "";
+  state.compare = null;
+  state.compareLeftRunId = "";
+  state.compareRightRunId = "";
   state.page = "replay";
   go("replay");
 }
@@ -890,11 +941,48 @@ async function openSettlement(runId) {
   state.perspective = null;
   state.world = null;
   state.replay = null;
+  state.compare = null;
+  state.compareLeftRunId = "";
+  state.compareRightRunId = "";
   state.settlementRunId = runId;
   await loadSettlement(runId);
   state.notice = "危局已经形成局部结果，可以先阅读这一页，再回看整局。";
   state.page = "settlement";
   goSettlement(runId);
+}
+
+async function openCompare(leftRunId, rightRunId) {
+  state.replay = null;
+  state.settlement = null;
+  state.settlementRunId = "";
+  state.compareLeftRunId = leftRunId;
+  state.compareRightRunId = rightRunId;
+  await loadCompare(leftRunId, rightRunId);
+  state.compareSelectedRunId = "";
+  state.page = "compare";
+  goCompare(leftRunId, rightRunId);
+}
+
+async function selectComparisonRun(runId) {
+  const selected = state.archive.find((run) => run.id === state.compareSelectedRunId) || null;
+  const next = state.archive.find((run) => run.id === runId) || null;
+  if (!next || next.mode === "LEGACY_V2" || next.crisis_phase !== "SETTLED") {
+    throw new Error("只有已经形成 Outcome 的危局可以参与两卷对照。");
+  }
+  if (selected?.id === next.id) {
+    state.compareSelectedRunId = "";
+    state.notice = "已取消这卷对照选择。";
+    return;
+  }
+  if (!selected) {
+    state.compareSelectedRunId = next.id;
+    state.notice = "已选一卷；请从同一危局的另一卷继续选择。";
+    return;
+  }
+  if (selected.crisis_id !== next.crisis_id || selected.crisis_hash !== next.crisis_hash) {
+    throw new Error("两卷必须来自同一场危局及其相同内容版本。");
+  }
+  await openCompare(selected.id, next.id);
 }
 
 function currentRouteHash() {
@@ -903,6 +991,9 @@ function currentRouteHash() {
   }
   if (state.page === "crisis" && state.crisisId) {
     return `#/crisis/${encodeURIComponent(state.crisisId)}`;
+  }
+  if (state.page === "compare" && state.compareLeftRunId && state.compareRightRunId) {
+    return `#/compare/${encodeURIComponent(state.compareLeftRunId)}/${encodeURIComponent(state.compareRightRunId)}`;
   }
   return `#/${state.page}`;
 }
@@ -935,6 +1026,10 @@ root.addEventListener("click", (event) => {
   }
   const replayId = event.target.closest("[data-replay-id]")?.dataset.replayId;
   if (replayId) return runAction(() => openReplay(replayId));
+  const compareRunId = event.target.closest("[data-compare-run-id]")?.dataset.compareRunId;
+  if (compareRunId) return runAction(() => selectComparisonRun(compareRunId));
+  const compareReplayId = event.target.closest("[data-compare-replay-id]")?.dataset.compareReplayId;
+  if (compareReplayId) return runAction(() => openReplay(compareReplayId));
   const settlementReplayId = event.target.closest("[data-settlement-replay-id]")?.dataset.settlementReplayId;
   if (settlementReplayId) return runAction(() => openReplay(settlementReplayId));
   const cleanupId = event.target.closest("[data-cleanup-id]")?.dataset.cleanupId;

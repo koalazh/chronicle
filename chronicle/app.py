@@ -493,6 +493,16 @@ def create_app(
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
 
+    @app.get("/api/compare")
+    async def compare_runs(
+        left: str = Query(min_length=1, max_length=128),
+        right: str = Query(min_length=1, max_length=128),
+    ) -> dict[str, Any]:
+        try:
+            return crisis_engine().compare(left, right)
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
     @app.get("/api/archive")
     async def archive() -> dict[str, Any]:
         active = current_config()

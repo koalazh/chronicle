@@ -33,7 +33,7 @@ web/
   app.js          暂时保留生命周期、加载、mutation lock 与事件委托
 ```
 
-模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 仍是生命周期 owner；Desk 与 Settlement 已在保持相同 interaction contract 的前提下迁移，Replay/Compare 留待后续逐页迁移。
+模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 仍是生命周期 owner；Desk、Settlement 与 Compare 已在保持相同 interaction contract 的前提下迁移，Replay 留待后续逐页迁移。
 
 ## Phase 18 迁移准则
 
@@ -61,3 +61,9 @@ Desk 没有建立新的前端状态模型：后端在当前 Actor 的 `product_p
 Settlement 不另造世界状态：调度器原有 `SETTLEMENT` attention 和 sealed `outcome_json` 仍是唯一来源。`app.js` 只在 `/continue` 返回 `SEALED` / `SETTLED` 时转到可直达的 `#/settlement/{run_id}`，再经既有 Outcome API 加载；手动封存仍走 Replay。Outcome 追加的 `summary` 只是已执行的 deterministic Resolution Result 的持久化投影，不引入 LLM 或新的 Resolver 分支。
 
 fixture/API 测试证明山海关与南都的结算 Outcome 都保留该摘要，且一条隔离的自动结算 Run 可由 `GET /api/runs/{id}/outcome` 读取。静态合同覆盖自动跳转、Outcome 路由、不可逆节点文案和不呈现 raw resolution variant/factors。当前尚未为 Settlement 页面新增浏览器检查，也没有启动 Hermes；这两项不能由上述 fixture/API 证据替代。
+
+## Phase 21 验证结果
+
+Compare 继续使用 `app.js` 作为请求、hash 路由与 busy owner；`web/pages/compare.js` 只呈现 `GET /api/compare` 的产品投影，Archive 只负责选择两卷同 Crisis／同内容 pin 的已结算记录。它不读取 Ledger、Snapshot 或 Outcome 原始 ID，也不构造前端世界线树。
+
+后端的首次分歧来自归一化的 append-only Ledger 事实，而不是模型文字：消息只比较发送／送达及参与方，Observation 才比较内容、来源与可靠性；Plan、Reflection、Revisit、Event ID 与通信修辞都被排除。focused fixture/API 测试证明不同消息正文不会单独形成分歧、两种山海关结算会形成不同 Outcome、同 Crisis 限制和重复 Run 拒绝生效；静态合同覆盖 Compare route、Archive 选择、无 raw Resolver fields 和无 Worldline Tree。当前没有为 Compare 新增浏览器或 Hermes 证据，这两项仍不能由 fixture/API/static 代替。

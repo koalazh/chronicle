@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections import deque
+import json
+from collections import Counter, deque
 from collections.abc import Callable
 from typing import Any
 
@@ -68,6 +69,317 @@ _PREFERRED_COMPRESSION_TYPES = frozenset(
         "RESOLUTION_APPLIED",
     }
 )
+
+
+def compare_material_runs(
+    left_events: list[dict[str, Any]],
+    right_events: list[dict[str, Any]],
+    *,
+    project_event: EventProjection,
+) -> dict[str, Any]:
+    """Compare two sealed Ledgers through durable World facts only.
+
+    This deliberately ignores free-form communications, plans, reflections, and
+    event identifiers.  A first difference therefore means that a World object,
+    Agreement, Operation, or obtained Observation actually became different.
+    """
+
+    divergence = _first_material_divergence(left_events, right_events)
+    if divergence is None:
+        return {
+            "first_material_divergence": None,
+            "consequence_paths": {
+                "title": "这两局尚未出现可建模的世界分歧",
+                "left": {"entered_outcome": False, "steps": []},
+                "right": {"entered_outcome": False, "steps": []},
+            },
+        }
+
+    left_events_at_fork = divergence["left"]
+    right_events_at_fork = divergence["right"]
+    return {
+        "first_material_divergence": {
+            "tick": divergence["tick"],
+            "summary": (
+                f"危局第 {divergence['tick']} 日，两局第一次进入不同的可验证现实。"
+            ),
+            "left": [project_event(event) for event in left_events_at_fork[:3]],
+            "right": [project_event(event) for event in right_events_at_fork[:3]],
+        },
+        "consequence_paths": {
+            "title": "这处差异后来如何进入结局",
+            "left": _comparison_consequence_path(
+                left_events,
+                [str(event["id"]) for event in left_events_at_fork],
+                project_event,
+            ),
+            "right": _comparison_consequence_path(
+                right_events,
+                [str(event["id"]) for event in right_events_at_fork],
+                project_event,
+            ),
+        },
+    }
+
+
+def _first_material_divergence(
+    left_events: list[dict[str, Any]], right_events: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    left_by_tick = _comparison_facts_by_tick(left_events)
+    right_by_tick = _comparison_facts_by_tick(right_events)
+    for tick in sorted(set(left_by_tick).union(right_by_tick)):
+        left = left_by_tick.get(tick, [])
+        right = right_by_tick.get(tick, [])
+        if Counter(key for key, _ in left) == Counter(key for key, _ in right):
+            continue
+        return {
+            "tick": tick,
+            "left": _unmatched_comparison_events(left, right),
+            "right": _unmatched_comparison_events(right, left),
+        }
+    return None
+
+
+def _comparison_facts_by_tick(
+    events: list[dict[str, Any]],
+) -> dict[int, list[tuple[str, dict[str, Any]]]]:
+    by_tick: dict[int, list[tuple[str, dict[str, Any]]]] = {}
+    for event in events:
+        fact = _comparison_fact(event)
+        if fact is None:
+            continue
+        by_tick.setdefault(int(event["tick"]), []).append(
+            (json_key(fact), event)
+        )
+    return by_tick
+
+
+def _unmatched_comparison_events(
+    candidates: list[tuple[str, dict[str, Any]]],
+    other: list[tuple[str, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    remaining = Counter(key for key, _ in other)
+    unmatched: list[dict[str, Any]] = []
+    for key, event in candidates:
+        if remaining[key]:
+            remaining[key] -= 1
+            continue
+        unmatched.append(event)
+    return unmatched
+
+
+def _comparison_consequence_path(
+    events: list[dict[str, Any]],
+    source_event_ids: list[str],
+    project_event: EventProjection,
+) -> dict[str, Any]:
+    target_event_id = next(
+        (
+            str(event["id"])
+            for event in reversed(events)
+            if event["event_type"] == "CRISIS_SETTLED"
+        ),
+        "",
+    )
+    events_by_id = {str(event["id"]): event for event in events}
+    children = _children(events)
+    for source_event_id in source_event_ids:
+        path = [
+            events_by_id[event_id]
+            for event_id in _path_to_target(source_event_id, target_event_id, children)
+            if _comparison_fact(events_by_id[event_id]) is not None
+        ]
+        if path:
+            return {
+                "entered_outcome": True,
+                "steps": [
+                    project_event(event) for event in _compress_material_events(path)
+                ],
+            }
+    return {"entered_outcome": False, "steps": []}
+
+
+def _comparison_fact(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize an event into a fact whose equality is independent of prose."""
+
+    event_type = str(event["event_type"])
+    payload = event["payload"]
+    if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
+        return {
+            "kind": "message",
+            "stage": event_type,
+            "sender": str(payload.get("sender", "")),
+            "recipient": str(payload.get("recipient", "")),
+            "arrival_tick": payload.get("arrival_tick"),
+        }
+    if event_type in {"INVESTIGATION_STARTED", "INVESTIGATION_COMPLETED"}:
+        investigation = payload.get("investigation", {})
+        return {
+            "kind": "investigation",
+            "stage": event_type,
+            "actor": str(investigation.get("actor_id", event.get("seat_id") or "")),
+            "definition": str(investigation.get("definition_id", "")),
+            "target": str(investigation.get("target_id", "")),
+            "method": str(investigation.get("method", "")),
+            "expected_result_tick": investigation.get("expected_result_tick"),
+        }
+    if event_type == "OBSERVATION_OBTAINED":
+        observation = payload.get("observation", {})
+        return {
+            "kind": "observation",
+            "actor": str(event.get("seat_id") or ""),
+            "content": str(observation.get("content", "")),
+            "source": str(observation.get("source", "")),
+            "source_ids": sorted(str(item) for item in observation.get("source_ids", [])),
+            "reliability": str(observation.get("reliability", "")),
+            "related_assertions": sorted(
+                str(item) for item in observation.get("related_assertions", [])
+            ),
+        }
+    if event_type in {
+        "OFFER_PROPOSED",
+        "OFFER_COUNTERED",
+        "OFFER_ACCEPTED",
+        "OFFER_REJECTED",
+        "OFFER_WITHDRAWN",
+        "OFFER_EXPIRED",
+    }:
+        offer = payload.get("counter_offer") if event_type == "OFFER_COUNTERED" else payload.get("offer")
+        return {
+            "kind": "offer",
+            "stage": event_type,
+            "offer": _comparison_offer(offer),
+        }
+    if event_type in {"AGREEMENT_CREATED", "AGREEMENT_FULFILLED", "AGREEMENT_BREACHED"}:
+        agreement = payload.get("agreement", {})
+        return {
+            "kind": "agreement",
+            "stage": event_type,
+            "parties": sorted(str(item) for item in agreement.get("parties", [])),
+            "terms": _comparison_terms(agreement.get("terms", [])),
+            "status": str(agreement.get("status", "")),
+        }
+    if event_type in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
+        operation = payload.get("operation", {})
+        return {
+            "kind": "operation",
+            "stage": event_type,
+            "actor": str(operation.get("actor_id", event.get("seat_id") or "")),
+            "definition": str(operation.get("definition_id", "")),
+            "targets": [str(item) for item in operation.get("target_ids", [])],
+            "expected_complete_tick": operation.get("expected_complete_tick"),
+            "status": str(operation.get("status", "")),
+            "result_state": {
+                str(key): str(value)
+                for key, value in sorted(operation.get("result_state", {}).items())
+            },
+        }
+    if event_type in {"MOVEMENT_STARTED", "MOVEMENT_ARRIVED"}:
+        return {
+            "kind": "movement",
+            "stage": event_type,
+            "actor": str(payload.get("actor_id", event.get("seat_id") or "")),
+            "from": str(payload.get("from", "")),
+            "to": str(payload.get("to", "")),
+            "arrival_tick": payload.get("arrival_tick"),
+            "status": str(payload.get("status", "")),
+        }
+    if event_type in {"PRESSURE_APPLIED", "PRESSURE_SKIPPED"}:
+        pressure = payload.get("pressure", {})
+        return {
+            "kind": "pressure",
+            "stage": event_type,
+            "pressure": str(pressure.get("id", "")),
+            "effects": _comparison_effects(pressure.get("effects", [])),
+            "status": str(pressure.get("status", "")),
+        }
+    if event_type in {"ENTITY_STATE_CHANGED", "RESOLUTION_ENTITY_EFFECT"}:
+        return {
+            "kind": "entity_state",
+            "stage": event_type,
+            "entity": str(payload.get("entity_id", "")),
+            "before": str(payload.get("before", "")),
+            "after": str(payload.get("after", "")),
+        }
+    if event_type == "RESOLUTION_AGREEMENT_EFFECT":
+        return {
+            "kind": "agreement_state",
+            "stage": event_type,
+            "before": str(payload.get("before", "")),
+            "after": str(payload.get("after", "")),
+            "description": str(payload.get("description", "")),
+        }
+    if event_type == "RESOLUTION_APPLIED":
+        result = payload.get("result", {})
+        return {
+            "kind": "resolution",
+            "result_kind": str(result.get("kind", "")),
+            "variant": str(result.get("variant", "")),
+            "ambiguity_used": bool(result.get("ambiguity_used", False)),
+        }
+    if event_type in {"RESOLUTION_REPORT_DISPATCHED", "RESOLUTION_REPORT_DELIVERED"}:
+        report = payload.get("report", {})
+        return {
+            "kind": "resolution_information",
+            "stage": event_type,
+            "recipient": str(report.get("recipient", event.get("seat_id") or "")),
+            "resolution_kind": str(report.get("resolution_kind", "")),
+        }
+    if event_type == "CRISIS_SETTLED":
+        return {
+            "kind": "settlement",
+            "settlement_type": str(payload.get("settlement_type", "")),
+            "reason": str(payload.get("reason", "")),
+        }
+    return None
+
+
+def _comparison_offer(offer: Any) -> dict[str, Any]:
+    value = offer if isinstance(offer, dict) else {}
+    return {
+        "issuer": str(value.get("issuer", "")),
+        "recipient": str(value.get("recipient", "")),
+        "terms": _comparison_terms(value.get("terms", [])),
+        "expires_tick": value.get("expires_tick"),
+        "status": str(value.get("status", "")),
+    }
+
+
+def _comparison_terms(terms: Any) -> list[dict[str, str]]:
+    if not isinstance(terms, list):
+        return []
+    return sorted(
+        [
+            {
+                "type": str(term.get("type", "")),
+                "subject": str(term.get("subject", "")),
+                "value": str(term.get("value", "")),
+            }
+            for term in terms
+            if isinstance(term, dict)
+        ],
+        key=json_key,
+    )
+
+
+def _comparison_effects(effects: Any) -> list[dict[str, str]]:
+    if not isinstance(effects, list):
+        return []
+    return sorted(
+        [
+            {
+                "subject": str(effect.get("subject", "")),
+                "state": str(effect.get("state", "")),
+            }
+            for effect in effects
+            if isinstance(effect, dict)
+        ],
+        key=json_key,
+    )
+
+
+def json_key(value: dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def material_causal_roots(

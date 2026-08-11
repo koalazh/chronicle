@@ -2,7 +2,7 @@
 
 本文合并页面产品约定与视觉约定。它回答“用户应该看到什么”，不把 Profile、Wake、数据库或技术日志当成用户心智；实现以 `web/` 下的 ES modules、`web/index.html`、`web/styles.css` 和当前 API 为准。
 
-> V4 状态：Phase 20 已实现 Volume Home、Crisis Cover、任意 playable Actor 入口、`SPATIAL` / `POLITICAL` Surface、私有 Perspective 驱动的 Takeover Desk，以及从自动 Settlement 进入的 Outcome 页面。Replay/Compare 的 V4 细化仍由后续 Phase 完成；本文件不会把当前 fixture/API 或静态页面证据写成 live Hermes 验收。
+> V4 状态：Phase 21 已实现 Volume Home、Crisis Cover、任意 playable Actor 入口、`SPATIAL` / `POLITICAL` Surface、私有 Perspective 驱动的 Takeover Desk、从自动 Settlement 进入的 Outcome 页面，以及同一危局的两卷对照。Replay 的 V4 分层呈现与 live Hermes 验收仍由后续 Phase 完成；本文件不会把当前 fixture/API 或静态页面证据写成 live Hermes 验收。
 
 ## 首次打开
 
@@ -40,6 +40,14 @@ Crisis Cover 回答四件事：现在发生什么、真正未决的问题、谁�
 
 用户主动封存的未结算 Run 仍进入原有回看/卷册路径，不能伪装成一个世界已回答的 Settlement。若 live Run 的本地资源仍在收束，Settlement 先保留可回看 Outcome，再单独提供“再次收束”。
 
+### 两卷对照
+
+Compare 只从封存卷册进入：用户先选择一卷已 `SETTLED` 的 V4 Crisis，再从**同一 Crisis 且相同内容版本**选择第二卷。旧版留存、手动封存但未形成 Outcome 的卷册，以及不同 Crisis／不同内容 pin 的卷册都不能被拼成比较；页面与后端都拒绝它们，而不是把不同 checkpoint 或不同规则误当作同一场重玩。
+
+页面是两份并置的结局文书，不是世界线树或数据仪表盘。先展示两份 Outcome 的确定性摘要、进入结果的关键现实、仍有约束力或已经兑现的约定，以及与真实后续的必要前提关系；随后才展示“第一次出现分歧”。
+
+这处 First Material Divergence 只能来自结构化 Ledger 世界事实：实体状态、Offer／Agreement 生命周期、Operation／Movement、Pressure，或已经取得的 Observation。信件正文措辞、Plan、Reflection、Revisit 和 Event ID 都不参与判定。这样两封语气不同却没有改变可执行现实的信，不会被误报为历史分叉。每一卷下方只压缩展示能从 Ledger 直接追到 `CRISIS_SETTLED` 的后续路径；没有这种直接路径时，页面说明证据边界并保留各自 Outcome，绝不补写因果。
+
 ### 回看、卷册、史实和设置
 
 Watch 回看默认是“封存后全景”，标题为“几条人生如何相遇”；Takeover 回看默认是“当时可见”，第一屏回答“在你看不见的地方发生了什么”。回看要能读出“计划 → 发信 → 收信 → 收信人改计划”，不能只显示内部事件名或工具调用次数。
@@ -69,7 +77,7 @@ Surface 在宽屏横向、手机按内容单列；信件显示“在途中”或
 
 live Run 的 `BOOTSTRAPPING`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP_PENDING` 用现有纸页、朱印与细蓝线显示为一张轻量的“待续页”。它只说明已知状态：正在建立、正在恢复、尚未准备好或已经封存；不显示假进度、倒计时或“主体正在思考”。建立、恢复、推进、决定和封存共享一个 mutation lock，书案在这段时间展示已提交文字的只读纸条。`FAILED` 只提供“重新准备”或封存，不允许继续输入。
 
-至少检查 1440、1280、768 和 390 宽度：没有横向溢出，Corridor 方向正确，Desk 文书和 Settlement 行动在手机为单列，按钮、label、textarea 可键盘操作并有清晰 disabled 状态。浏览器截图只证明当时本地 API/fixture 的页面状态。
+至少检查 1440、1280、768 和 390 宽度：没有横向溢出，Corridor 方向正确，Desk 文书、Settlement 行动与两卷 Compare 文书在手机为单列，按钮、label、textarea 可键盘操作并有清晰 disabled 状态。浏览器截图只证明当时本地 API/fixture 的页面状态。
 
 ## 前后端接缝
 
@@ -83,7 +91,7 @@ live Run 的 `BOOTSTRAPPING`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP
 | 创建/恢复一局 | `POST /api/runs`、`GET /api/runs/active`、`POST /api/runs/{id}/runtime/retry` |
 | 合法视野 | `GET /api/runs/{id}/world`、`GET /api/runs/{id}/perspective/{actor}` |
 | 推进/决定/封存 | `POST /api/runs/{id}/continue`、`POST /api/runs/{id}/decision`、`POST /api/runs/{id}/seal` |
-| Outcome/回看/卷册/史实 | `GET /api/runs/{id}/outcome`、`GET /api/runs/{id}/replay`、`GET /api/archive`、`GET /api/crises/{id}/history` |
+| Outcome/回看/对照/卷册/史实 | `GET /api/runs/{id}/outcome`、`GET /api/runs/{id}/replay`、`GET /api/compare?left=...&right=...`、`GET /api/archive`、`GET /api/crises/{id}/history` |
 | 原始诊断 | `/api/dev/*`，仅开发模式开放 |
 
 后端错误要翻译成下一步可执行的产品语言；主产品不展示 Profile、Wake、Session、Memory hash、Worldline、ActionType、HTTP 状态码、原始模型配置或数据库表名。

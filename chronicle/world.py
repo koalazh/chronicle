@@ -553,29 +553,89 @@ class WorldAffordanceSession:
                 result = {"status": "accepted"}
         return self._stage("manage_offer", payload, result, idempotency_key=idempotency_key)
 
+    def _known_evidence(self, evidence_event_ids: list[Any]) -> list[str] | None:
+        wake = self.service.db.crisis_wake(self.identity.wake_id)
+        if wake is None:
+            return None
+        requested = [str(item).strip() for item in evidence_event_ids if str(item).strip()]
+        if not requested and wake["trigger_event_id"]:
+            requested = [str(wake["trigger_event_id"])]
+        events = {
+            str(event["id"]): event
+            for event in self.service.db.worldline_events(self.identity.run_id)
+        }
+        lifetime = self.service.db.worldline_lifetime(
+            self.identity.run_id, self.identity.actor_id
+        )
+        if lifetime is None:
+            return None
+        for event_id in dict.fromkeys(requested):
+            event = events.get(event_id)
+            if event is None:
+                return None
+            payload = event.get("payload", {})
+            if (
+                event.get("seat_id") == self.identity.actor_id
+                or isinstance(payload, dict)
+                and self.identity.actor_id in payload.get("visibility", [])
+            ):
+                continue
+            known = any(
+                isinstance(item, dict)
+                and event_id
+                in {
+                    str(item.get("event_id", "")),
+                    str(item.get("delivery_event_id", "")),
+                }
+                for item in lifetime["knowledge"]
+            )
+            if not known:
+                return None
+        return list(dict.fromkeys(requested))
+
     def update_plan(
         self,
         objective: str,
         steps: list[str],
         *,
         rationale: str = "",
-        belief_updates: list[dict[str, str] | str] | None = None,
+        rationale_source: str = "",
+        belief_updates: list[dict[str, Any] | str] | None = None,
+        belief_source: str = "",
         reconsider_when: list[str] | None = None,
         idempotency_key: str,
     ) -> dict[str, Any]:
         beliefs = [item for item in belief_updates or [] if isinstance(item, dict)]
         ignored_belief_updates = len(belief_updates or []) - len(beliefs)
+        evidence_error = False
+        normalized_beliefs: list[dict[str, Any]] = []
+        for belief in beliefs:
+            evidence = belief.get("evidence_event_ids", [])
+            if not isinstance(evidence, list):
+                evidence_error = True
+                break
+            known_evidence = self._known_evidence(evidence)
+            if known_evidence is None:
+                evidence_error = True
+                break
+            normalized = dict(belief)
+            normalized["evidence_event_ids"] = known_evidence
+            normalized_beliefs.append(normalized)
         payload = {
             "objective": objective.strip(),
             "steps": [step.strip() for step in steps if step.strip()],
             "rationale": rationale.strip(),
-            "belief_updates": beliefs,
+            "rationale_source": rationale_source.strip(),
+            "belief_source": belief_source.strip(),
+            "belief_updates": normalized_beliefs,
             "reconsider_when": [item.strip() for item in reconsider_when or [] if item.strip()],
         }
         if "update_plan" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
         elif not payload["objective"] or not payload["steps"]:
             result = {"status": "rejected", "code": "invalid_plan"}
+        elif evidence_error:
+            result = {"status": "rejected", "code": "evidence_not_known"}
         elif any(
             not isinstance(item, dict)
             or not str(item.get("subject", "")).strip()

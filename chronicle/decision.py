@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -29,6 +30,59 @@ class DecisionOperation(StrictModel):
 class InterpretedDecision(StrictModel):
     summary: str = Field(max_length=1200)
     operations: list[DecisionOperation] = Field(max_length=8)
+
+
+def guard_human_interpretation(text: str, decision: InterpretedDecision) -> InterpretedDecision:
+    """Remove model-inferred psychology that the Human did not state."""
+
+    reason_markers = ("因为", "由于", "考虑到", "担心", "为了", "所以")
+    belief_markers = (
+        "相信",
+        "不信",
+        "怀疑",
+        "判断",
+        "认为",
+        "不确定",
+        "确信",
+        "担心",
+    )
+    explicit_reason = any(marker in text for marker in reason_markers)
+    explicit_belief = any(marker in text for marker in belief_markers)
+    operations: list[DecisionOperation] = []
+    for operation in decision.operations:
+        arguments = dict(operation.arguments)
+        if operation.tool == "update_plan":
+            rationale = str(arguments.get("rationale", "")).strip()
+            if not rationale or not explicit_reason or not _shares_phrase(text, rationale):
+                arguments["rationale"] = ""
+                arguments["rationale_source"] = "unstated"
+            else:
+                arguments["rationale_source"] = "explicit"
+            beliefs = arguments.get("belief_updates", [])
+            if not explicit_belief:
+                arguments["belief_updates"] = []
+                arguments["belief_source"] = "unstated"
+            else:
+                arguments["belief_updates"] = [
+                    item
+                    for item in beliefs
+                    if isinstance(item, dict)
+                    and _shares_phrase(text, str(item.get("assessment", "")))
+                ]
+                arguments["belief_source"] = "explicit"
+        operations.append(DecisionOperation(tool=operation.tool, arguments=arguments))
+    return InterpretedDecision(summary=decision.summary, operations=operations)
+
+
+def _shares_phrase(text: str, candidate: str) -> bool:
+    if not text.strip() or not candidate.strip():
+        return False
+    text_folded = text.casefold()
+    candidate_folded = candidate.casefold()
+    if candidate_folded in text_folded:
+        return True
+    terms = re.findall(r"[a-z0-9][a-z0-9_-]+|[\u4e00-\u9fff]{2,}", text_folded)
+    return any(term in candidate_folded for term in terms if len(term) >= 2)
 
 
 class DecisionInterpreter(Protocol):
@@ -200,6 +254,8 @@ class ModelDecisionInterpreter:
                     "operate 参数 operation_definition_id/targets/description；"
                     "operation_definition_id 与 targets 必须从 private_perspective.available_operations 选择；"
                     "update_plan 参数 objective/steps/rationale/belief_updates/reconsider_when；"
+                    "rationale 只能复述用户明确说出的理由，未明确说明时必须为空；"
+                    "belief_updates 只能记录用户明确表达的相信、不信、判断或怀疑，不能从行动反推心理；"
                     "schedule_revisit 参数 after_days/reason。"
                 ),
             },

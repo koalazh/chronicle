@@ -10,6 +10,7 @@ from . import hermes
 from .crisis import CrisisPack, VolumePack
 from .db import content_hash, stable_hash
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
+from .subject_continuity import LifetimeContextBuilder
 
 if TYPE_CHECKING:
     from .host import ChronicleHost
@@ -128,6 +129,11 @@ class VolumeRuntime:
                     "knowledge": list(definition.initial_knowledge),
                     "beliefs": dict(definition.initial_beliefs),
                     "authority": list(definition.stable_authority),
+                    "resources": dict(definition.initial_resources),
+                    "plan": [],
+                    "commitments": [],
+                    "revisits": [],
+                    "last_perspective": {},
                     "genesis_context": dict(definition.genesis_context),
                 }
             )
@@ -228,6 +234,25 @@ class VolumeRuntime:
             "crisis_instances": self.db.crisis_instances(worldline_id),
             "projection": snapshot["projection"],
         }
+
+    def lifetime_context(
+        self, worldline_id: str, lifetime_id: str, *, wake_id: str | None = None
+    ) -> dict[str, Any]:
+        row = self._active_worldline(worldline_id)
+        snapshot = self.db.worldline_snapshot(worldline_id, int(row["current_tick"]))
+        if snapshot is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        wake = self.db.crisis_wake(wake_id) if wake_id else None
+        return LifetimeContextBuilder(self.db, self.pack).build(
+            worldline_id,
+            lifetime_id,
+            snapshot["projection"],
+            wake=wake,
+        )
+
+    def causal_trace(self, worldline_id: str, event_id: str) -> dict[str, Any]:
+        self._active_worldline(worldline_id)
+        return LifetimeContextBuilder(self.db, self.pack).causal_trace(worldline_id, event_id)
 
     def activate_crisis(self, worldline_id: str, crisis_id: str) -> dict[str, Any]:
         row = self._active_worldline(worldline_id)
@@ -790,9 +815,12 @@ class VolumeRuntime:
                 "controller": lifetime["controller"],
                 "trigger_event_id": wake["trigger_event_id"],
                 "wake_type": wake["wake_type"],
-                "world": copy.deepcopy(projection),
-                "knowledge": list(lifetime["knowledge"]),
-                "beliefs": dict(lifetime["beliefs"]),
+                "context": LifetimeContextBuilder(self.db, self.pack).build(
+                    worldline_id,
+                    lifetime["id"],
+                    projection,
+                    wake=wake,
+                ),
             }
             frozen_updates.append(
                 {
@@ -883,10 +911,30 @@ class VolumeRuntime:
         if not isinstance(intent, dict) or str(intent.get("type", "wait")) not in {
             "wait",
             "message",
+            "update_plan",
         }:
-            raise VolumeRuntimeError("V5 Phase 7 supports wait and message intents")
+            raise VolumeRuntimeError("V5 supports wait, message, and update_plan intents")
         intent = dict(intent)
         intent.setdefault("type", "wait")
+        if intent["type"] == "update_plan":
+            intent = self._normalize_plan_intent(
+                worldline_id,
+                lifetime,
+                wake,
+                intent,
+                source=actual_source,
+            )
+        elif intent["type"] == "message":
+            self._logical_message(worldline_id, pending["id"], seat, intent, tick)
+        belief_keys = [
+            str(item).strip() for item in intent.get("belief_keys", []) if str(item).strip()
+        ]
+        unknown_belief_keys = set(belief_keys) - set(lifetime["beliefs"])
+        if unknown_belief_keys:
+            raise VolumeRuntimeError(
+                "unknown expectation keys: " + ", ".join(sorted(unknown_belief_keys))
+            )
+        intent["belief_keys"] = list(dict.fromkeys(belief_keys))
         key = idempotency_key or stable_hash(
             {"moment_id": pending["id"], "seat": seat, "intent": intent}
         )
@@ -972,9 +1020,24 @@ class VolumeRuntime:
         events: list[dict[str, Any]] = []
         wake_updates: list[dict[str, Any]] = []
         operation_updates: list[dict[str, Any]] = []
+        lifetime_updates: list[dict[str, Any]] = []
         committed_intent_ids: list[str] = []
         for lifetime, wake, operation in staged:
             intent = dict(operation["payload"]["intent"])
+            belief_parent_ids = self._belief_parent_ids(
+                worldline_id,
+                lifetime["seat"],
+                intent.get("belief_keys", []),
+                events,
+            )
+            causal_parent_ids = list(
+                dict.fromkeys(
+                    [
+                        *([wake["trigger_event_id"]] if wake["trigger_event_id"] else []),
+                        *belief_parent_ids,
+                    ]
+                )
+            )
             intent_event = self._event(
                 worldline_id,
                 tick,
@@ -985,17 +1048,86 @@ class VolumeRuntime:
                     "seat": lifetime["seat"],
                     "source": operation["payload"]["source"],
                     "intent": intent,
+                    "belief_keys": list(intent.get("belief_keys", [])),
                 },
                 seat_id=lifetime["seat"],
                 provenance=Provenance.BRANCH_DERIVED.value,
-                causal_parent_ids=[wake["trigger_event_id"]] if wake["trigger_event_id"] else [],
+                causal_parent_ids=causal_parent_ids,
                 event_id=f"{pending['id']}:intent:{lifetime['seat']}:{stable_hash(intent)[:12]}",
                 runtime_epoch=row["runtime_epoch"],
             )
             events.append(intent_event)
             committed_intent_ids.append(intent_event["id"])
             outcome: dict[str, Any] = {"status": "committed", "event_id": intent_event["id"]}
-            if intent["type"] == "message":
+            if intent["type"] == "update_plan":
+                plan = {
+                    "version": f"{pending['id']}:plan:{lifetime['seat']}:{stable_hash(intent)[:12]}",
+                    "objective": intent["objective"],
+                    "steps": list(intent["steps"]),
+                    "rationale": intent["rationale"],
+                    "rationale_source": intent.get("rationale_source", ""),
+                    "reconsider_when": list(intent.get("reconsider_when", [])),
+                    "updated_tick": tick,
+                }
+                plan_event = self._event(
+                    worldline_id,
+                    tick,
+                    "PLAN_UPDATED",
+                    {
+                        "moment_id": pending["id"],
+                        "wake_id": wake["id"],
+                        "seat": lifetime["seat"],
+                        "plan": plan,
+                    },
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[intent_event["id"]],
+                    event_id=f"{intent_event['id']}:plan",
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(plan_event)
+                beliefs = dict(lifetime["beliefs"])
+                belief_keys: list[str] = []
+                for update in intent.get("belief_updates", []):
+                    subject = update["subject"]
+                    belief = {
+                        "assessment": update["assessment"],
+                        "confidence": update["confidence"],
+                        "updated_tick": tick,
+                        "evidence_event_ids": list(update["evidence_event_ids"]),
+                    }
+                    if update.get("condition"):
+                        belief["condition"] = update["condition"]
+                    beliefs[subject] = belief
+                    belief_keys.append(subject)
+                    belief_event = self._event(
+                        worldline_id,
+                        tick,
+                        "BELIEF_UPDATED",
+                        {
+                            "moment_id": pending["id"],
+                            "wake_id": wake["id"],
+                            "seat": lifetime["seat"],
+                            "belief_key": subject,
+                            "belief": belief,
+                            "evidence_event_ids": list(update["evidence_event_ids"]),
+                        },
+                        seat_id=lifetime["seat"],
+                        provenance=Provenance.BRANCH_DERIVED.value,
+                        causal_parent_ids=[plan_event["id"]],
+                        event_id=f"{plan_event['id']}:belief:{stable_hash(update)[:12]}",
+                        runtime_epoch=row["runtime_epoch"],
+                    )
+                    events.append(belief_event)
+                lifetime_updates.append(
+                    {
+                        "id": lifetime["id"],
+                        "plan_json": json.dumps([plan], ensure_ascii=False, sort_keys=True),
+                        "belief_json": json.dumps(beliefs, ensure_ascii=False, sort_keys=True),
+                    }
+                )
+                outcome.update({"plan_version": plan["version"], "belief_keys": belief_keys})
+            elif intent["type"] == "message":
                 message = self._logical_message(
                     worldline_id, pending["id"], lifetime["seat"], intent, tick
                 )
@@ -1049,6 +1181,7 @@ class VolumeRuntime:
             worldline_id,
             events,
             current_tick=tick,
+            lifetime_updates=lifetime_updates,
             wake_updates=wake_updates,
             operation_updates=operation_updates,
             snapshot=projection,
@@ -1073,6 +1206,32 @@ class VolumeRuntime:
         return self.db.worldline_lifetime_by_id(
             worldline_id, actor_id
         ) or self.db.worldline_lifetime(worldline_id, actor_id)
+
+    def _belief_parent_ids(
+        self,
+        worldline_id: str,
+        seat: str,
+        belief_keys: list[str],
+        staged_events: list[dict[str, Any]],
+    ) -> list[str]:
+        if not belief_keys:
+            return []
+        events = [*self.db.worldline_events(worldline_id), *staged_events]
+        parents: list[str] = []
+        for key in dict.fromkeys(str(item) for item in belief_keys):
+            event = next(
+                (
+                    item
+                    for item in reversed(events)
+                    if item["event_type"] == "BELIEF_UPDATED"
+                    and item.get("seat_id") == seat
+                    and item.get("payload", {}).get("belief_key") == key
+                ),
+                None,
+            )
+            if event is not None:
+                parents.append(str(event["id"]))
+        return parents
 
     def _instance_for_crisis(self, worldline_id: str, crisis_id: str) -> dict[str, Any]:
         for instance in self.db.crisis_instances(worldline_id):
@@ -1287,6 +1446,77 @@ class VolumeRuntime:
             "source": "checkpoint",
             "disputed": bool(message.disputed),
             "assertion_ids": list(message.assertion_ids),
+        }
+
+    def _normalize_plan_intent(
+        self,
+        worldline_id: str,
+        lifetime: dict[str, Any],
+        wake: dict[str, Any],
+        intent: dict[str, Any],
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        objective = str(intent.get("objective", "")).strip()
+        steps = [str(step).strip() for step in intent.get("steps", []) if str(step).strip()]
+        if not objective or not steps:
+            raise VolumeRuntimeError("update_plan requires an objective and at least one step")
+        rationale = str(intent.get("rationale", "")).strip()
+        rationale_source = str(intent.get("rationale_source", "")).strip()
+        if source == "human":
+            if rationale and rationale_source != "explicit":
+                raise VolumeRuntimeConflict("Human rationale must be marked as explicitly stated")
+            if not rationale:
+                rationale_source = "unstated"
+            elif rationale_source != "explicit":
+                raise VolumeRuntimeConflict("Human rationale provenance is invalid")
+        belief_updates = intent.get("belief_updates", [])
+        if not isinstance(belief_updates, list):
+            raise VolumeRuntimeError("belief_updates must be a list")
+        if source == "human" and belief_updates and intent.get("belief_source") != "explicit":
+            raise VolumeRuntimeConflict("Human belief updates must be explicitly stated")
+        builder = LifetimeContextBuilder(self.db, self.pack)
+        normalized_beliefs: list[dict[str, Any]] = []
+        for raw in belief_updates:
+            if not isinstance(raw, dict):
+                raise VolumeRuntimeError("each belief update must be an object")
+            subject = str(raw.get("subject", raw.get("belief_key", ""))).strip()
+            assessment = str(raw.get("assessment", "")).strip()
+            confidence = raw.get("confidence")
+            if not subject or not assessment:
+                raise VolumeRuntimeError("belief updates require subject and assessment")
+            if not (
+                confidence in {"low", "medium", "high"}
+                or isinstance(confidence, (int, float))
+                and 0 <= float(confidence) <= 1
+            ):
+                raise VolumeRuntimeError("belief confidence must be low, medium, high, or 0..1")
+            evidence_event_ids = builder.validate_evidence(
+                worldline_id,
+                lifetime["id"],
+                raw.get("evidence_event_ids"),
+                fallback_event_id=str(wake.get("trigger_event_id", "")),
+            )
+            item = {
+                "subject": subject,
+                "assessment": assessment,
+                "confidence": confidence,
+                "evidence_event_ids": evidence_event_ids,
+            }
+            if raw.get("condition"):
+                item["condition"] = str(raw["condition"]).strip()
+            normalized_beliefs.append(item)
+        return {
+            **intent,
+            "objective": objective,
+            "steps": steps,
+            "rationale": rationale,
+            "rationale_source": rationale_source,
+            "belief_source": str(intent.get("belief_source", "")).strip(),
+            "belief_updates": normalized_beliefs,
+            "reconsider_when": [
+                str(item).strip() for item in intent.get("reconsider_when", []) if str(item).strip()
+            ],
         }
 
     def _logical_message(

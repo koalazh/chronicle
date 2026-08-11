@@ -29,6 +29,8 @@ from .host import BranchEngine, ChronicleHost
 from .live_runtime import LiveRuntimeManager
 from .models import BranchAction, WakeType
 from .runtime import WorldlineConflict, WorldlineError, WorldlineRuntime
+from .subject_continuity import SubjectContinuityError
+from .volume_runtime import VolumeRuntimeError
 
 
 class AdvanceRequest(BaseModel):
@@ -578,6 +580,20 @@ def create_app(
             }
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
+
+    @app.get("/api/dev/worldlines/{worldline_id}/why/{event_id}")
+    async def dev_worldline_causal_trace(worldline_id: str, event_id: str) -> dict[str, Any]:
+        active = current_config()
+        if not active.dev:
+            raise HTTPException(status_code=404, detail="Developer diagnostics are disabled")
+        try:
+            return await asyncio.to_thread(
+                ChronicleHost(active).volume_runtime.causal_trace,
+                worldline_id,
+                event_id,
+            )
+        except (SubjectContinuityError, VolumeRuntimeError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/scenario")
     async def scenario() -> dict[str, Any]:

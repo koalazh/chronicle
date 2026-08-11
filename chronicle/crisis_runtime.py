@@ -36,6 +36,7 @@ from .decision import (
     DecisionInterpreter,
     FixtureDecisionInterpreter,
     ModelDecisionInterpreter,
+    guard_human_interpretation,
 )
 from .replay_projection import compare_material_runs, material_causal_roots, replay_layers
 from .resolution import get_resolution_contract
@@ -1160,6 +1161,7 @@ class CrisisRunEngine:
         )
         try:
             interpretation = selected.interpret(text.strip(), perspective)
+            interpretation = guard_human_interpretation(text.strip(), interpretation)
             world = self.world.human_session(wake["id"], human_actor_id)
             for index, operation in enumerate(interpretation.operations):
                 self._invoke_decision_operation(
@@ -3323,6 +3325,7 @@ class CrisisRunEngine:
                         "objective": payload["objective"],
                         "steps": payload["steps"],
                         "rationale": payload["rationale"],
+                        "rationale_source": payload.get("rationale_source", ""),
                         "reconsider_when": payload.get("reconsider_when", []),
                         "updated_tick": tick,
                     }
@@ -3341,9 +3344,10 @@ class CrisisRunEngine:
                     "assessment": belief["assessment"],
                     "confidence": belief["confidence"],
                     "updated_tick": tick,
-                    "evidence_event_ids": [wake["trigger_event_id"]]
-                    if wake["trigger_event_id"]
-                    else [],
+                    "evidence_event_ids": list(
+                        belief.get("evidence_event_ids")
+                        or ([wake["trigger_event_id"]] if wake["trigger_event_id"] else [])
+                    ),
                 }
                 events.append(
                     self._event(
@@ -3353,6 +3357,9 @@ class CrisisRunEngine:
                         {
                             "wake_id": wake["id"],
                             "subject": belief["subject"],
+                            "evidence_event_ids": state["beliefs"][belief["subject"]][
+                                "evidence_event_ids"
+                            ],
                             "visibility": [actor_id],
                         },
                         seat_id=actor_id,

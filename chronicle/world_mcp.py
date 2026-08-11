@@ -105,6 +105,8 @@ def update_plan(
     idempotency_key: str,
     rationale: str = "",
     belief_updates: list[dict[str, str] | str] | None = None,
+    rationale_source: str = "",
+    belief_source: str = "",
     reconsider_when: list[str] | None = None,
 ) -> dict[str, Any]:
     """Replace the private current plan and optionally revise a few private beliefs."""
@@ -113,7 +115,9 @@ def update_plan(
         objective,
         steps,
         rationale=rationale,
+        rationale_source=rationale_source,
         belief_updates=belief_updates,
+        belief_source=belief_source,
         reconsider_when=reconsider_when,
         idempotency_key=idempotency_key,
     )

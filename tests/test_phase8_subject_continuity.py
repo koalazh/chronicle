@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+
+import pytest
+from fastapi.testclient import TestClient
+
+from chronicle.app import create_app
+from chronicle.db import content_hash
+from chronicle.decision import (
+    DecisionOperation,
+    InterpretedDecision,
+    guard_human_interpretation,
+)
+from chronicle.host import ChronicleHost
+from chronicle.volume_runtime import VolumeRuntimeConflict
+
+
+def _runtime(app_config, suffix: str):
+    config = replace(
+        app_config,
+        database_path=app_config.database_path.with_name(f"chronicle-{suffix}.db"),
+        runtime_dir=app_config.runtime_dir / suffix,
+        hermes_home=app_config.hermes_home / suffix,
+    )
+    host = ChronicleHost(config)
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    wu = runtime.db.worldline_lifetime(worldline_id, "wu-sangui")
+    dorgon = runtime.db.worldline_lifetime(worldline_id, "dorgon")
+    assert wu is not None and dorgon is not None
+    host.worldline_runtime.inhabit(worldline_id, wu["id"])
+    runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    runtime.advance_one(worldline_id)
+    runtime.db.create_subject_wake(
+        {
+            "id": f"{worldline_id}:wake:dorgon:phase8",
+            "worldline_id": worldline_id,
+            "actor_id": dorgon["id"],
+            "wake_type": "OBSERVATION",
+            "tick": 1,
+            "status": "QUEUED",
+            "source": "phase8-test",
+            "trigger_event_id": f"{worldline_id}:trigger:dorgon:phase8",
+        }
+    )
+    return runtime, worldline_id, wu, dorgon
+
+
+def test_lifetime_context_is_bounded_and_actor_scoped(app_config):
+    runtime, worldline_id, wu, _dorgon = _runtime(app_config, "context")
+    knowledge = [
+        {"message_id": f"old-{index}", "content": f"old knowledge {index}"} for index in range(20)
+    ]
+    beliefs = {
+        f"belief-{index}": {
+            "assessment": f"assessment {index}",
+            "confidence": "medium",
+            "updated_tick": 0,
+            "evidence_event_ids": [],
+        }
+        for index in range(12)
+    }
+    memory_text = "\n".join(f"memory line {index}" for index in range(12))
+    runtime.db.update_worldline_lifetime(
+        worldline_id,
+        wu["seat"],
+        knowledge_json=json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+        belief_json=json.dumps(beliefs, ensure_ascii=False, sort_keys=True),
+        memory_text=memory_text,
+        memory_hash=content_hash(memory_text),
+    )
+
+    frozen = runtime.freeze_pending_moment(worldline_id)
+    context = frozen["pending_moment"]
+    wake = runtime.db.crisis_wake(context["wake_ids"][0])
+    assert wake is not None
+    perspective = wake["frozen_perspective"]
+    bounded = perspective["context"]
+
+    assert "world" not in perspective
+    assert bounded["position"]["id"] == "shanhaiguan"
+    assert bounded["resources"]["pass_control"] == "contested-but-held"
+    assert bounded["active_crisis_context"][0]["crisis_id"] == "before-shanhaiguan"
+    assert len(bounded["beliefs"]) <= 8
+    assert len(bounded["recent_knowledge"]) <= 6
+    assert len(bounded["subjective_memory"]["selected_lines"]) <= 6
+    assert all(item["message_id"].startswith("old-") for item in bounded["recent_knowledge"])
+
+
+def test_human_interpretation_does_not_infer_reason_or_belief():
+    decision = InterpretedDecision(
+        summary="已决定。",
+        operations=[
+            DecisionOperation(
+                tool="update_plan",
+                arguments={
+                    "objective": "执行",
+                    "steps": ["执行"],
+                    "rationale": "因为他值得信任",
+                    "belief_updates": [
+                        {
+                            "subject": "peer:dorgon",
+                            "assessment": "对方可信",
+                            "confidence": "high",
+                        }
+                    ],
+                },
+            )
+        ],
+    )
+
+    guarded = guard_human_interpretation("直接执行", decision)
+
+    assert guarded.operations[0].arguments["rationale"] == ""
+    assert guarded.operations[0].arguments["rationale_source"] == "unstated"
+    assert guarded.operations[0].arguments["belief_updates"] == []
+    assert guarded.operations[0].arguments["belief_source"] == "unstated"
+
+
+def test_evidence_backed_expectation_requires_human_provenance(app_config):
+    runtime, worldline_id, wu, dorgon = _runtime(app_config, "belief")
+    frozen = runtime.freeze_pending_moment(worldline_id)
+    wu_wake_id = next(
+        wake_id
+        for wake_id in frozen["pending_moment"]["wake_ids"]
+        if runtime.db.crisis_wake(wake_id)["actor_id"] in {wu["id"], wu["seat"]}
+    )
+    trigger_event_id = runtime.db.crisis_wake(wu_wake_id)["trigger_event_id"]
+
+    with pytest.raises(VolumeRuntimeConflict, match="Human rationale"):
+        runtime.stage_intent(
+            worldline_id,
+            wu["id"],
+            {
+                "type": "update_plan",
+                "objective": "判断是否回应",
+                "steps": ["等待更多证据"],
+                "rationale": "因为对方值得信任",
+                "belief_updates": [],
+            },
+            source="human",
+        )
+
+    runtime.stage_intent(
+        worldline_id,
+        wu["id"],
+        {
+            "type": "update_plan",
+            "objective": "判断是否回应",
+            "steps": ["等待更多证据"],
+            "rationale": "",
+            "rationale_source": "unstated",
+            "belief_source": "explicit",
+            "belief_updates": [
+                {
+                    "subject": "peer:dorgon",
+                    "assessment": "对方的承诺仍需通过后续行动验证。",
+                    "confidence": "medium",
+                    "evidence_event_ids": [trigger_event_id],
+                }
+            ],
+        },
+        source="human",
+    )
+    runtime.stage_intent(
+        worldline_id,
+        dorgon["id"],
+        {"type": "wait"},
+        source="agent",
+    )
+    runtime.commit_pending_moment(worldline_id)
+
+    lifetime = runtime.db.worldline_lifetime(worldline_id, wu["seat"])
+    assert lifetime is not None
+    expectation = lifetime["beliefs"]["peer:dorgon"]
+    assert expectation["updated_tick"] == 1
+    assert expectation["evidence_event_ids"] == [trigger_event_id]
+    assert lifetime["plan"][0]["rationale"] == ""
+
+
+def test_later_action_trace_reuses_expectation_and_selective_memory(app_config):
+    runtime, worldline_id, wu, dorgon = _runtime(app_config, "trace")
+    memory_text = "旧判断：短期承诺必须等待行动验证。\n不相关：远方天气。"
+    runtime.db.update_worldline_lifetime(
+        worldline_id,
+        wu["seat"],
+        memory_text=memory_text,
+        memory_hash=content_hash(memory_text),
+    )
+    first = runtime.freeze_pending_moment(worldline_id)
+    wu_wake = next(
+        runtime.db.crisis_wake(wake_id)
+        for wake_id in first["pending_moment"]["wake_ids"]
+        if runtime.db.crisis_wake(wake_id)["actor_id"] in {wu["id"], wu["seat"]}
+    )
+    runtime.stage_intent(
+        worldline_id,
+        wu["id"],
+        {
+            "type": "update_plan",
+            "objective": "等待行动验证",
+            "steps": ["保留核验选项"],
+            "rationale": "",
+            "rationale_source": "unstated",
+            "belief_source": "explicit",
+            "belief_updates": [
+                {
+                    "subject": "peer:dorgon",
+                    "assessment": "短期承诺仍需行动验证。",
+                    "confidence": "medium",
+                    "evidence_event_ids": [wu_wake["trigger_event_id"]],
+                }
+            ],
+        },
+        source="human",
+    )
+    runtime.stage_intent(worldline_id, dorgon["id"], {"type": "wait"}, source="agent")
+    runtime.commit_pending_moment(worldline_id)
+
+    second_wake = runtime.db.create_subject_wake(
+        {
+            "id": f"{worldline_id}:wake:wu:follow-up",
+            "worldline_id": worldline_id,
+            "actor_id": wu["id"],
+            "wake_type": "OBSERVATION",
+            "tick": 1,
+            "status": "WAITING_HUMAN",
+            "source": "phase8-test",
+            "trigger_event_id": f"{worldline_id}:follow-up-trigger",
+        }
+    )
+    runtime.freeze_pending_moment(worldline_id)
+    staged = runtime.stage_intent(
+        worldline_id,
+        wu["id"],
+        {
+            "type": "message",
+            "recipient": "dorgon",
+            "content": "请以行动证明承诺。",
+            "delivery_tick": 3,
+            "belief_keys": ["peer:dorgon"],
+        },
+        source="human",
+    )
+    runtime.commit_pending_moment(worldline_id)
+    message_event = next(
+        event
+        for event in reversed(runtime.db.worldline_events(worldline_id))
+        if event["event_type"] == "MESSAGE_DISPATCHED"
+        and event["payload"].get("source") == "logical_moment"
+    )
+    trace = runtime.causal_trace(worldline_id, message_event["id"])
+    context = runtime.lifetime_context(worldline_id, wu["id"], wake_id=second_wake["id"])
+
+    assert staged["operation"]["payload"]["intent"]["belief_keys"] == ["peer:dorgon"]
+    assert trace["controller"] == "human"
+    assert trace["current_expectation"]["payload"]["belief_key"] == "peer:dorgon"
+    assert trace["evidence_event_ids"]
+    assert trace["earlier_episode"]
+    assert "短期承诺必须等待行动验证" in context["subjective_memory"]["text"]
+
+    assert (
+        TestClient(create_app(runtime.host.config))
+        .get(f"/api/dev/worldlines/{worldline_id}/why/{message_event['id']}")
+        .status_code
+        == 404
+    )
+    dev_client = TestClient(create_app(replace(runtime.host.config, dev=True)))
+    response = dev_client.get(f"/api/dev/worldlines/{worldline_id}/why/{message_event['id']}")
+    assert response.status_code == 200
+    assert response.json()["controller"] == "human"

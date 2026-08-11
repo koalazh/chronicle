@@ -1121,11 +1121,14 @@ class ChronicleDB:
                 connection.execute(
                     "INSERT INTO worldline_lifetimes(id, worldline_id, seat, controller, status, "
                     "parent_canon_lifetime, profile_name, profile_metadata_json, genesis_hash, memory_text, memory_hash, "
-                    "knowledge_json, belief_json, authority_json, lifetime_kind, genesis_context_json, profile_state, "
-                    "created_at, updated_at) "
+                    "knowledge_json, belief_json, authority_json, role_charter_json, plan_json, commitments_json, "
+                    "resources_json, last_perspective_json, revisits_json, wake_count, lifetime_kind, "
+                    "genesis_context_json, profile_state, created_at, updated_at) "
                     "VALUES (:id, :worldline_id, :seat, :controller, :status, :parent_canon_lifetime, :profile_name, "
                     ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, :knowledge_json, :belief_json, "
-                    ":authority_json, :lifetime_kind, :genesis_context_json, :profile_state, :created_at, :updated_at)",
+                    ":authority_json, :role_charter_json, :plan_json, :commitments_json, :resources_json, "
+                    ":last_perspective_json, :revisits_json, :wake_count, :lifetime_kind, :genesis_context_json, "
+                    ":profile_state, :created_at, :updated_at)",
                     {
                         "id": values_for_lifetime["id"],
                         "worldline_id": values["id"],
@@ -1149,6 +1152,25 @@ class ChronicleDB:
                         "authority_json": json.dumps(
                             values_for_lifetime.get("authority", []), ensure_ascii=False, sort_keys=True
                         ),
+                        "role_charter_json": json.dumps(
+                            values_for_lifetime.get("role_charter", {}), ensure_ascii=False, sort_keys=True
+                        ),
+                        "plan_json": json.dumps(
+                            values_for_lifetime.get("plan", []), ensure_ascii=False, sort_keys=True
+                        ),
+                        "commitments_json": json.dumps(
+                            values_for_lifetime.get("commitments", []), ensure_ascii=False, sort_keys=True
+                        ),
+                        "resources_json": json.dumps(
+                            values_for_lifetime.get("resources", {}), ensure_ascii=False, sort_keys=True
+                        ),
+                        "last_perspective_json": json.dumps(
+                            values_for_lifetime.get("last_perspective", {}), ensure_ascii=False, sort_keys=True
+                        ),
+                        "revisits_json": json.dumps(
+                            values_for_lifetime.get("revisits", []), ensure_ascii=False, sort_keys=True
+                        ),
+                        "wake_count": int(values_for_lifetime.get("wake_count", 0)),
                         "lifetime_kind": values_for_lifetime.get("lifetime_kind", "ACTOR"),
                         "genesis_context_json": json.dumps(
                             values_for_lifetime.get("genesis_context", {}),
@@ -1751,6 +1773,10 @@ class ChronicleDB:
                     "belief_json",
                     "authority_json",
                     "last_perspective_json",
+                    "plan_json",
+                    "commitments_json",
+                    "revisits_json",
+                    "resources_json",
                     "wake_count",
                 }
                 fields = {key: value for key, value in update_values.items() if key in allowed}

@@ -18,6 +18,7 @@ from .crisis import (
     CrisisPack,
     OfferAction,
     OfferStatus,
+    PressureStatus,
     VolumeRegistry,
 )
 from .db import ChronicleDB, content_hash, stable_hash
@@ -63,6 +64,7 @@ class CrisisWakeType(StrEnum):
     OFFER_CHANGE = "OFFER_CHANGE"
     AGREEMENT_CHANGE = "AGREEMENT_CHANGE"
     OPERATION_RESULT = "OPERATION_RESULT"
+    PRESSURE = "PRESSURE"
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
 
@@ -488,6 +490,26 @@ class CrisisRunEngine:
             "investigations": [],
             "offers": [],
             "agreements": [],
+            "pressures": [
+                {
+                    "id": pressure.id,
+                    "kind": pressure.kind.value,
+                    "title": pressure.title,
+                    "description": pressure.description,
+                    "trigger_tick": pressure.trigger_tick,
+                    "preconditions": [
+                        condition.model_dump(mode="json")
+                        for condition in pressure.preconditions
+                    ],
+                    "effects": [effect.model_dump(mode="json") for effect in pressure.effects],
+                    "status": PressureStatus.PENDING.value,
+                    "visibility": pressure.visibility.value,
+                    "visible_actor_ids": list(pressure.visible_actor_ids),
+                    "provenance": pressure.provenance.value,
+                    "assertion_ids": list(pressure.assertion_ids),
+                }
+                for pressure in self.pack.crisis.pressures
+            ],
         }
         events = [
             self._event(
@@ -545,6 +567,17 @@ class CrisisRunEngine:
             )
             message["dispatch_event_id"] = dispatch["id"]
             events.append(dispatch)
+        for pressure in projection["pressures"]:
+            scheduled = self._event(
+                run_id,
+                0,
+                "PRESSURE_SCHEDULED",
+                {"pressure": pressure, "visibility": []},
+                provenance=pressure["provenance"],
+                causal_parent_ids=[checkpoint_event_id],
+            )
+            pressure["scheduled_event_id"] = scheduled["id"]
+            events.append(scheduled)
 
         lifetimes: list[dict[str, Any]] = []
         for actor in self.pack.crisis.actors:
@@ -1187,6 +1220,9 @@ class CrisisRunEngine:
         if self._offers_due(projection, next_tick):
             self._expire_offers(run_id, next_tick, projection)
             return True
+        if self._pressures_due(projection, next_tick):
+            self._commit_pressures(run_id, next_tick, projection)
+            return True
         if self._movements_due(projection, next_tick):
             self._commit_movements(run_id, next_tick, projection)
             return True
@@ -1306,6 +1342,11 @@ class CrisisRunEngine:
             for offer in snapshot["projection"].get("offers", [])
             if offer.get("status") == OfferStatus.PROPOSED.value
             and offer.get("expires_tick") is not None
+        )
+        candidates.extend(
+            int(pressure["trigger_tick"])
+            for pressure in snapshot["projection"].get("pressures", [])
+            if pressure.get("status") == PressureStatus.PENDING.value
         )
         candidates.extend(
             int(movement["arrival_tick"])
@@ -1710,6 +1751,133 @@ class CrisisRunEngine:
                 run_id,
                 actor_id,
                 CrisisWakeType.OFFER_CHANGE,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
+
+    @staticmethod
+    def _pressures_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
+        return [
+            pressure
+            for pressure in projection.get("pressures", [])
+            if pressure.get("status") == PressureStatus.PENDING.value
+            and int(pressure["trigger_tick"]) == tick
+        ]
+
+    def _pressure_visible_actor_ids(self, pressure: dict[str, Any]) -> list[str]:
+        if pressure.get("visibility") == "PUBLIC":
+            return sorted(self.pack.actor_by_id)
+        return sorted(str(actor_id) for actor_id in pressure.get("visible_actor_ids", []))
+
+    @staticmethod
+    def _pressure_preconditions_met(
+        pressure: dict[str, Any], projection: dict[str, Any]
+    ) -> bool:
+        return all(
+            str(projection.get("entities", {}).get(condition["subject"], {}).get("state", ""))
+            in condition["states"]
+            for condition in pressure.get("preconditions", [])
+        )
+
+    def _commit_pressures(self, run_id: str, tick: int, projection: dict[str, Any]) -> None:
+        due = self._pressures_due(projection, tick)
+        projection["tick"] = tick
+        events: list[dict[str, Any]] = []
+        knowledge_by_actor: dict[str, list[Any]] = {}
+        queued: set[tuple[str, str]] = set()
+        for pressure in due:
+            scheduled_event_id = str(pressure.get("scheduled_event_id") or "")
+            parent_ids = [scheduled_event_id] if scheduled_event_id else []
+            if not self._pressure_preconditions_met(pressure, projection):
+                pressure["status"] = PressureStatus.SKIPPED.value
+                skipped = self._event(
+                    run_id,
+                    tick,
+                    "PRESSURE_SKIPPED",
+                    {"pressure": pressure, "visibility": []},
+                    provenance=str(pressure["provenance"]),
+                    causal_parent_ids=parent_ids,
+                )
+                pressure["skip_event_id"] = skipped["id"]
+                events.append(skipped)
+                continue
+            pressure["status"] = PressureStatus.APPLIED.value
+            visible_actor_ids = self._pressure_visible_actor_ids(pressure)
+            applied = self._event(
+                run_id,
+                tick,
+                "PRESSURE_APPLIED",
+                {"pressure": pressure, "visibility": visible_actor_ids},
+                provenance=str(pressure["provenance"]),
+                causal_parent_ids=parent_ids,
+            )
+            pressure["applied_event_id"] = applied["id"]
+            events.append(applied)
+            for effect in pressure["effects"]:
+                entity = projection["entities"][effect["subject"]]
+                previous_state = str(entity["state"])
+                entity["state"] = effect["state"]
+                if previous_state == effect["state"]:
+                    continue
+                events.append(
+                    self._event(
+                        run_id,
+                        tick,
+                        "ENTITY_STATE_CHANGED",
+                        {
+                            "pressure_id": pressure["id"],
+                            "entity_id": effect["subject"],
+                            "before": previous_state,
+                            "after": effect["state"],
+                            "phase": "pressure",
+                            "visibility": visible_actor_ids,
+                        },
+                        provenance=str(pressure["provenance"]),
+                        causal_parent_ids=[applied["id"]],
+                    )
+                )
+            for actor_id in visible_actor_ids:
+                lifetime = self.db.worldline_lifetime(run_id, actor_id)
+                if lifetime is None:
+                    raise CrisisRunError("pressure observer life state is missing")
+                knowledge = knowledge_by_actor.setdefault(actor_id, list(lifetime["knowledge"]))
+                knowledge.append(
+                    {
+                        "kind": "pressure",
+                        "event_id": applied["id"],
+                        "pressure_id": pressure["id"],
+                        "title": pressure["title"],
+                        "content": pressure["description"],
+                        "obtained_tick": tick,
+                        "provenance": pressure["provenance"],
+                        "assertion_ids": list(pressure["assertion_ids"]),
+                    }
+                )
+                queued.add((actor_id, applied["id"]))
+        updates = [
+            {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+                "last_perspective_json": json.dumps(
+                    self._perspective_from(run_id, actor_id, projection, knowledge=knowledge),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+            for actor_id, knowledge in knowledge_by_actor.items()
+        ]
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            lifetime_updates=updates,
+            snapshot=projection,
+        )
+        for actor_id, trigger_event_id in sorted(queued):
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.PRESSURE,
                 tick,
                 trigger_event_id=trigger_event_id,
             )
@@ -3018,6 +3186,12 @@ class CrisisRunEngine:
             if agreement.get("status") == AgreementStatus.ACTIVE.value
             and actor_id in agreement.get("parties", [])
         ]
+        visible_pressures = [
+            pressure
+            for pressure in projection.get("pressures", [])
+            if pressure.get("status") == PressureStatus.APPLIED.value
+            and actor_id in self._pressure_visible_actor_ids(pressure)
+        ]
         known_entity_ids = {item["id"] for item in known_entities}
         investigation_target_ids = {
             affordance["target"]["id"] for affordance in available_investigations
@@ -3051,6 +3225,11 @@ class CrisisRunEngine:
             for agreement in active_agreements
             for term in agreement.get("terms", [])
         )
+        agreement_subject_ids.update(
+            str(effect["subject"])
+            for pressure in visible_pressures
+            for effect in pressure.get("effects", [])
+        )
         for subject_id in sorted(agreement_subject_ids):
             subject = projected_entities.get(subject_id)
             if subject is None or subject_id in known_entity_ids:
@@ -3077,6 +3256,10 @@ class CrisisRunEngine:
             constraints.append(
                 {"kind": "agreement", "description": "已经提出或生效的条件会约束之后可采取的行动。"}
             )
+        constraints.extend(
+            {"kind": "pressure", "description": str(pressure["description"])}
+            for pressure in visible_pressures
+        )
         return {
             "contactable_actors": contactable_actors,
             "known_entities": known_entities,
@@ -3090,6 +3273,7 @@ class CrisisRunEngine:
             "available_offer_terms": available_offer_terms,
             "active_offers": active_offers,
             "active_agreements": active_agreements,
+            "visible_pressures": visible_pressures,
             "current_revisits": revisits,
             "meaningful_world_constraints": constraints,
         }
@@ -3174,6 +3358,11 @@ class CrisisRunEngine:
             "investigations": list(projection.get("investigations", [])),
             "offers": list(projection.get("offers", [])),
             "agreements": list(projection.get("agreements", [])),
+            "pressures": [
+                pressure
+                for pressure in projection.get("pressures", [])
+                if pressure.get("status") == PressureStatus.APPLIED.value
+            ],
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
@@ -3302,6 +3491,7 @@ class CrisisRunEngine:
             "available_offer_terms": perspective["available_offer_terms"],
             "active_offers": perspective["active_offers"],
             "active_agreements": perspective["active_agreements"],
+            "visible_pressures": perspective["visible_pressures"],
             "current_revisits": perspective["current_revisits"],
             "meaningful_world_constraints": perspective["meaningful_world_constraints"],
             "known_situation": known_situation,
@@ -3388,6 +3578,7 @@ class CrisisRunEngine:
             "AGREEMENT_CREATED": "一项约定已经生效",
             "AGREEMENT_FULFILLED": "一项约定已经履行",
             "AGREEMENT_BREACHED": "一项约定已经被违背",
+            "PRESSURE_APPLIED": "外部压力进入危局",
             "OPERATION_STARTED": "一项行动已经开始",
             "OPERATION_COMPLETED": "一项行动已经完成",
             "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
@@ -3510,6 +3701,9 @@ class CrisisRunEngine:
                 for term in agreement.get("terms", [])
             )
             return f"{parties}：{terms}"
+        if event["event_type"] == "PRESSURE_APPLIED":
+            pressure = payload["pressure"]
+            return f"{pressure['title']}：{pressure['description']}"
         if event["event_type"] in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
             operation = payload["operation"]
             definition = self.pack.operation_by_id.get(str(operation["definition_id"]))
@@ -3556,6 +3750,14 @@ class CrisisRunEngine:
                 "content": observation["content"],
                 "source": observation["source"],
                 "reliability": observation["reliability"],
+            }
+        if event["event_type"] == "PRESSURE_APPLIED":
+            pressure = event["payload"]["pressure"]
+            return {
+                "type": wake["wake_type"],
+                "pressure_id": pressure["id"],
+                "title": pressure["title"],
+                "content": pressure["description"],
             }
         if event["event_type"].startswith("OFFER_"):
             offer = event["payload"].get("counter_offer") or event["payload"].get("offer", {})

@@ -411,7 +411,11 @@ def test_human_operation_persists_then_changes_a_later_available_action(app_conf
         "status"
     ] == "IN_PROGRESS"
 
-    restarted.run_until_idle(run_id)
+    while (
+        restarted.db.worldline_snapshot(run_id)["projection"]["operations"][0]["status"]
+        != "COMPLETED"
+    ):
+        assert restarted.advance_one(run_id) is True
     resumed = restarted.product_perspective(run_id, "wu-sangui")
 
     assert resumed["own_assets"][0]["id"] == "wu-field-force"

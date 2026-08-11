@@ -158,6 +158,7 @@ def test_private_perspective_exposes_a_grounded_affordance_manifest(app_config):
     assert perspective["active_investigations"] == []
     assert perspective["active_offers"] == []
     assert perspective["active_agreements"] == []
+    assert perspective["visible_pressures"] == []
     assert perspective["current_revisits"] == []
     assert perspective["meaningful_world_constraints"]
     assert "commitments" not in perspective
@@ -247,7 +248,8 @@ def test_same_tick_revisit_is_visible_to_every_frozen_actor_perspective(app_conf
     engine._queue_wake(run_id, "li-zicheng", "MESSAGE", 1)
     engine.run_until_idle(run_id)
 
-    assert driver.statuses == {"MESSAGE": "DUE", "REVISIT_DUE": "DUE"}
+    assert driver.statuses["MESSAGE"] == "DUE"
+    assert driver.statuses["REVISIT_DUE"] == "DUE"
 
 
 def test_live_orient_without_world_operation_fails_closed(app_config):

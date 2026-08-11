@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from pydantic import Field
 
-from .models import Assertion, HistoricalSource, StrictModel
+from .models import Assertion, HistoricalSource, Provenance, StrictModel
 
 
 class CrisisValidationError(ValueError):
@@ -61,6 +61,17 @@ class ObservationReliability(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
+
+class PressureKind(StrEnum):
+    EXOGENOUS = "EXOGENOUS"
+    CONDITIONAL = "CONDITIONAL"
+
+
+class PressureStatus(StrEnum):
+    PENDING = "PENDING"
+    APPLIED = "APPLIED"
+    SKIPPED = "SKIPPED"
 
 
 class AgreementTermType(StrEnum):
@@ -197,6 +208,20 @@ class CrisisInvestigationDefinition(StrictModel):
     observation: InvestigationObservationDefinition
 
 
+class CrisisPressureDefinition(StrictModel):
+    id: str
+    kind: PressureKind
+    title: str
+    description: str
+    trigger_tick: int = Field(ge=1)
+    preconditions: list[OperationStateCondition] = Field(default_factory=list)
+    effects: list[OperationStateEffect]
+    visibility: OperationVisibility = OperationVisibility.PUBLIC
+    visible_actor_ids: list[str] = Field(default_factory=list)
+    provenance: Provenance
+    assertion_ids: list[str]
+
+
 class CorridorLocation(StrictModel):
     id: str
     display_name: str
@@ -276,6 +301,7 @@ class CrisisDefinition(StrictModel):
     operations: list[CrisisOperationDefinition] = Field(default_factory=list)
     investigations: list[CrisisInvestigationDefinition] = Field(default_factory=list)
     offer_terms: list[CrisisOfferTermDefinition] = Field(default_factory=list)
+    pressures: list[CrisisPressureDefinition] = Field(default_factory=list)
 
 
 class CrisisReference(StrictModel):
@@ -359,6 +385,10 @@ class CrisisPack:
         return {
             investigation.id: investigation for investigation in self.crisis.investigations
         }
+
+    @property
+    def pressure_by_id(self) -> dict[str, CrisisPressureDefinition]:
+        return {pressure.id: pressure for pressure in self.crisis.pressures}
 
     @staticmethod
     def _agreement_term_key(
@@ -981,6 +1011,53 @@ class CrisisPack:
                         )
                     seen_investigation_capabilities.add(capability)
 
+        pressure_ids = [pressure.id for pressure in self.crisis.pressures]
+        if len(pressure_ids) != len(set(pressure_ids)):
+            errors.append("pressures: ids must be unique")
+        for pressure in self.crisis.pressures:
+            if not pressure.title or not pressure.description:
+                errors.append(f"pressure {pressure.id}: title and description are required")
+            if pressure.trigger_tick >= self.crisis.simulation_boundary.maximum_tick:
+                errors.append(f"pressure {pressure.id}: trigger must precede the simulation boundary")
+            if pressure.kind == PressureKind.EXOGENOUS and pressure.preconditions:
+                errors.append(f"pressure {pressure.id}: EXOGENOUS pressure cannot have preconditions")
+            if pressure.kind == PressureKind.CONDITIONAL and not pressure.preconditions:
+                errors.append(f"pressure {pressure.id}: CONDITIONAL pressure requires preconditions")
+            if not pressure.effects:
+                errors.append(f"pressure {pressure.id}: effects are required")
+            if pressure.provenance == Provenance.BRANCH_DERIVED:
+                errors.append(f"pressure {pressure.id}: provenance cannot be branch_derived")
+            unknown_assertions = set(pressure.assertion_ids) - known_assertions
+            if not pressure.assertion_ids or unknown_assertions:
+                errors.append(
+                    f"pressure {pressure.id}: unknown assertions "
+                    + ", ".join(sorted(unknown_assertions))
+                )
+            if len(pressure.visible_actor_ids) != len(set(pressure.visible_actor_ids)):
+                errors.append(f"pressure {pressure.id}: visible actor ids must be unique")
+            unknown_visible = set(pressure.visible_actor_ids) - set(actor_ids)
+            if unknown_visible:
+                errors.append(
+                    f"pressure {pressure.id}: unknown visible actors "
+                    + ", ".join(sorted(unknown_visible))
+                )
+            if pressure.visibility == OperationVisibility.PUBLIC and pressure.visible_actor_ids:
+                errors.append(f"pressure {pressure.id}: PUBLIC pressure cannot name visible actors")
+            if pressure.visibility == OperationVisibility.PRIVATE and not pressure.visible_actor_ids:
+                errors.append(f"pressure {pressure.id}: PRIVATE pressure requires visible actors")
+            for condition in pressure.preconditions:
+                if condition.subject not in known_entities:
+                    errors.append(
+                        f"pressure {pressure.id}: unknown precondition subject {condition.subject}"
+                    )
+                if not condition.states:
+                    errors.append(f"pressure {pressure.id}: precondition states are required")
+            for effect in pressure.effects:
+                if effect.subject not in known_entities:
+                    errors.append(f"pressure {pressure.id}: unknown effect subject {effect.subject}")
+                if not effect.state:
+                    errors.append(f"pressure {pressure.id}: effect state is required")
+
         checkpoint = self.crisis.checkpoint
         if self.crisis.simulation_boundary.maximum_tick > checkpoint.safety_horizon_days:
             errors.append("boundary: maximum tick exceeds the safety horizon")
@@ -1005,6 +1082,19 @@ class CrisisPack:
             if anchor.actor_ids and anchor.policy != HistoricalPolicy.REFERENCE_ONLY:
                 errors.append(
                     f"anchor {anchor.id}: post-checkpoint actor actions must be REFERENCE_ONLY"
+                )
+        actor_reference_assertion_ids = {
+            assertion_id
+            for anchor in self.crisis.anchors
+            if anchor.actor_ids
+            for assertion_id in anchor.assertion_ids
+        }
+        for pressure in self.crisis.pressures:
+            injected_actor_history = set(pressure.assertion_ids) & actor_reference_assertion_ids
+            if injected_actor_history:
+                errors.append(
+                    f"pressure {pressure.id}: cannot inject Decision Actor historical anchors "
+                    + ", ".join(sorted(injected_actor_history))
                 )
         if errors:
             raise CrisisValidationError(errors)
@@ -1038,6 +1128,7 @@ class CrisisPack:
             "operation_count": len(self.crisis.operations),
             "investigation_count": len(self.crisis.investigations),
             "offer_term_count": len(self.crisis.offer_terms),
+            "pressure_count": len(self.crisis.pressures),
             "horizon_days": self.crisis.checkpoint.safety_horizon_days,
             "maximum_tick": self.crisis.simulation_boundary.maximum_tick,
         }

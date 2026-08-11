@@ -37,7 +37,7 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 
 | 层 | 保存什么 | 谁能更新 |
 | --- | --- | --- |
-| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Investigation/Observation、Offer/Agreement、Operation、移动和世界效果 | Host 的确定性提交路径 |
+| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Investigation/Observation、Offer/Agreement、Operation、Pressure、移动和世界效果 | Host 的确定性提交路径 |
 | Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
 | Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
 | Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
@@ -54,11 +54,11 @@ Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将
 
 ### 推进
 
-Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、Offer 到期、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、Offer 到期、Pressure trigger、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
 
 `ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
-一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion、Investigation result 与 Offer expiry）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Offer/Agreement、Operation、Investigation、移动和观察排入未来时刻。
+一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（依次包括 Operation completion、Investigation result、Offer expiry 与 Pressure）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Offer/Agreement、Operation、Investigation、移动和观察排入未来时刻。
 
 因此模型返回顺序不能改变世界语义；拒绝、等待、沉默和 no-op 都是合法结果；消息不能在同 tick 递归唤醒收件人。
 
@@ -78,7 +78,7 @@ GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项
 
 ## Perspective 与隐私
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、可提出的结构化条件、自己作为当事人的未决 Offer/生效 Agreement、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束。Offer 与 Agreement 只在当事人合法知道时出现。
+Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、可提出的结构化条件、自己作为当事人的未决 Offer/生效 Agreement、已发生且对其可见的 Pressure、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束。Offer 与 Agreement 只在当事人合法知道时出现；未发生或不可见的 Pressure 不会预告给主体。
 
 人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
 
@@ -107,13 +107,15 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组六种请求：
 
 Crisis Operation 可以声明它需要某个 `ACTIVE` Agreement；因此已接受的通行条件会让多尔衮随后合法获得“通过山海关”的行动 affordance。相反，吴三桂仍可实际封闭关口；Host 不用一个 `betray()` 按钮替代现实行为，而是在该 Operation 完成时写入 `AGREEMENT_BREACHED`。只有同时是协议当事人且能合法看见该现实行动的主体会收到这一结论；其他人最多看见公开的关口变化，不会获得私下协议。没有 Trust Score，背约后的后果仍由主体依据自己收到的世界事实判断。
 
+Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler 对象。它只有 `EXOGENOUS`（固定时刻、无 actor-state 前提）与 `CONDITIONAL`（固定时刻检查小型 Entity state 前提）两种；每个对象都声明 effect、可见范围、provenance 与 assertion IDs，写入 `PENDING → APPLIED/SKIPPED` Ledger/Projection lifecycle。Pack validator 拒绝把带有 Decision Actor 的 post-checkpoint historical anchor 作为 Pressure 来源，因此真实历史后续不能成为 Canon Conveyor。山海关当前的“京东通行窗口收紧”明确是基于距离与时序的 `scenario_assumption`，不是任何一方的预设行动：它使新的东向调动不再可开始，而已经发生的行动和主体选择仍按各自的世界状态结算。
+
 ## Hermes 边界
 
 | Hermes 负责 | Chronicle 负责 |
 | --- | --- |
 | Profile、模型请求、Agent loop、fresh Session | Run、模拟时间、停止边界、Perspective |
 | Profile 原生 Memory 和会话上下文 | Knowledge、Belief、Plan、Revisit、Resource、Authority |
-| 模型判断与工具调用 | 路线、消息送达、Offer/Agreement 与 Operation lifecycle、权限、世界效果和 Ledger |
+| 模型判断与工具调用 | 路线、消息送达、Offer/Agreement、Operation 与 Pressure lifecycle、权限、世界效果和 Ledger |
 
 Watch 在 live Run 建立后为全部 Agent-controlled Actor 运行 Profile；Takeover 只为非 Human-controlled Actor 运行 Profile。每个 Profile 的归属至少包含 `crisis_id`、`run_id`、`actor_id`、genesis hash、initial Memory snapshot 和 runtime epoch；World token 只在项目私有环境文件中，SQLite 只保存 token hash；封存时统一撤销 binding，并把执行资源移出后续 Run。
 

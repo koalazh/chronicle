@@ -118,3 +118,10 @@ assertions:
     source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474, mingshi-309]
     normalized_evidence: 历史材料明确后续进入大型交战，而本场危局的产品范围不含战役结算。
     notes: product simulation boundary
+  - id: c015
+    claim: 本局把危局拖延后京东至山海关的新一轮通行窗口收紧，建模为不属于任一 Decision Actor 的外部压力。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [qing-shilu-shizu-4, wakeman-great-enterprise]
+    normalized_evidence: 清实录与现代研究均支持此窗口由有限距离、行军节点与快速变化的局势构成；具体在第几日收紧不是史料事实，而是明确的产品模型，用来表达时间不会为主体暂停。
+    notes: modeled time pressure; it does not inject a post-checkpoint actor action or historical outcome

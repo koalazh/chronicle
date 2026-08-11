@@ -38,6 +38,7 @@ def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
     crisis["operations"] = []
     crisis["investigations"] = []
     crisis["offer_terms"] = []
+    crisis["pressures"] = []
     (root / "crisis.yaml").write_text(
         yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -237,6 +238,68 @@ def test_crisis_pack_rejects_an_operation_agreement_that_is_not_declared(tmp_pat
     with pytest.raises(
         CrisisValidationError,
         match="operation enter-shanhai-pass: unknown agreement requirement passage/shanhai-pass",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_exogenous_pressure_with_actor_state_preconditions(tmp_path):
+    root = tmp_path / "invalid-exogenous-pressure"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["pressures"][0]["preconditions"] = [
+        {"subject": "wu-field-force", "states": ["READY"]}
+    ]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="pressure eastern-transit-window-narrows: EXOGENOUS pressure cannot have preconditions",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_a_pressure_effect_for_a_missing_entity(tmp_path):
+    root = tmp_path / "invalid-pressure-effect"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["pressures"][0]["effects"][0]["subject"] = "missing-window"
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="pressure eastern-transit-window-narrows: unknown effect subject missing-window",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_a_pressure_that_injects_decision_actor_history(tmp_path):
+    root = tmp_path / "invalid-pressure-history"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["pressures"][0]["assertion_ids"] = ["c006"]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="pressure eastern-transit-window-narrows: cannot inject Decision Actor historical anchors c006",
     ):
         CrisisPack.load(root)
 

@@ -110,6 +110,7 @@ entities:
   - {id: shanhaiguan, type: PLACE, display_name: 山海关, initial_state: CONTESTED, assertion_ids: [c002]}
   - {id: liaoxi, type: PLACE, display_name: 辽西行军路, initial_state: OPEN, assertion_ids: [c001, c008]}
   - {id: shanhai-pass, type: ASSET, display_name: 山海关通道, initial_state: CONTESTED, assertion_ids: [c002]}
+  - {id: eastern-transit-window, type: ASSET, display_name: 京东通行窗口, initial_state: OPEN, assertion_ids: [c015]}
   - {id: shun-eastern-force, type: FORCE, display_name: 大顺东向兵力, initial_state: DISPERSED, assertion_ids: [c013]}
   - {id: wu-field-force, type: FORCE, display_name: 关宁所部, initial_state: FORMING, assertion_ids: [c002, c013]}
   - {id: qing-expedition-force, type: FORCE, display_name: 清军西征主力, initial_state: FORMING, assertion_ids: [c001, c013]}
@@ -148,6 +149,7 @@ operations:
     required_assets: [force]
     preconditions:
       - {subject: force, states: [READY]}
+      - {subject: eastern-transit-window, states: [OPEN]}
     start_effects:
       - {subject: force, state: MOVING}
     completion_effects:
@@ -195,6 +197,7 @@ operations:
     required_assets: [force]
     preconditions:
       - {subject: force, states: [READY]}
+      - {subject: eastern-transit-window, states: [OPEN]}
     start_effects:
       - {subject: force, state: MOVING}
     completion_effects:
@@ -225,6 +228,19 @@ offer_terms:
     value: permitted
     description: 允许清军在约定条件下通过山海关通道。
     party_ids: [wu-sangui, dorgon]
+
+pressures:
+  - id: eastern-transit-window-narrows
+    kind: EXOGENOUS
+    title: 京东通行窗口收紧
+    description: 时间与距离使京东至山海关的新一轮调动已难在不暴露或不发生摩擦前完成；这不是三方中任何一人的既定行动。
+    trigger_tick: 5
+    preconditions: []
+    effects:
+      - {subject: eastern-transit-window, state: CLOSING}
+    visibility: PUBLIC
+    provenance: scenario_assumption
+    assertion_ids: [c015]
 
 corridor:
   - {id: beijing, display_name: 北京, order: 0}

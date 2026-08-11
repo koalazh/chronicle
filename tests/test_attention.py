@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 from chronicle.decision import DecisionOperation, InterpretedDecision
 
@@ -17,6 +15,30 @@ class PlanOnlyDriver:
                 rationale="这项私有计划用于验证 Watch 不会把 Plan churn 当作产品停点。",
                 idempotency_key=f"{wake['id']}:plan",
             )
+        return ActorTurnResult("保持当前判断。")
+
+
+class MessageToTargetDriver:
+    source = "fixture"
+
+    def __init__(self, sender: str, recipient: str):
+        self.sender = sender
+        self.recipient = recipient
+
+    def run_wake(self, actor_id, wake, perspective, world):
+        if wake["wake_type"] == "ORIENT":
+            world.update_plan(
+                f"维持{actor_id}的当前判断",
+                ["等待新的世界变化"],
+                rationale="这项私有计划用于验证 Takeover 会跳过 Agent 的私有时刻。",
+                idempotency_key=f"{wake['id']}:plan",
+            )
+            if actor_id == self.sender:
+                world.communicate(
+                    self.recipient,
+                    "这是一封会触发 Human 注意力的来信。",
+                    idempotency_key=f"{wake['id']}:message",
+                )
         return ActorTurnResult("保持当前判断。")
 
 
@@ -42,7 +64,10 @@ def test_takeover_attention_requires_the_initial_human_decision(app_config):
 
 
 def test_takeover_attention_skips_agent_private_work_until_a_human_message(app_config):
-    engine = CrisisRunEngine(app_config)
+    engine = CrisisRunEngine(
+        app_config,
+        actor_driver=MessageToTargetDriver("li-zicheng", "wu-sangui"),
+    )
     run_id = engine.create(RunMode.TAKEOVER, human_actor_id="wu-sangui")["run"]["id"]
     engine.submit_human_decision(run_id, "")
 
@@ -74,9 +99,6 @@ def test_takeover_attention_skips_agent_private_work_until_a_human_message(app_c
     assert any(
         event["event_type"] == "PLAN_UPDATED" and event["seat_id"] == "dorgon"
         for event in events
-    )
-    assert "保持西进行动自由并核验关内局势" not in json.dumps(
-        engine.actor_perspective(run_id, "wu-sangui"), ensure_ascii=False
     )
 
 

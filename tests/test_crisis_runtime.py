@@ -11,6 +11,7 @@ from chronicle.crisis_runtime import (
     CrisisRunConflict,
     CrisisRunEngine,
     CrisisRunError,
+    FixtureActorDriver,
     HermesActorDriver,
     RunMode,
 )
@@ -46,31 +47,64 @@ def test_watch_fixture_lives_without_forced_revisits_or_reflections(app_config):
         for event in events
     )
 
-    dorgon_plans = [
-        event
-        for event in events
-        if event["event_type"] == "PLAN_UPDATED" and event["seat_id"] == "dorgon"
-    ]
-    assert len(dorgon_plans) >= 2
-    wu_plans = [
-        event
-        for event in events
-        if event["event_type"] == "PLAN_UPDATED" and event["seat_id"] == "wu-sangui"
-    ]
-    assert len(wu_plans) >= 3
+    actor_ids = set(engine.pack.actor_by_id)
+    plans_by_actor = {
+        actor_id: [
+            event
+            for event in events
+            if event["event_type"] == "PLAN_UPDATED" and event["seat_id"] == actor_id
+        ]
+        for actor_id in actor_ids
+    }
+    assert all(len(plans) >= 2 for plans in plans_by_actor.values())
     li_view = engine.actor_perspective(run_id, "li-zicheng")
-    assert "关外回信改变了可选项" not in str(li_view)
     assert not any(str(item).startswith("c00") for item in li_view["knowledge"])
     assert li_view["plan"]
     assert all(
         lifetime["revisits"] == [] for lifetime in engine.db.worldline_lifetimes(run_id)
     )
-    assert engine.db.worldline_lifetime(run_id, "dorgon")["beliefs"]["shanhai-request"]
+    assert all(
+        engine.db.worldline_lifetime(run_id, actor_id)["beliefs"]
+        for actor_id in actor_ids
+    )
     assert engine.db.agent_bindings(run_id)
     assert all(
         engine.db.memory_versions(f"{run_id}:{actor_id}")[0]["mutation_kind"] == "genesis"
-        for actor_id in ("li-zicheng", "wu-sangui", "dorgon")
+        for actor_id in actor_ids
     )
+
+
+def test_fixture_actor_driver_uses_only_generic_perspective_affordances(app_config):
+    source = inspect.getsource(FixtureActorDriver)
+    assert all(
+        actor_id not in source
+        for actor_id in (
+            "li-zicheng",
+            "wu-sangui",
+            "dorgon",
+            "shi-kefa",
+            "ma-shiying",
+            "han-zanzhou",
+        )
+    )
+
+    engine = CrisisRunEngine(app_config)
+    created = engine.create(RunMode.WATCH, crisis_id="nanjing-succession")
+    run_id = created["run"]["id"]
+
+    assert engine.advance_one(run_id) is True
+    events = engine.db.worldline_events(run_id)
+    actor_ids = set(engine.pack.actor_by_id)
+    assert {
+        event["seat_id"]
+        for event in events
+        if event["event_type"] == "PLAN_UPDATED"
+    } == actor_ids
+    assert {
+        event["seat_id"]
+        for event in events
+        if event["event_type"] == "MESSAGE_DISPATCHED"
+    } == actor_ids
 
 
 def test_takeover_uses_same_engine_but_only_agent_actors_orient(app_config):

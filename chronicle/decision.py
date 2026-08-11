@@ -52,26 +52,28 @@ class FixtureDecisionInterpreter:
                 tool="update_plan",
                 arguments={
                     "objective": text.strip(),
-                    "steps": ["先以书面条件试探", "保留关口的有限应急准备"],
+                    "steps": ["先以书面条件核验", "保留仍可执行的行动"],
                     "rationale": "这是 Human 输入的确定性 fixture 解释，不代表 live 模型结果。",
                 },
             )
         ]
-        if "关外" in text or "多尔衮" in text:
+        contacts = sorted(
+            str(contact.get("id", ""))
+            for contact in perspective.get("contactable_actors", [])
+            if str(contact.get("id", ""))
+        )
+        if contacts and any(term in text for term in ("说明", "致信", "通信", "来信")):
             operations.append(
                 DecisionOperation(
                     tool="communicate",
-                    arguments={
-                        "recipient": "dorgon",
-                        "content": text.strip(),
-                    },
+                    arguments={"recipient": contacts[0], "content": text.strip()},
                 )
             )
         if "两日" in text:
             operations.append(
                 DecisionOperation(
                     tool="schedule_revisit",
-                    arguments={"after_days": 2, "reason": "两日后重新比较两方回应"},
+                    arguments={"after_days": 2, "reason": "两日后重新判断已知条件"},
                 )
             )
         if "调查" in text or "查问" in text or "打听" in text:
@@ -125,25 +127,29 @@ class FixtureDecisionInterpreter:
                     arguments={"action": "ACCEPT", "offer_id": incoming_offer["id"]},
                 )
             )
-        if "整备" in text or "准备兵力" in text:
-            prepare = next(
+        if "整备" in text or "准备" in text:
+            operation = next(
                 (
                     item
                     for item in perspective.get("available_operations", [])
-                    if item.get("id") == "prepare_force"
+                    if "整备" in str(item.get("display_name", ""))
+                    or "整备" in str(item.get("description", ""))
                 ),
                 None,
             )
-            prepare_targets = prepare.get("targets", []) if prepare else []
-            force_options = prepare_targets[0].get("options", []) if prepare_targets else []
-            if force_options:
+            if operation is not None:
+                targets = [
+                    target["options"][0]["id"]
+                    for target in operation.get("targets", [])
+                    if target.get("options")
+                ]
                 operations.append(
                     DecisionOperation(
                         tool="operate",
                         arguments={
-                            "operation_definition_id": "prepare_force",
-                            "targets": [force_options[0]["id"]],
-                            "description": "开始整备可用兵力。",
+                            "operation_definition_id": operation["id"],
+                            "targets": targets,
+                            "description": "开始执行当前可用的整备行动。",
                         },
                     )
                 )

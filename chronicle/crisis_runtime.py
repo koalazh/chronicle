@@ -166,7 +166,7 @@ class ActorDriver(Protocol):
 
 
 class FixtureActorDriver:
-    """Deterministic model double; all world effects still cross WorldService."""
+    """Deterministic model double driven only by the frozen Perspective."""
 
     source = "fixture"
 
@@ -178,80 +178,53 @@ class FixtureActorDriver:
         world: WorldAffordanceSession,
     ) -> ActorTurnResult:
         wake_type = wake["wake_type"]
-        tick = int(wake["tick"])
         if wake_type == CrisisWakeType.ORIENT.value:
-            objectives = {
-                "li-zicheng": ("稳住北京并测试山海关的条件", ["等待来使回音", "保留东部处置选项"]),
-                "wu-sangui": ("在两方压力间保住所部与关口", ["核验北京条件", "等待关外回音"]),
-                "dorgon": ("保持西进行动自由并核验关内局势", ["继续西行", "等待可靠来使"]),
-            }
-            objective, steps = objectives.get(
-                actor_id,
-                (
-                    "在当前有限信息下建立可修正的初始处置",
-                    ["核验当前可见事实", "保留仍可执行的行动"],
-                ),
-            )
             world.update_plan(
-                objective,
-                steps,
+                "在当前有限信息下建立可修正的初始处置",
+                ["核验当前可见事实", "保留仍可执行的行动"],
                 rationale="先建立可修正计划，不把未到达的消息当作事实。",
                 idempotency_key=f"{wake['id']}:orient-plan",
             )
+            contacts = {
+                str(contact.get("id", ""))
+                for contact in perspective.get("contactable_actors", [])
+                if str(contact.get("id", ""))
+            }
+            contacts.intersection_update(
+                str(actor_id)
+                for actor_id in perspective.get("fixture_contactable_agent_ids", [])
+            )
+            if contacts:
+                participants = sorted(contacts | {actor_id})
+                recipient = participants[(participants.index(actor_id) + 1) % len(participants)]
+                if recipient in contacts:
+                    world.communicate(
+                        recipient,
+                        "我已收到当前局势；请说明你已知的条件和准备。",
+                        idempotency_key=f"{wake['id']}:orient-message",
+                    )
             return ActorTurnResult("已形成可修正的初始计划。")
 
         if wake_type == CrisisWakeType.MESSAGE.value:
             message = perspective.get("trigger", {})
-            sender = message.get("sender", "")
-            if actor_id == "wu-sangui" and sender == "li-zicheng":
-                world.update_plan(
-                    "拖住北京条件，同时等待关外答复",
-                    ["不作不可逆承诺", "要求验证家属与军队条件"],
-                    rationale="北京来信增加压力，但尚不足以证明条件会被履行。",
-                    idempotency_key=f"{wake['id']}:li-letter-plan",
-                )
-                world.communicate(
-                    "li-zicheng",
-                    "关口愿继续议条件；请先给出家属安全与所部处置的可验证答复。",
-                    idempotency_key=f"{wake['id']}:reply-li",
-                )
-            elif actor_id == "li-zicheng" and sender == "wu-sangui":
-                world.update_plan(
-                    "继续以条件争取关口，但准备替代方案",
-                    ["回复可验证条件", "评估东部压力手段"],
-                    rationale="吴没有拒绝，也没有承诺。",
-                    idempotency_key=f"{wake['id']}:wu-reply-plan",
-                )
-            elif actor_id == "dorgon" and sender == "wu-sangui":
-                world.update_plan(
-                    "把山海关求助转化为可检验的合作机会",
-                    ["要求明确政治与通行条件", "保持军队不被来使牵制"],
-                    rationale="来信是真实机会，也可能是诱使改变行军的风险。",
-                    belief_updates=[
-                        {
-                            "subject": "shanhai-request",
-                            "assessment": "求助提供机会，但政治与通行条件仍未明确。",
-                            "confidence": "medium",
-                        }
-                    ],
-                    idempotency_key=f"{wake['id']}:wu-letter-plan",
-                )
-                world.communicate(
-                    "wu-sangui",
-                    "关外已收到来意。若要共同行动，请说明关口通行、指挥与承诺边界。",
-                    idempotency_key=f"{wake['id']}:reply-wu",
-                )
-            elif actor_id == "wu-sangui" and sender == "dorgon":
-                world.update_plan(
-                    "把两方书面条件并列核验，延后不可逆选择",
-                    ["整理关外提出的边界", "等待北京方面可验证答复", "准备关口应急部署"],
-                    rationale="关外回信改变了可选项，但仍未构成必须接受的结论。",
-                    idempotency_key=f"{wake['id']}:dorgon-reply-plan",
-                )
+            sender = str(message.get("sender") or "未知来信")
+            world.update_plan(
+                "根据新到信息核验条件，保持仍可执行的行动",
+                ["区分已知与待核验内容", "保留仍可执行的行动"],
+                rationale="来信改变了需要核验的条件，但不能替代已经兑现的世界事实。",
+                belief_updates=[
+                    {
+                        "subject": f"message:{sender}",
+                        "assessment": "收到一条需要继续核验的来信。",
+                        "confidence": "medium",
+                    }
+                ],
+                idempotency_key=f"{wake['id']}:message-plan",
+            )
             return ActorTurnResult("已按收到的信修正判断；没有替世界声明对方真实意图。")
 
         if wake_type == CrisisWakeType.REVISIT_DUE.value:
-            return ActorTurnResult(f"第 {tick} 日复查后，暂不追加行动。")
+            return ActorTurnResult("复查后，暂不追加行动。")
         if wake_type == CrisisWakeType.RESOLUTION_RESULT.value:
             world.update_plan(
                 "根据已经形成的局部结果调整后续处置",
@@ -2941,6 +2914,11 @@ class CrisisRunEngine:
         wakes: list[dict[str, Any]],
     ) -> None:
         projection["tick"] = tick
+        fixture_agent_ids = {
+            actor_id
+            for actor_id, controller in self._controller_map(run_id).items()
+            if controller == "AGENT"
+        }
         frozen: dict[str, dict[str, Any]] = {}
         frozen_revisits: dict[str, list[dict[str, Any]]] = {}
         actors_with_due_revisits = {
@@ -2964,6 +2942,10 @@ class CrisisRunEngine:
                 revisits=frozen_revisits[str(wake["actor_id"])],
             )
             perspective["trigger"] = self._trigger_for(wake)
+            if self.actor_driver.source == "fixture":
+                perspective["fixture_contactable_agent_ids"] = sorted(
+                    fixture_agent_ids - {str(wake["actor_id"])}
+                )
             frozen[wake["id"]] = perspective
 
         groups: dict[str, list[dict[str, Any]]] = {}

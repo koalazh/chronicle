@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -129,6 +130,38 @@ def test_fixture_decision_interpreter_creates_an_offer_only_for_explicit_passage
     assert offer.arguments["terms"][0]["subject"] == "shanhai-pass"
 
 
+def test_fixture_decision_interpreter_uses_the_perspective_manifest_not_historical_ids():
+    source = inspect.getsource(FixtureDecisionInterpreter)
+    assert all(
+        actor_id not in source
+        for actor_id in (
+            "li-zicheng",
+            "wu-sangui",
+            "dorgon",
+            "shi-kefa",
+            "ma-shiying",
+            "han-zanzhou",
+        )
+    )
+
+    result = FixtureDecisionInterpreter().interpret(
+        "请致信说明条件，并在两日后重新判断。",
+        {
+            "contactable_actors": [
+                {"id": "actor-b"},
+                {"id": "actor-a"},
+            ]
+        },
+    )
+
+    assert [operation.tool for operation in result.operations] == [
+        "update_plan",
+        "communicate",
+        "schedule_revisit",
+    ]
+    assert result.operations[1].arguments["recipient"] == "actor-a"
+
+
 def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
@@ -171,7 +204,7 @@ def test_takeover_human_multi_action_and_silence_use_the_shared_world_service(ap
     assert lifetime["plan"][0]["objective"].startswith("向关外")
     assert any(
         revisit["actor_id"] == "wu-sangui"
-        and revisit["reason"] == "两日后重新比较两方回应"
+        and revisit["reason"] == "两日后重新判断已知条件"
         and revisit["status"] == "DUE"
         for revisit in lifetime["revisits"]
     )

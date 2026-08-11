@@ -144,6 +144,7 @@ _REPLAY_LABELS = {
 class ActorTurnResult:
     summary: str
     session_id: str = ""
+    coalesced_with: str = ""
     memory_before_text: str = ""
     memory_before_hash: str = ""
     memory_before_existed: bool = False
@@ -419,7 +420,11 @@ class HermesActorDriver:
                 "content": (
                     "你是 Chronicle 危局中的长期历史主体，不是旁白、史官或游戏主持。"
                     "只依据本次私有视野判断；不要使用后世知识。世界事实只能通过 chronicle-world 工具改变。"
-                    "你可以更新自己的计划和少量信念、安排未来 Revisit、通信或请求有限行动。"
+                    "本次 Wake 不是待办清单：没有实质新判断时，不调用工具也是完整处置。"
+                    "不要为了重述或润色既有意图而更新计划；不要为了保持活跃而安排 Revisit。"
+                    "只有明确的未来时点会带来你需要重新判断的证据或行动可能性时，才安排 Revisit。"
+                    "若新 Agreement 或世界状态让 private_perspective.available_operations 中的行动成为可行，先判断是否实际开始；不要只把机会改写进计划。"
+                    "你可以在确有必要时更新计划和少量信念、安排未来 Revisit、通信或请求有限行动。"
                     "工具拒绝不是 Wake 失败：可在同一 Agent Loop 中修正参数或选择不行动。"
                     "调用参数：update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)；"
                     "schedule_revisit(after_days, reason, idempotency_key)；"
@@ -433,6 +438,7 @@ class HermesActorDriver:
                     "引用 ID 必须传对象 id 字段的裸字符串，不能把 target、targets、recipient、offer 或 term.subject 的完整对象原样传入；"
                     "belief_updates 是可选项，若使用，每项必须是含 subject、assessment、confidence（low/medium/high）的对象。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
+                    "若 private_perspective.triggers 存在，它们是同一模拟时刻一并到达的触发；综合处置一次，不要分别重复计划或 Revisit。"
                     "不要声称工具尚未确认的结果。最终只用简体中文简短说明你如何处置本次触发。"
                     + orient_rule
                     + memory_rule
@@ -2858,6 +2864,55 @@ class CrisisRunEngine:
                 trigger_event_id=trigger_event_id,
             )
 
+    @staticmethod
+    def _wake_sort_key(wake: dict[str, Any]) -> tuple[int, str, str, str]:
+        priorities = {
+            CrisisWakeType.RESOLUTION_GATE.value: 0,
+            CrisisWakeType.RESOLUTION_RESULT.value: 1,
+            CrisisWakeType.AGREEMENT_CHANGE.value: 2,
+            CrisisWakeType.OFFER_CHANGE.value: 3,
+            CrisisWakeType.OPERATION_RESULT.value: 4,
+            CrisisWakeType.INVESTIGATION_RESULT.value: 5,
+            CrisisWakeType.OBSERVATION.value: 6,
+            CrisisWakeType.MESSAGE.value: 7,
+            CrisisWakeType.PRESSURE.value: 8,
+            CrisisWakeType.REVISIT_DUE.value: 9,
+            CrisisWakeType.REFLECTION.value: 10,
+            CrisisWakeType.ORIENT.value: 11,
+        }
+        return (
+            priorities.get(str(wake["wake_type"]), 99),
+            str(wake["wake_type"]),
+            str(wake["trigger_event_id"]),
+            str(wake["id"]),
+        )
+
+    @classmethod
+    def _wake_batches(cls, wakes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Merge ordinary same-tick inputs into one logical Actor attention."""
+        coalescible = {
+            CrisisWakeType.AGREEMENT_CHANGE.value,
+            CrisisWakeType.OFFER_CHANGE.value,
+            CrisisWakeType.OPERATION_RESULT.value,
+            CrisisWakeType.INVESTIGATION_RESULT.value,
+            CrisisWakeType.OBSERVATION.value,
+            CrisisWakeType.MESSAGE.value,
+            CrisisWakeType.PRESSURE.value,
+            CrisisWakeType.REVISIT_DUE.value,
+        }
+        merged = sorted(
+            (wake for wake in wakes if wake["wake_type"] in coalescible),
+            key=cls._wake_sort_key,
+        )
+        batches = [
+            [wake]
+            for wake in wakes
+            if wake["wake_type"] not in coalescible
+        ]
+        if merged:
+            batches.append(merged)
+        return sorted(batches, key=lambda batch: cls._wake_sort_key(batch[0]))
+
     def _run_wake_moment(
         self,
         run_id: str,
@@ -2894,16 +2949,40 @@ class CrisisRunEngine:
         groups: dict[str, list[dict[str, Any]]] = {}
         for wake in wakes:
             groups.setdefault(wake["actor_id"], []).append(wake)
+        batches_by_actor: dict[str, list[list[dict[str, Any]]]] = {}
+        for actor_id, actor_wakes in groups.items():
+            batches = (
+                self._wake_batches(actor_wakes)
+                if self.actor_driver.source == "hermes"
+                else [[wake] for wake in sorted(actor_wakes, key=lambda item: item["id"])]
+            )
+            batches_by_actor[actor_id] = batches
+            for batch in batches:
+                if len(batch) <= 1:
+                    continue
+                primary = batch[0]
+                triggers = [
+                    {
+                        "wake_id": item["id"],
+                        "wake_type": item["wake_type"],
+                        "trigger": frozen[item["id"]]["trigger"],
+                    }
+                    for item in batch
+                ]
+                frozen[primary["id"]]["triggers"] = triggers
+                frozen[primary["id"]]["coalesced_wake_ids"] = [
+                    item["id"] for item in batch[1:]
+                ]
         results: dict[str, ActorTurnResult] = {}
         failures: list[tuple[str, Exception]] = []
         with ThreadPoolExecutor(max_workers=len(groups)) as executor:
             futures = {
                 executor.submit(
                     self._execute_actor_wakes,
-                    actor_wakes,
+                    actor_batches,
                     frozen,
                 ): actor_id
-                for actor_id, actor_wakes in groups.items()
+                for actor_id, actor_batches in batches_by_actor.items()
             }
             for future in as_completed(futures):
                 actor_id = futures[future]
@@ -2927,6 +3006,8 @@ class CrisisRunEngine:
             if lifetime is None:
                 raise CrisisRunError("actor life state is missing")
             actor_lifetimes[wake["actor_id"]] = lifetime
+            turn_result = results[wake["id"]]
+            coalesced_with = turn_result.coalesced_with
             state = actor_states.setdefault(
                 wake["actor_id"],
                 {
@@ -2938,8 +3019,8 @@ class CrisisRunEngine:
                     "wake_count": int(lifetime["wake_count"]),
                 },
             )
-            state["wake_count"] += 1
-            turn_result = results[wake["id"]]
+            if not coalesced_with:
+                state["wake_count"] += 1
             if wake["wake_type"] == CrisisWakeType.REFLECTION.value:
                 if turn_result.memory_before_hash and (
                     turn_result.memory_before_hash != state["memory_hash"]
@@ -3018,7 +3099,7 @@ class CrisisRunEngine:
                         causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
                     )
                 )
-            if not accepted:
+            if not accepted and not coalesced_with:
                 events.append(
                     self._event(
                         run_id,
@@ -3070,36 +3151,57 @@ class CrisisRunEngine:
                         causal_parent_ids=[revisit_due_events[revisit["id"]]],
                     )
                 )
-            fingerprint = stable_hash(
-                {
-                    "summary": results[wake["id"]].summary,
-                    "operations": [
-                        {"tool": item["tool_name"], "payload": item["payload"]}
-                        for item in operations
-                    ],
-                }
-            )
-            previous_count = self._previous_repetition_count(run_id, wake["actor_id"], fingerprint)
-            events.append(
-                self._event(
-                    run_id,
-                    tick,
-                    "ACTOR_WAKE_COMPLETED",
-                    {
-                        "wake_id": wake["id"],
-                        "wake_type": wake["wake_type"],
-                        "source": self.actor_driver.source,
-                        "session_id": self.db.crisis_wake(wake["id"])["hermes_session_id"],
-                        "operation_count": len(operations),
-                        "decision_fingerprint": fingerprint,
-                        "repetition_count": previous_count + 1,
-                    },
-                    seat_id=wake["actor_id"],
-                    causal_parent_ids=[wake["trigger_event_id"]]
-                    if wake["trigger_event_id"]
-                    else [],
+            if coalesced_with:
+                events.append(
+                    self._event(
+                        run_id,
+                        tick,
+                        "WAKE_COALESCED",
+                        {
+                            "wake_id": wake["id"],
+                            "wake_type": wake["wake_type"],
+                            "coalesced_with": coalesced_with,
+                            "visibility": [wake["actor_id"]],
+                        },
+                        seat_id=wake["actor_id"],
+                        causal_parent_ids=[wake["trigger_event_id"]]
+                        if wake["trigger_event_id"]
+                        else [],
+                    )
                 )
-            )
+            else:
+                fingerprint = stable_hash(
+                    {
+                        "summary": turn_result.summary,
+                        "operations": [
+                            {"tool": item["tool_name"], "payload": item["payload"]}
+                            for item in operations
+                        ],
+                    }
+                )
+                previous_count = self._previous_repetition_count(
+                    run_id, wake["actor_id"], fingerprint
+                )
+                events.append(
+                    self._event(
+                        run_id,
+                        tick,
+                        "ACTOR_WAKE_COMPLETED",
+                        {
+                            "wake_id": wake["id"],
+                            "wake_type": wake["wake_type"],
+                            "source": self.actor_driver.source,
+                            "session_id": self.db.crisis_wake(wake["id"])["hermes_session_id"],
+                            "operation_count": len(operations),
+                            "decision_fingerprint": fingerprint,
+                            "repetition_count": previous_count + 1,
+                        },
+                        seat_id=wake["actor_id"],
+                        causal_parent_ids=[wake["trigger_event_id"]]
+                        if wake["trigger_event_id"]
+                        else [],
+                    )
+                )
         lifetime_updates: list[dict[str, Any]] = []
         for actor_id, state in actor_states.items():
             lifetime = actor_lifetimes[actor_id]
@@ -3166,8 +3268,11 @@ class CrisisRunEngine:
             )
         for wake in wakes:
             result = results[wake["id"]]
+            wake_result = {"summary": result.summary}
+            if result.coalesced_with:
+                wake_result["coalesced_with"] = result.coalesced_with
             self.db.update_crisis_wake(
-                wake["id"], status="COMPLETED", result={"summary": result.summary}
+                wake["id"], status="COMPLETED", result=wake_result
             )
             for operation in self.db.crisis_wake_operations(wake["id"]):
                 if operation["status"] == "PROPOSED":
@@ -3177,12 +3282,19 @@ class CrisisRunEngine:
 
     def _execute_actor_wakes(
         self,
-        wakes: list[dict[str, Any]],
+        wake_batches: list[list[dict[str, Any]]] | list[dict[str, Any]],
         frozen: dict[str, dict[str, Any]],
     ) -> dict[str, ActorTurnResult]:
+        if wake_batches and isinstance(wake_batches[0], dict):
+            wake_batches = [
+                [wake]
+                for wake in sorted(wake_batches, key=lambda item: item["id"])
+            ]
         results: dict[str, ActorTurnResult] = {}
         expected_memory_hash = ""
-        for wake in sorted(wakes, key=lambda item: item["id"]):
+        wakes = [wake for batch in wake_batches for wake in batch]
+        for batch in wake_batches:
+            wake = batch[0]
             perspective = frozen[wake["id"]]
             session_id = (
                 f"fixture-{wake['id']}-{uuid.uuid4().hex[:8]}"
@@ -3224,6 +3336,16 @@ class CrisisRunEngine:
                 if results[wake["id"]].memory_hash:
                     expected_memory_hash = results[wake["id"]].memory_hash
                 self.db.update_crisis_wake(wake["id"], status="STAGED")
+                for coalesced in batch[1:]:
+                    self.db.update_crisis_wake(
+                        coalesced["id"],
+                        status="STAGED",
+                        frozen_perspective=frozen[coalesced["id"]],
+                    )
+                    results[coalesced["id"]] = ActorTurnResult(
+                        "同一时刻的触发已与本主体的综合判断合并处理。",
+                        coalesced_with=str(wake["id"]),
+                    )
             except Exception as exc:
                 self.db.update_crisis_wake(
                     wake["id"], status="FAILED", error={"type": type(exc).__name__}

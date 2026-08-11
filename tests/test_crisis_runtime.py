@@ -237,7 +237,10 @@ def test_same_tick_revisit_is_visible_to_every_frozen_actor_perspective(app_conf
                     idempotency_key=f"{wake['id']}:revisit",
                 )
             else:
-                self.statuses[wake["wake_type"]] = perspective["current_revisits"][0]["status"]
+                for trigger in perspective.get(
+                    "triggers", [{"wake_type": wake["wake_type"]}]
+                ):
+                    self.statuses[trigger["wake_type"]] = perspective["current_revisits"][0]["status"]
             return ActorTurnResult("保持当前判断。")
 
     driver = RevisitAwareDriver()
@@ -250,6 +253,73 @@ def test_same_tick_revisit_is_visible_to_every_frozen_actor_perspective(app_conf
 
     assert driver.statuses["MESSAGE"] == "DUE"
     assert driver.statuses["REVISIT_DUE"] == "DUE"
+
+
+def test_same_actor_triggers_share_one_fresh_frozen_wake(app_config):
+    class CoalescingDriver:
+        source = "hermes"
+
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if wake["wake_type"] == "ORIENT":
+                world.update_plan(
+                    "建立初始处置",
+                    ["等待新的世界事实"],
+                    idempotency_key=f"{wake['id']}:orient-plan",
+                )
+            if actor_id == "li-zicheng" and wake["wake_type"] != "ORIENT":
+                self.calls.append(
+                    {
+                        "wake_type": wake["wake_type"],
+                        "triggers": [item["wake_type"] for item in perspective["triggers"]],
+                        "plan": perspective["plan"],
+                    }
+                )
+            return ActorTurnResult("保持当前判断。")
+
+    driver = CoalescingDriver()
+    engine = CrisisRunEngine(app_config, actor_driver=driver)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    assert engine.advance_one(run_id) is True
+    engine._queue_wake(run_id, "li-zicheng", "MESSAGE", 1)
+    engine._queue_wake(run_id, "li-zicheng", "PRESSURE", 1)
+    for _ in range(4):
+        assert engine.advance_one(run_id) is True
+        li_wakes = [
+            wake
+            for wake in engine.db.crisis_wakes(run_id, tick=1)
+            if wake["actor_id"] == "li-zicheng"
+            and wake["wake_type"] in {"MESSAGE", "PRESSURE"}
+        ]
+        if li_wakes and all(wake["status"] == "COMPLETED" for wake in li_wakes):
+            break
+
+    assert len(driver.calls) == 1
+    assert driver.calls[0]["wake_type"] == "MESSAGE"
+    assert set(driver.calls[0]["triggers"]) == {"MESSAGE", "PRESSURE"}
+    li_wakes = [
+        wake
+        for wake in engine.db.crisis_wakes(run_id, tick=1)
+        if wake["actor_id"] == "li-zicheng"
+        and wake["wake_type"] in {"MESSAGE", "PRESSURE"}
+    ]
+    primary = next(wake for wake in li_wakes if not wake["result"].get("coalesced_with"))
+    coalesced = next(wake for wake in li_wakes if wake["result"].get("coalesced_with"))
+    assert {item["wake_type"] for item in primary["frozen_perspective"]["triggers"]} == {
+        "MESSAGE",
+        "PRESSURE",
+    }
+    assert coalesced["result"]["coalesced_with"] == primary["id"]
+    li_events = [
+        event
+        for event in engine.db.worldline_events(run_id)
+        if event["seat_id"] == "li-zicheng" and int(event["tick"]) == 1
+    ]
+    assert sum(event["event_type"] == "ACTOR_WAKE_COMPLETED" for event in li_events) == 1
+    assert sum(event["event_type"] == "WAKE_COALESCED" for event in li_events) == 1
 
 
 def test_live_orient_without_world_operation_fails_closed(app_config):

@@ -78,6 +78,7 @@ def doctor(config: AppConfig) -> dict[str, Any]:
             for wake in wakes
             if wake["status"] == "COMPLETED"
             and controllers.get(str(wake["actor_id"])) == "AGENT"
+            and not wake["result"].get("coalesced_with")
         )
         expected_revisit_wakes: dict[tuple[str, int, str], str] = {}
         for lifetime in lifetimes:
@@ -115,6 +116,7 @@ def doctor(config: AppConfig) -> dict[str, Any]:
                 and (
                     wake["status"] != "COMPLETED"
                     or controllers.get(str(wake["actor_id"])) != "AGENT"
+                    or bool(wake["result"].get("coalesced_with"))
                     or bool(wake["hermes_session_id"])
                 )
                 for wake in wakes

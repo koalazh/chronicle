@@ -103,6 +103,42 @@ class _FuRecognitionDriver:
         return ActorTurnResult("保持有限且可追溯的南京处置。")
 
 
+class _LateLuEntryDriver(_FuRecognitionDriver):
+    """Keep a competing claimant's already-started entry visible after recognition."""
+
+    def __init__(self):
+        super().__init__()
+        self.lu_revisit_scheduled = False
+        self.lu_entry_arranged = False
+
+    def run_wake(self, actor_id, wake, perspective, world):
+        available_operations = {
+            item["id"] for item in perspective.get("available_operations", [])
+        }
+        if actor_id == "shi-kefa" and wake["wake_type"] == "ORIENT":
+            if not self.lu_revisit_scheduled:
+                world.schedule_revisit(
+                    3,
+                    "待程序已实际开始后，再判断是否安排潞王进入南京。",
+                    idempotency_key="revisit-lu-entry",
+                )
+                self.lu_revisit_scheduled = True
+        elif (
+            actor_id == "shi-kefa"
+            and wake["wake_type"] == "REVISIT_DUE"
+            and "arrange_lu_entry" in available_operations
+            and not self.lu_entry_arranged
+        ):
+            world.operate(
+                "arrange_lu_entry",
+                ["lu-prince"],
+                "程序已经开启，安排潞王进入南京以保留可见的候选事实。",
+                idempotency_key="arrange-lu-entry-late",
+            )
+            self.lu_entry_arranged = True
+        return super().run_wake(actor_id, wake, perspective, world)
+
+
 class _DeferredProcedureDriver:
     source = "fixture"
 
@@ -247,6 +283,33 @@ def test_nanjing_fixture_loop_reaches_recognition_aftermath_and_settlement(app_c
     compatibility = {item["anchor_id"]: item["status"] for item in outcome["historical_compatibility"]}
     assert compatibility["historical-fu-regency"] == "COMPATIBLE"
     assert compatibility["historical-fu-enthronement"] == "UNKNOWN"
+
+
+def test_nanjing_recognition_remains_distinct_from_a_late_competing_claimant_entry(
+    app_config,
+):
+    engine = CrisisRunEngine(app_config, actor_driver=_LateLuEntryDriver())
+    run_id = engine.create(RunMode.WATCH, crisis_id="nanjing-succession")["run"]["id"]
+
+    engine.run_until_idle(run_id)
+    projection = engine.db.worldline_snapshot(run_id)["projection"]
+    events = engine.db.worldline_events(run_id)
+
+    assert projection["entities"]["nanjing-recognition"]["state"] == "FU_RECOGNIZED"
+    assert projection["entities"]["nanjing-court"]["state"] == "RECOGNIZED"
+    assert projection["entities"]["lu-prince"]["state"] == "IN_NANJING"
+    resolution_tick = next(
+        int(event["tick"])
+        for event in events
+        if event["event_type"] == "RESOLUTION_APPLIED"
+    )
+    late_entry_tick = next(
+        int(event["tick"])
+        for event in events
+        if event["event_type"] == "OPERATION_COMPLETED"
+        and event["payload"]["operation"]["definition_id"] == "arrange_lu_entry"
+    )
+    assert late_entry_tick > resolution_tick
 
 
 def test_nanjing_pressure_can_lead_to_a_deferred_world_resolution_before_safety_horizon(

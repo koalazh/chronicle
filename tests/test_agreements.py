@@ -76,6 +76,32 @@ def test_manage_offer_requires_a_declared_term_and_stages_the_request(app_config
     assert engine.db.worldline_snapshot(run_id)["projection"]["offers"] == []
 
 
+def test_manifest_marks_an_incoming_offer_as_requiring_a_formal_response(app_config):
+    class ProposingDriver:
+        source = "fixture"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id == "wu-sangui" and wake["wake_type"] == "ORIENT":
+                world.manage_offer(
+                    "PROPOSE",
+                    recipient="dorgon",
+                    terms=_passage_terms(perspective),
+                    message="请明确山海关通行条件。",
+                    idempotency_key="initial-offer",
+                )
+            return ActorTurnResult("保持有限行动。")
+
+    engine = CrisisRunEngine(app_config, actor_driver=ProposingDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    assert engine.advance_one(run_id) is True
+
+    incoming = engine.actor_perspective(run_id, "dorgon")["active_offers"]
+    outgoing = engine.actor_perspective(run_id, "wu-sangui")["active_offers"]
+
+    assert incoming[0]["response_required"] is True
+    assert outgoing[0]["response_required"] is False
+
+
 def test_offer_terms_take_their_display_description_from_the_crisis_pack(app_config):
     engine = CrisisRunEngine(app_config)
     perspective = engine.actor_perspective(

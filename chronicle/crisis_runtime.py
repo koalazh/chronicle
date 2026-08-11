@@ -454,6 +454,8 @@ class HermesActorDriver:
                     "manage_offer(action, offer_id, recipient, terms, message, expires_after_days, idempotency_key)，"
                     "可用条件、待回应 Offer 与生效 Agreement 已在私有视野中列出；"
                     "只有结构化 terms 真正变化时才使用 COUNTER；若同意现有条款，应使用 ACCEPT。"
+                    "若 active_offers 中有 response_required=true 的 Offer，必须用 manage_offer 作出正式回应；"
+                    "普通通信不能代替接受、拒绝或 Counter。"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
                     "引用 ID 必须传对象 id 字段的裸字符串，不能把 target、targets、recipient、offer 或 term.subject 的完整对象原样传入；"
@@ -4163,7 +4165,10 @@ class CrisisRunEngine:
         )
         available_offer_terms = self.pack.offer_term_affordances(actor_id)
         active_offers = [
-            offer
+            {
+                **offer,
+                "response_required": offer.get("recipient") == actor_id,
+            }
             for offer in projection.get("offers", [])
             if offer.get("status") == OfferStatus.PROPOSED.value
             and actor_id in {offer.get("issuer"), offer.get("recipient")}

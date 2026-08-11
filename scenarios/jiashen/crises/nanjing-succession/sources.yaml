@@ -1,0 +1,116 @@
+sources:
+  - id: mingji-nanlue-1
+    work: 《明季南略》
+    locator: 卷一·南都甲乙纪·福王本末
+    url: https://zh.wikisource.org/wiki/明季南略/卷01
+    description: 计六奇所编南都纪事；保留福王在淮上、仪真、入南京、监国与即位等节点，具体四月末日序需与其他材料交叉。
+  - id: mingji-yiwen-2
+    work: 《明季遗闻》
+    locator: 卷二·南都
+    url: https://zh.wikisource.org/wiki/明季遺聞/卷2
+    description: 邹漪的清初叙述，记南京获北都消息、候选范围、会议及五月初程序；人物评价不直接转成世界规则。
+  - id: hongguang-shilu-chao-1
+    work: 《弘光实录钞》
+    locator: 卷一·崇祯十七年夏五月
+    url: https://www.shidianguji.com/book/CADAL02080058/chapter/1lampcfs43bc8
+    description: 黄宗羲所撰弘光朝纪事；用于交叉观察定策、军政网络与后续任命，其评论性文字须与事实层分开。
+  - id: palace-nanming-overview
+    work: 故宫博物院《南明弘光政权及其覆灭》
+    locator: 南明弘光政权建立段
+    url: https://www.dpm.org.cn/court/event/159031.html
+    description: 现代博物馆概览，供核对四月十二日确报、福／潞候选及五月初三、十五两个公开节点；不替代近时材料。
+  - id: gu-cheng-nanming-history
+    work: 顾诚《南明史》
+    locator: 弘光朝建立相关章节
+    url: https://www.books.com.tw/products/CN11749042
+    description: 现代南明研究的交叉参照；本 Pack 用它审视材料谱系与后见之明，不将其解释直接变成 Host 规则。
+  - id: ma-shiying-modern-study
+    work: 《马士英与福王登基之研究》
+    locator: 《史汇》2014 年第 17 期，第 75–100 页
+    url: https://lawdata.com.tw/tw/detail.aspx?no=298834
+    description: 现代研究从候选、伦序、地方军政支持与后续军政分工分析定策；用于 Role Charter 的去刻板化审计。
+  - id: han-zanzhou-modern-study
+    work: 《南明弘光帝继统中的宦官活动探析——以卢、韩为中心》
+    locator: 《玉溪师范学院学报》2026 年第 2 期，摘要与参考文献
+    url: https://yxsg.cbpt.cnki.net/portal/journal/portal/client/paper/3d347469dc3f664eb5e2fb30993afff4
+    description: 现代研究将韩赞周的会议与程序权力作为独立问题讨论；用于检验不能把南京程序悄然交给 Host。
+
+assertions:
+  - id: n001
+    claim: 北京陷落与崇祯帝死亡的确切消息在甲申四月中旬进入南京官员的政治视野。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-yiwen-2, palace-nanming-overview]
+    normalized_evidence: 《明季遗闻》记四月十二日闻京师陷与帝殉；故宫概览亦以四月十二日为南京获得确报的节点。
+  - id: n002
+    claim: 福王朱由崧与潞王朱常淓都曾是南京继统讨论中的现实候选。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-yiwen-2, hongguang-shilu-chao-1, palace-nanming-overview, han-zanzhou-modern-study]
+    normalized_evidence: 三种叙述均把福王与潞王置于继统讨论中；关于其他候选和排序的细节并不完全一致。
+  - id: n003
+    claim: 史可法一侧与马士英一侧对候选、伦序、程序及可动员支持的判断存在分歧。
+    provenance: historical
+    evidence_status: disputed
+    source_ids: [mingji-yiwen-2, hongguang-shilu-chao-1, palace-nanming-overview]
+    normalized_evidence: 材料共同呈现分歧和军政支持的重要性，但对具体参与者、先后和压力方式的叙述不同；本场不把任何一方的评价写成固定动机。
+    notes: actor agency and disagreement are historical; exact negotiation sequence is disputed
+  - id: n004
+    claim: 福王在四月末至五月初由淮上／仪真方向进入南京的政治程序，随后在五月初三被推为监国。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-1, hongguang-shilu-chao-1, palace-nanming-overview]
+    normalized_evidence: 《明季南略》给出四月末仪真、五月初一入南京与初三程序的序列；其他材料保留相近的进入与迎立叙述，但四月末精确日序不能统一。
+    notes: exact location and date are intentionally not used as a deterministic checkpoint fact
+  - id: n005
+    claim: 福王在五月初三先以监国形式被推立，五月十五再即帝位。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, palace-nanming-overview]
+    normalized_evidence: 三种材料都区分监国与即位两个公开节点；它们属于 checkpoint 后的 reference-only 历史对照。
+  - id: n006
+    claim: 可见的江北军政支持是继统方案能否进入南京程序的现实约束之一。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-yiwen-2, hongguang-shilu-chao-1, palace-nanming-overview]
+    normalized_evidence: 近时和现代叙述都记录马士英与江北军政网络、迎立和后续安置之间的联系；本场只抽象支持能否公开进入程序，不声称各方完全一致。
+  - id: n007
+    claim: 史可法与马士英在监国、即位后均进入新的军政分工，史可法随后请求督师江北。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+    normalized_evidence: 三种材料均记入阁、兵部或督师等后续安排，但此事属于本 Crisis Resolution 之后的历史参考，不自动注入 Run。
+  - id: n008
+    claim: 本场把起点置于甲申四月下旬、北都确报已到而五月初三监国礼未完成的时段，是为保留继统程序与候选进入的多种现实路径而作的研究性切片。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+    normalized_evidence: 各材料对四月末会议和福王位置的精确先后有不同叙述；场景只固定它们共同支持的相对边界。
+    notes: checkpoint placement, not a claim of a single exact day
+  - id: n009
+    claim: 本场以未承诺、可见支持、已承认、争议等质性状态表示军政与制度现实，不使用兵额、票数或人物品行分值。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [mingji-yiwen-2, hongguang-shilu-chao-1, ma-shiying-modern-study]
+    normalized_evidence: 材料的叙述性、立场性和对具体数量的不足不支持精确分数；这是为保持可解释性所作的显式模型选择。
+  - id: n010
+    claim: 本场把无确定继统中心造成的时间压力建模为外部制度真空，而不把任何 Decision Actor 的历史后续行动做成自动事件。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [mingji-yiwen-2, palace-nanming-overview]
+    normalized_evidence: 北都确报与随后迅速发生的继统程序说明危局不能无限等待；具体触发 tick 是产品模型，不是史料日程。
+    notes: allowed EXOGENOUS pressure boundary
+  - id: n011
+    claim: “福王七不可”等文字属于当时争议和后出叙述的一部分，不能作为人物性格真相、行动成功率或默认结局。
+    provenance: modeled
+    evidence_status: disputed
+    source_ids: [hongguang-shilu-chao-1, ma-shiying-modern-study]
+    normalized_evidence: 《弘光实录钞》保存相关论述，现代研究提醒人物定型和材料立场；Pack 只承认争议存在，不裁决其内容。
+    notes: role-charter and resolver exclusion
+  - id: n012
+    claim: 韩赞周参与南京继统会议，并拥有使候选进入正式程序的制度性影响。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-yiwen-2, han-zanzhou-modern-study]
+    normalized_evidence: 《明季遗闻》将韩赞周列入四月末议立会议；现代研究依据相关材料将其召集议事、推进程序的职权作为继统中的独立作用讨论。
+    notes: supports Actor classification; it does not assign a fixed candidate preference

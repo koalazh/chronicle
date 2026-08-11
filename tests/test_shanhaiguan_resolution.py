@@ -96,6 +96,27 @@ def test_no_qing_access_does_not_force_a_resolution(app_config):
         resolver.resolve(world, "no-access-seed")
 
 
+def test_pressure_and_shun_arrival_can_defer_without_replacing_qing_choice(app_config):
+    resolver = get_resolution_contract("shanhaiguan-v1", 1)
+    world = _world(app_config)
+    world["positions"]["li-zicheng"] = "shanhaiguan"
+    world["entities"]["shun-eastern-force"]["state"] = "COMMITTED"
+    world["entities"]["qing-expedition-force"]["state"] = "READY"
+    world["entities"]["eastern-transit-window"]["state"] = "CLOSING"
+
+    readiness = resolver.evaluate_gate(world)
+    result = resolver.resolve(world, "pressure-deferred-seed")
+
+    assert readiness.status == ResolutionGateStatus.READY
+    assert readiness.candidate_kind == ResolutionKind.DEFERRED
+    assert result.variant == "SHUN_PRESSURE_DEFERRED"
+    assert {effect.entity_id for effect in result.entity_effects} == {
+        "shanhai-pass",
+        "eastern-transit-window",
+    }
+    assert all(effect.entity_id != "qing-expedition-force" for effect in result.entity_effects)
+
+
 def test_direct_conflict_uses_changed_readiness_and_control_as_world_facts(app_config):
     resolver = get_resolution_contract("shanhaiguan-v1", 1)
     qing_advantage = _direct_conflict_world(

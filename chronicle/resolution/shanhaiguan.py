@@ -91,6 +91,15 @@ class ShanhaiGuanResolutionContract:
                 reasons=("关口已关闭，关外主力也已经退出这一接触空间。",),
                 facts=self._gate_facts(facts),
             )
+        if self._shun_pressure_deferred(facts):
+            return ResolutionReadiness(
+                status=ResolutionGateStatus.READY,
+                candidate_kind=ResolutionKind.DEFERRED,
+                reasons=(
+                    "大顺东向兵力已到山海关，而京东通行窗口已经收紧；清军未能在这轮接触前进入。",
+                ),
+                facts=self._gate_facts(facts),
+            )
         if (
             facts.pass_state == "CLOSED"
             and not facts.qing_at_pass
@@ -184,6 +193,34 @@ class ShanhaiGuanResolutionContract:
                 ),
                 agreement_effects=(),
             )
+        if self._shun_pressure_deferred(facts):
+            return ResolutionResult(
+                contract_id=self.id,
+                contract_version=self.version,
+                kind=ResolutionKind.DEFERRED,
+                variant="SHUN_PRESSURE_DEFERRED",
+                ambiguity_used=False,
+                summary="大顺东向兵力已抵山海关，清军未能在通行窗口收紧前进入；关口形成由大顺前沿压力主导、但后续尚不可推演的局部现实。",
+                immediate_actor_ids=("li-zicheng", "wu-sangui"),
+                factors=(
+                    "大顺东向兵力已经进入山海关的现实接触空间。",
+                    "清军主力尚未进入山海关。",
+                    "京东通行窗口已经收紧，新的进入行动不再能在本场危局中可靠完成。",
+                ),
+                entity_effects=(
+                    ResolutionEntityEffect(
+                        "shanhai-pass",
+                        "SHUN_PRESSURE",
+                        "大顺东向兵力抵达后，关口首先承受其现实压力。",
+                    ),
+                    ResolutionEntityEffect(
+                        "eastern-transit-window",
+                        "CLOSED",
+                        "这一轮通行窗口已经结束，未完成的进入安排不能再在本场危局中兑现。",
+                    ),
+                ),
+                agreement_effects=(),
+            )
         return ResolutionResult(
             contract_id=self.id,
             contract_version=self.version,
@@ -205,6 +242,14 @@ class ShanhaiGuanResolutionContract:
                 ),
             ),
             agreement_effects=(),
+        )
+
+    @staticmethod
+    def _shun_pressure_deferred(facts: _ShanhaiFacts) -> bool:
+        return (
+            facts.transit_window == "CLOSING"
+            and facts.shun_at_pass
+            and not facts.qing_at_pass
         )
 
     def _resolve_direct_conflict(self, facts: _ShanhaiFacts, seed: str) -> ResolutionResult:

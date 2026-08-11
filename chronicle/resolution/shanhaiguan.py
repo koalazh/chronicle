@@ -128,6 +128,8 @@ class ShanhaiGuanResolutionContract:
                 kind=ResolutionKind.NEGOTIATED_SETTLEMENT,
                 variant="PASSAGE_IMPLEMENTED",
                 ambiguity_used=False,
+                summary="山海关通行安排已经被实际兑现，关口形成了暂时可执行的共同秩序。",
+                immediate_actor_ids=("wu-sangui", "dorgon"),
                 factors=(
                     "清军已在关口现实抵达。",
                     "吴三桂与多尔衮之间的通行安排仍然有效。",
@@ -161,6 +163,8 @@ class ShanhaiGuanResolutionContract:
                 kind=ResolutionKind.WITHDRAWAL,
                 variant="QING_WITHDRAWS",
                 ambiguity_used=False,
+                summary="山海关保持关闭，清军主力已经退出这一局部接触空间。",
+                immediate_actor_ids=("wu-sangui", "dorgon"),
                 factors=(
                     "山海关通道已经关闭。",
                     "清军主力已经退出关口接触空间。",
@@ -186,6 +190,8 @@ class ShanhaiGuanResolutionContract:
             kind=ResolutionKind.DEFERRED,
             variant="PASS_CLOSED_DEFERRED",
             ambiguity_used=False,
+            summary="山海关控制已经形成关闭状态，但主要力量尚未形成可裁定的直接接触。",
+            immediate_actor_ids=("wu-sangui",),
             factors=(
                 "山海关控制已形成关闭状态。",
                 "清军尚未以主力进入关口。",
@@ -239,6 +245,8 @@ class ShanhaiGuanResolutionContract:
                 kind=ResolutionKind.DIRECT_CONFLICT,
                 variant="QING_ADVANCE",
                 ambiguity_used=ambiguity_used,
+                summary="山海关一线的直接接触已经形成结果，清军取得了通道的局部控制。",
+                immediate_actor_ids=("li-zicheng", "wu-sangui", "dorgon"),
                 factors=tuple(factors),
                 entity_effects=(
                     ResolutionEntityEffect(
@@ -265,6 +273,8 @@ class ShanhaiGuanResolutionContract:
             kind=ResolutionKind.DIRECT_CONFLICT,
             variant="SHUN_HOLDS",
             ambiguity_used=ambiguity_used,
+            summary="山海关一线的直接接触已经形成结果，关口仍未向关外主力开放。",
+            immediate_actor_ids=("li-zicheng", "wu-sangui", "dorgon"),
             factors=tuple(factors),
             entity_effects=(
                 ResolutionEntityEffect(

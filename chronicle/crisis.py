@@ -250,7 +250,7 @@ class CrisisCheckpoint(StrictModel):
     native_date_window: str
     summary: str
     start_tick: int = 0
-    safety_horizon_days: int = Field(ge=7, le=10)
+    safety_horizon_days: int = Field(ge=7, le=45)
     facts: list[str]
     unresolved: list[str]
     in_transit: list[InTransitMessage]

@@ -1336,6 +1336,9 @@ class ChronicleDB:
         lifetime_updates: list[dict[str, Any]] | None = None,
         memory_versions: list[dict[str, Any]] | None = None,
         snapshot: dict[str, Any] | None = None,
+        crisis_phase: str | None = None,
+        outcome_json: str | None = None,
+        settlement_reason: str | None = None,
         pending_confirmation_json: str | None = None,
         expected_pending_confirmation_json: str | None = None,
         expected_current_tick: int | None = None,
@@ -1377,6 +1380,15 @@ class ChronicleDB:
             if pending_confirmation_json is not None:
                 update_sql += ", pending_confirmation_json = ?"
                 update_args.append(pending_confirmation_json)
+            if crisis_phase is not None:
+                update_sql += ", crisis_phase = ?"
+                update_args.append(crisis_phase)
+            if outcome_json is not None:
+                update_sql += ", outcome_json = ?"
+                update_args.append(outcome_json)
+            if settlement_reason is not None:
+                update_sql += ", settlement_reason = ?"
+                update_args.append(settlement_reason)
             update_sql += " WHERE id = ? AND status = 'ACTIVE'"
             update_args.append(worldline_id)
             if expected_current_tick is not None:
@@ -1461,6 +1473,10 @@ class ChronicleDB:
         runtime_phase: str | None = None,
         runtime_error_code: str = "",
         cancel_queued_wakes: bool = False,
+        crisis_phase: str | None = None,
+        outcome_json: str | None = None,
+        settlement_reason: str | None = None,
+        current_tick: int | None = None,
     ) -> dict[str, Any]:
         """Seal a Worldline, its event ledger, and all branch lifetimes atomically."""
 
@@ -1491,12 +1507,27 @@ class ChronicleDB:
             runtime_args: tuple[Any, ...] = (
                 (runtime_phase, runtime_error_code) if runtime_phase else ()
             )
+            crisis_sql = ""
+            crisis_args: tuple[Any, ...] = ()
+            if crisis_phase is not None:
+                crisis_sql += ", crisis_phase = ?"
+                crisis_args += (crisis_phase,)
+            if outcome_json is not None:
+                crisis_sql += ", outcome_json = ?"
+                crisis_args += (outcome_json,)
+            if settlement_reason is not None:
+                crisis_sql += ", settlement_reason = ?"
+                crisis_args += (settlement_reason,)
+            if current_tick is not None:
+                crisis_sql += ", current_tick = ?"
+                crisis_args += (current_tick,)
             updated = connection.execute(
                 "UPDATE worldlines SET status = 'SEALED', seal_reason = ?, outcome = ?, "
                 "pending_confirmation_json = ''"
                 + runtime_sql
+                + crisis_sql
                 + ", updated_at = ? WHERE id = ? AND status = 'ACTIVE'",
-                (reason, outcome, *runtime_args, now_iso(), worldline_id),
+                (reason, outcome, *runtime_args, *crisis_args, now_iso(), worldline_id),
             )
             if updated.rowcount != 1:
                 raise sqlite3.IntegrityError("worldline is no longer active")

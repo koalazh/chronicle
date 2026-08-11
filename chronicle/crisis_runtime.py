@@ -27,6 +27,8 @@ from .decision import (
     FixtureDecisionInterpreter,
     ModelDecisionInterpreter,
 )
+from .resolution import get_resolution_contract
+from .resolution.base import ResolutionGateStatus, ResolutionKind
 from .world import WorldAffordanceSession, WorldService, token_hash
 
 
@@ -65,6 +67,8 @@ class CrisisWakeType(StrEnum):
     AGREEMENT_CHANGE = "AGREEMENT_CHANGE"
     OPERATION_RESULT = "OPERATION_RESULT"
     PRESSURE = "PRESSURE"
+    RESOLUTION_GATE = "RESOLUTION_GATE"
+    RESOLUTION_RESULT = "RESOLUTION_RESULT"
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
 
@@ -87,6 +91,9 @@ WATCH_ATTENTION_EVENT_TYPES = frozenset(
         "MOVEMENT_STARTED",
         "MOVEMENT_ARRIVED",
         "PRESSURE_APPLIED",
+        "RESOLUTION_GATE_REACHED",
+        "RESOLUTION_APPLIED",
+        "CRISIS_SETTLED",
     }
 )
 
@@ -196,6 +203,14 @@ class FixtureActorDriver:
 
         if wake_type == CrisisWakeType.REVISIT_DUE.value:
             return ActorTurnResult(f"第 {tick} 日复查后，暂不追加行动。")
+        if wake_type == CrisisWakeType.RESOLUTION_RESULT.value:
+            world.update_plan(
+                "根据已经形成的局部结果调整后续处置",
+                ["核验新现实是否稳定", "只保留仍可执行的有限行动"],
+                rationale="危局已经形成结果，后续判断必须以已经兑现的世界事实为准。",
+                idempotency_key=f"{wake['id']}:aftermath-plan",
+            )
+            return ActorTurnResult("已依据危局结果重新安排后续处置。")
         return ActorTurnResult("没有足够的新触发，保持当前计划。")
 
 
@@ -512,6 +527,9 @@ class CrisisRunEngine:
             "investigations": [],
             "offers": [],
             "agreements": [],
+            "resolution": {"status": "OPEN"},
+            "resolution_reports": [],
+            "settlement": {"status": "OPEN"},
             "pressures": [
                 {
                     "id": pressure.id,
@@ -829,6 +847,18 @@ class CrisisRunEngine:
             current = self.db.worldline(run_id)
             if current is None:
                 raise CrisisRunError("Run disappeared while advancing")
+            if current["status"] == "SEALED":
+                return {
+                    "advanced": True,
+                    "attention": {
+                        "mode": "SETTLEMENT",
+                        "tick": int(current["current_tick"]),
+                        "event_type": "CRISIS_SETTLED",
+                    },
+                    "moments": moments,
+                    "from_tick": start_tick,
+                    "to_tick": int(current["current_tick"]),
+                }
             if self._human_actor_id(run_id) is not None:
                 human_attention = self._human_attention(run_id)
                 if human_attention is not None:
@@ -1068,6 +1098,7 @@ class CrisisRunEngine:
                 status="COMPLETED",
                 result={"silence": True, "summary": "暂不追加命令，继续观察。"},
             )
+            self._advance_crisis_lifecycle(run_id)
             return {"silence": True, "events": [event, *fulfilled_events], "operations": []}
 
         snapshot = self.db.worldline_snapshot(run_id)
@@ -1129,6 +1160,7 @@ class CrisisRunEngine:
                 wake["id"], status="FAILED", error={"type": type(exc).__name__}
             )
             raise CrisisRunError("Human decision could not be safely applied") from exc
+        self._advance_crisis_lifecycle(run_id)
         return {
             "silence": False,
             "summary": interpretation.summary,
@@ -1329,9 +1361,574 @@ class CrisisRunEngine:
             due.append(revisit)
         return due
 
+    def _resolution_contract_for_run(self, run: dict[str, Any]):
+        return get_resolution_contract(
+            str(run["resolution_contract_id"]), int(run["resolution_contract_version"])
+        )
+
+    def _advance_crisis_lifecycle(self, run_id: str) -> None:
+        """Move the Crisis phase only after a committed world moment."""
+
+        run = self.db.worldline(run_id)
+        if run is None or run["status"] != "ACTIVE":
+            return
+        phase = str(run.get("crisis_phase") or "OPEN")
+        if phase == "OPEN":
+            self._begin_resolution_if_ready(run_id, run)
+        elif phase == "AFTERMATH":
+            self._settle_if_stable(run_id, run)
+
+    def _begin_resolution_if_ready(self, run_id: str, run: dict[str, Any]) -> bool:
+        snapshot = self.db.worldline_snapshot(run_id)
+        if snapshot is None:
+            raise CrisisRunError("Run snapshot is missing")
+        projection = copy.deepcopy(snapshot["projection"])
+        contract = self._resolution_contract_for_run(run)
+        readiness = contract.evaluate_gate(projection)
+        if readiness.status != ResolutionGateStatus.READY:
+            return False
+        tick = int(run["current_tick"])
+        existing_events = self.db.worldline_events(run_id)
+        gate = self._event(
+            run_id,
+            tick,
+            "RESOLUTION_GATE_REACHED",
+            {
+                "readiness": readiness.to_dict(),
+                "visibility": sorted(self.pack.actor_by_id),
+            },
+            causal_parent_ids=[existing_events[-1]["id"]] if existing_events else [],
+        )
+        projection["resolution"] = {
+            "status": "PENDING",
+            "gate_event_id": gate["id"],
+            "gate_tick": tick,
+            "readiness": readiness.to_dict(),
+        }
+        self.db.commit_worldline_moment(
+            run_id,
+            [gate],
+            current_tick=tick,
+            snapshot=projection,
+            crisis_phase="RESOLUTION_PENDING",
+        )
+        human_actor_id = self._human_actor_id(run_id)
+        if human_actor_id is not None:
+            self._queue_wake(
+                run_id,
+                human_actor_id,
+                CrisisWakeType.RESOLUTION_GATE,
+                tick,
+                trigger_event_id=gate["id"],
+            )
+        return True
+
+    def _queued_human_resolution_gate(self, run_id: str, actor_id: str) -> bool:
+        return any(
+            wake["actor_id"] == actor_id
+            and wake["wake_type"] == CrisisWakeType.RESOLUTION_GATE.value
+            and wake["status"] == "QUEUED"
+            for wake in self.db.crisis_wakes(run_id)
+        )
+
+    def _apply_resolution(self, run_id: str, run: dict[str, Any]) -> bool:
+        snapshot = self.db.worldline_snapshot(run_id)
+        if snapshot is None:
+            raise CrisisRunError("Run snapshot is missing")
+        projection = copy.deepcopy(snapshot["projection"])
+        tick = int(run["current_tick"])
+        projection["tick"] = tick
+        contract = self._resolution_contract_for_run(run)
+        readiness = contract.evaluate_gate(projection)
+        if readiness.status != ResolutionGateStatus.READY:
+            existing_events = self.db.worldline_events(run_id)
+            reopened = self._event(
+                run_id,
+                tick,
+                "RESOLUTION_GATE_REOPENED",
+                {
+                    "readiness": readiness.to_dict(),
+                    "visibility": sorted(self.pack.actor_by_id),
+                },
+                causal_parent_ids=[existing_events[-1]["id"]] if existing_events else [],
+            )
+            projection["resolution"] = {"status": "OPEN", "readiness": readiness.to_dict()}
+            self.db.commit_worldline_moment(
+                run_id,
+                [reopened],
+                current_tick=tick,
+                snapshot=projection,
+                crisis_phase="OPEN",
+            )
+            return True
+
+        result = contract.resolve(projection, str(run["resolution_seed"]))
+        immediate_actor_ids = sorted(
+            set(result.immediate_actor_ids).intersection(self.pack.actor_by_id)
+        )
+        if not immediate_actor_ids:
+            raise CrisisRunError("Resolution result must reach at least one Actor immediately")
+        result_payload = result.to_dict()
+        resolved = self._event(
+            run_id,
+            tick,
+            "RESOLUTION_APPLIED",
+            {"result": result_payload, "visibility": immediate_actor_ids},
+            causal_parent_ids=[
+                str(projection.get("resolution", {}).get("gate_event_id") or "")
+            ]
+            if projection.get("resolution", {}).get("gate_event_id")
+            else [],
+        )
+        projection["resolution"] = {
+            "status": "APPLIED",
+            "event_id": resolved["id"],
+            "applied_tick": tick,
+            "readiness": readiness.to_dict(),
+            "result": result_payload,
+        }
+        events: list[dict[str, Any]] = [resolved]
+        for effect in result.entity_effects:
+            entity = projection.get("entities", {}).get(effect.entity_id)
+            if entity is None:
+                raise CrisisRunError(f"Resolution references unknown entity {effect.entity_id}")
+            before = str(entity["state"])
+            entity["state"] = effect.state
+            if before == effect.state:
+                continue
+            events.append(
+                self._event(
+                    run_id,
+                    tick,
+                    "RESOLUTION_ENTITY_EFFECT",
+                    {
+                        "entity_id": effect.entity_id,
+                        "before": before,
+                        "after": effect.state,
+                        "description": effect.description,
+                        "visibility": immediate_actor_ids,
+                    },
+                    causal_parent_ids=[resolved["id"]],
+                )
+            )
+        agreements = {
+            str(agreement["id"]): agreement
+            for agreement in projection.get("agreements", [])
+        }
+        for effect in result.agreement_effects:
+            agreement = agreements.get(effect.agreement_id)
+            if agreement is None:
+                raise CrisisRunError(f"Resolution references unknown agreement {effect.agreement_id}")
+            before = str(agreement["status"])
+            agreement["status"] = effect.status
+            if before == effect.status:
+                continue
+            events.append(
+                self._event(
+                    run_id,
+                    tick,
+                    "RESOLUTION_AGREEMENT_EFFECT",
+                    {
+                        "agreement_id": effect.agreement_id,
+                        "before": before,
+                        "after": effect.status,
+                        "description": effect.description,
+                        "visibility": sorted(set(agreement.get("parties", []))),
+                    },
+                    causal_parent_ids=[resolved["id"]],
+                )
+            )
+
+        knowledge_by_actor: dict[str, list[Any]] = {}
+        for actor_id in immediate_actor_ids:
+            lifetime = self.db.worldline_lifetime(run_id, actor_id)
+            if lifetime is None:
+                raise CrisisRunError("resolution observer life state is missing")
+            knowledge = list(lifetime["knowledge"])
+            knowledge.append(
+                {
+                    "kind": "resolution",
+                    "event_id": resolved["id"],
+                    "resolution_kind": result.kind.value,
+                    "content": result.summary,
+                    "obtained_tick": tick,
+                }
+            )
+            knowledge_by_actor[actor_id] = knowledge
+
+        reports = projection.setdefault("resolution_reports", [])
+        for actor_id in sorted(set(self.pack.actor_by_id) - set(immediate_actor_ids)):
+            report = {
+                "id": f"resolution-report-{uuid.uuid4().hex[:16]}",
+                "recipient": actor_id,
+                "resolution_event_id": resolved["id"],
+                "resolution_kind": result.kind.value,
+                "content": result.summary,
+                "dispatched_tick": tick,
+                "expected_tick": tick + 2,
+                "status": "IN_TRANSIT",
+            }
+            reports.append(report)
+            dispatched = self._event(
+                run_id,
+                tick,
+                "RESOLUTION_REPORT_DISPATCHED",
+                {"report": report, "visibility": [actor_id]},
+                causal_parent_ids=[resolved["id"]],
+            )
+            report["dispatch_event_id"] = dispatched["id"]
+            events.append(dispatched)
+
+        updates = [
+            {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+                "last_perspective_json": json.dumps(
+                    self._perspective_from(run_id, actor_id, projection, knowledge=knowledge),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+            for actor_id, knowledge in knowledge_by_actor.items()
+        ]
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            lifetime_updates=updates,
+            snapshot=projection,
+            crisis_phase="AFTERMATH",
+        )
+        for actor_id in immediate_actor_ids:
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.RESOLUTION_RESULT,
+                tick + 1,
+                trigger_event_id=resolved["id"],
+            )
+        return True
+
+    @staticmethod
+    def _resolution_reports_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
+        return [
+            report
+            for report in projection.get("resolution_reports", [])
+            if report.get("status") == "IN_TRANSIT" and int(report["expected_tick"]) == tick
+        ]
+
+    def _commit_resolution_reports(
+        self, run_id: str, tick: int, projection: dict[str, Any]
+    ) -> None:
+        due = self._resolution_reports_due(projection, tick)
+        projection["tick"] = tick
+        events: list[dict[str, Any]] = []
+        knowledge_by_actor: dict[str, list[Any]] = {}
+        for report in due:
+            actor_id = str(report["recipient"])
+            report["status"] = "DELIVERED"
+            delivered = self._event(
+                run_id,
+                tick,
+                "RESOLUTION_REPORT_DELIVERED",
+                {"report": report, "visibility": [actor_id]},
+                seat_id=actor_id,
+                causal_parent_ids=[report["dispatch_event_id"]]
+                if report.get("dispatch_event_id")
+                else [],
+            )
+            report["delivery_event_id"] = delivered["id"]
+            events.append(delivered)
+            lifetime = self.db.worldline_lifetime(run_id, actor_id)
+            if lifetime is None:
+                raise CrisisRunError("resolution report recipient life state is missing")
+            knowledge = list(lifetime["knowledge"])
+            knowledge.append(
+                {
+                    "kind": "resolution",
+                    "event_id": delivered["id"],
+                    "resolution_event_id": report["resolution_event_id"],
+                    "resolution_kind": report["resolution_kind"],
+                    "content": report["content"],
+                    "obtained_tick": tick,
+                }
+            )
+            knowledge_by_actor[actor_id] = knowledge
+        updates = [
+            {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+                "last_perspective_json": json.dumps(
+                    self._perspective_from(run_id, actor_id, projection, knowledge=knowledge),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+            for actor_id, knowledge in knowledge_by_actor.items()
+        ]
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            lifetime_updates=updates,
+            snapshot=projection,
+        )
+        for event in events:
+            self._queue_wake(
+                run_id,
+                str(event["seat_id"]),
+                CrisisWakeType.RESOLUTION_RESULT,
+                tick,
+                trigger_event_id=event["id"],
+            )
+
+    def _human_resolution_attention_pending(self, run_id: str) -> bool:
+        run = self.db.worldline(run_id)
+        if run is None:
+            return False
+        actor_id = self._human_actor_id(run_id)
+        if actor_id is None:
+            return False
+        tick = int(run["current_tick"])
+        if self.human_decision_state(run_id, tick)["state"] != "NONE":
+            return False
+        return any(
+            event["event_type"] == "HUMAN_INTERRUPTION_READY"
+            and event["seat_id"] == actor_id
+            and int(event["tick"]) == tick
+            and event["payload"].get("wake_type") == CrisisWakeType.RESOLUTION_RESULT.value
+            for event in self.db.worldline_events(run_id)
+        )
+
+    def _settlement_outcome(self, projection: dict[str, Any]) -> dict[str, Any]:
+        resolution = projection.get("resolution", {})
+        result = dict(resolution.get("result", {}))
+        kind = str(result.get("kind") or ResolutionKind.DEFERRED.value)
+        effected_entity_ids = {
+            str(effect["entity_id"])
+            for effect in result.get("entity_effects", [])
+            if isinstance(effect, dict) and effect.get("entity_id")
+        }
+        return {
+            "settlement_type": "DEFERRED" if kind == ResolutionKind.DEFERRED.value else "RESOLVED",
+            "resolution_kind": kind,
+            "resolution_variant": str(result.get("variant") or ""),
+            "final_stakes": list(result.get("factors", [])),
+            "actor_positions": [
+                {"actor_id": actor_id, "position": projection["positions"][actor_id]}
+                for actor_id in sorted(self.pack.actor_by_id)
+            ],
+            "critical_assets": [
+                {
+                    "id": entity_id,
+                    "display_name": projection["entities"][entity_id]["display_name"],
+                    "state": projection["entities"][entity_id]["state"],
+                }
+                for entity_id in sorted(effected_entity_ids)
+                if entity_id in projection.get("entities", {})
+            ],
+            "agreements": [
+                {
+                    "id": agreement["id"],
+                    "parties": list(agreement["parties"]),
+                    "terms": list(agreement["terms"]),
+                    "status": agreement["status"],
+                }
+                for agreement in projection.get("agreements", [])
+            ],
+            "major_operations": [
+                {
+                    "id": operation["id"],
+                    "definition_id": operation["definition_id"],
+                    "actor_id": operation["actor_id"],
+                    "status": operation["status"],
+                    "result_state": dict(operation.get("result_state", {})),
+                }
+                for operation in projection.get("operations", [])
+                if operation.get("status") == "COMPLETED"
+            ],
+            "historical_compatibility": [],
+            "material_causal_roots": [str(resolution.get("event_id") or "")],
+        }
+
+    def _settle_if_stable(self, run_id: str, run: dict[str, Any]) -> bool:
+        snapshot = self.db.worldline_snapshot(run_id)
+        if snapshot is None:
+            raise CrisisRunError("Run snapshot is missing")
+        projection = copy.deepcopy(snapshot["projection"])
+        if projection.get("resolution", {}).get("status") != "APPLIED":
+            return False
+        if any(
+            operation.get("status") in {"PLANNED", "IN_PROGRESS"}
+            for operation in projection.get("operations", [])
+        ):
+            return False
+        if any(
+            investigation.get("status") in {"PLANNED", "IN_PROGRESS"}
+            for investigation in projection.get("investigations", [])
+        ):
+            return False
+        if any(movement.get("status") == "in_transit" for movement in projection.get("movements", [])):
+            return False
+        if any(message.get("status") == "in_transit" for message in projection.get("messages", [])):
+            return False
+        if any(report.get("status") == "IN_TRANSIT" for report in projection.get("resolution_reports", [])):
+            return False
+        if any(
+            offer.get("status") == OfferStatus.PROPOSED.value
+            for offer in projection.get("offers", [])
+        ):
+            return False
+        if any(
+            wake["status"] in {"QUEUED", "RUNNING", "STAGED"}
+            for wake in self.db.nonterminal_crisis_wakes(run_id)
+        ):
+            return False
+        if self._human_resolution_attention_pending(run_id):
+            return False
+
+        outcome = self._settlement_outcome(projection)
+        reason = (
+            "deferred_resolution"
+            if outcome["settlement_type"] == "DEFERRED"
+            else "resolution_stabilized"
+        )
+        tick = int(run["current_tick"])
+        settlement = self._event(
+            run_id,
+            tick,
+            "CRISIS_SETTLED",
+            {
+                "settlement_type": outcome["settlement_type"],
+                "reason": reason,
+                "outcome": outcome,
+                "visibility": sorted(self.pack.actor_by_id),
+            },
+            causal_parent_ids=[str(projection["resolution"].get("event_id") or "")]
+            if projection["resolution"].get("event_id")
+            else [],
+        )
+        projection["settlement"] = {
+            "status": "SETTLED",
+            "reason": reason,
+            "tick": tick,
+            "outcome": outcome,
+        }
+        sealed = self._event(
+            run_id,
+            tick,
+            "RUN_SEALED",
+            {"reason": "crisis_settled", "visibility": sorted(self.pack.actor_by_id)},
+            causal_parent_ids=[settlement["id"]],
+        )
+        self.db.commit_worldline_seal(
+            run_id,
+            sealed,
+            reason="crisis_settled",
+            outcome=str(projection["resolution"]["result"].get("summary") or "危局已经形成局部结果。"),
+            pre_events=[settlement],
+            snapshot=projection,
+            revoke_agent_bindings=True,
+            runtime_phase="CLEANUP_PENDING" if run["runtime_mode"] == "live" else None,
+            runtime_error_code="runtime_cleanup_pending" if run["runtime_mode"] == "live" else "",
+            cancel_queued_wakes=True,
+            crisis_phase="SETTLED",
+            outcome_json=json.dumps(outcome, ensure_ascii=False, sort_keys=True),
+            settlement_reason=reason,
+        )
+        return True
+
+    def _settle_at_safety_horizon(self, run_id: str, run: dict[str, Any]) -> bool:
+        """Produce a bounded Deferred outcome when the internal harness is exhausted."""
+
+        snapshot = self.db.worldline_snapshot(run_id)
+        if snapshot is None:
+            raise CrisisRunError("Run snapshot is missing")
+        projection = copy.deepcopy(snapshot["projection"])
+        tick = self.pack.crisis.simulation_boundary.maximum_tick
+        projection["tick"] = tick
+        horizon = self._event(
+            run_id,
+            tick,
+            "SAFETY_HORIZON_REACHED",
+            {
+                "maximum_tick": tick,
+                "visibility": sorted(self.pack.actor_by_id),
+            },
+            causal_parent_ids=[self.db.worldline_events(run_id)[-1]["id"]]
+            if self.db.worldline_events(run_id)
+            else [],
+        )
+        result = {
+            "contract_id": str(run["resolution_contract_id"]),
+            "contract_version": int(run["resolution_contract_version"]),
+            "kind": ResolutionKind.DEFERRED.value,
+            "variant": "SAFETY_HORIZON",
+            "ambiguity_used": False,
+            "summary": "危局尚未形成足以可靠裁定的局部结果，模拟在安全上限处以延期状态封存。",
+            "immediate_actor_ids": [],
+            "factors": ["内部模拟安全上限已经到达。"],
+            "entity_effects": [],
+            "agreement_effects": [],
+        }
+        projection["resolution"] = {
+            "status": "SAFETY_HORIZON",
+            "event_id": horizon["id"],
+            "applied_tick": tick,
+            "result": result,
+        }
+        outcome = self._settlement_outcome(projection)
+        outcome["settlement_type"] = "SAFETY_HORIZON"
+        projection["settlement"] = {
+            "status": "SETTLED",
+            "reason": "safety_horizon",
+            "tick": tick,
+            "outcome": outcome,
+        }
+        settlement = self._event(
+            run_id,
+            tick,
+            "CRISIS_SETTLED",
+            {
+                "settlement_type": "SAFETY_HORIZON",
+                "reason": "safety_horizon",
+                "outcome": outcome,
+                "visibility": sorted(self.pack.actor_by_id),
+            },
+            causal_parent_ids=[horizon["id"]],
+        )
+        sealed = self._event(
+            run_id,
+            tick,
+            "RUN_SEALED",
+            {"reason": "safety_horizon", "visibility": sorted(self.pack.actor_by_id)},
+            causal_parent_ids=[settlement["id"]],
+        )
+        self.db.commit_worldline_seal(
+            run_id,
+            sealed,
+            reason="safety_horizon",
+            outcome=result["summary"],
+            pre_events=[horizon, settlement],
+            snapshot=projection,
+            revoke_agent_bindings=True,
+            runtime_phase="CLEANUP_PENDING" if run["runtime_mode"] == "live" else None,
+            runtime_error_code="runtime_cleanup_pending" if run["runtime_mode"] == "live" else "",
+            cancel_queued_wakes=True,
+            crisis_phase="SETTLED",
+            outcome_json=json.dumps(outcome, ensure_ascii=False, sort_keys=True),
+            settlement_reason="safety_horizon",
+            current_tick=tick,
+        )
+        return True
+
     def advance_one(self, run_id: str, *, allow_runtime_bootstrap: bool = False) -> bool:
         run = self._activate_run_pack(run_id)
-        if run is None or run["kind"] != "CRISIS" or run["status"] != "ACTIVE":
+        if run is None or run["kind"] != "CRISIS":
+            raise CrisisRunError("Run is not active")
+        if run["status"] == "SEALED":
+            return False
+        if run["status"] != "ACTIVE":
             raise CrisisRunError("Run is not active")
         if run["runtime_mode"] == "live" and run.get("runtime_phase") != "READY":
             if not (
@@ -1343,32 +1940,55 @@ class CrisisRunEngine:
                     code="runtime_not_ready",
                     state=str(run.get("runtime_phase") or "FAILED"),
                 )
+        if run.get("crisis_phase") == "RESOLUTION_PENDING":
+            human_actor_id = self._human_actor_id(run_id)
+            if human_actor_id is not None:
+                if self._queued_human_resolution_gate(run_id, human_actor_id):
+                    pass
+                elif self._human_attention(run_id) is not None:
+                    return False
+                elif self.human_decision_state(run_id, int(run["current_tick"]))["state"] == "NONE":
+                    return False
+                else:
+                    return self._apply_resolution(run_id, run)
+            else:
+                return self._apply_resolution(run_id, run)
         next_tick = self._next_tick(run_id)
         if next_tick is None:
             return False
         if next_tick >= self.pack.crisis.simulation_boundary.maximum_tick:
-            return False
+            return self._settle_at_safety_horizon(run_id, run)
         snapshot = self.db.worldline_snapshot(run_id)
         if snapshot is None:
             raise CrisisRunError("Run snapshot is missing")
         projection = copy.deepcopy(snapshot["projection"])
         if self._operations_due(projection, next_tick):
             self._commit_operations(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         if self._investigations_due(projection, next_tick):
             self._commit_investigations(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         if self._offers_due(projection, next_tick):
             self._expire_offers(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         if self._pressures_due(projection, next_tick):
             self._commit_pressures(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         if self._movements_due(projection, next_tick):
             self._commit_movements(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         if self._deliveries_due(projection, next_tick):
             self._commit_deliveries(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
+            return True
+        if self._resolution_reports_due(projection, next_tick):
+            self._commit_resolution_reports(run_id, next_tick, projection)
+            self._advance_crisis_lifecycle(run_id)
             return True
         wakes = self.db.crisis_wakes(run_id, status="QUEUED", tick=next_tick)
         if not wakes:
@@ -1379,6 +1999,7 @@ class CrisisRunEngine:
             self._commit_human_interruptions(run_id, next_tick, projection, human_wakes)
             return True
         self._run_wake_moment(run_id, next_tick, projection, wakes)
+        self._advance_crisis_lifecycle(run_id)
         return True
 
     def _commit_human_interruptions(
@@ -1493,6 +2114,11 @@ class CrisisRunEngine:
             int(movement["arrival_tick"])
             for movement in snapshot["projection"].get("movements", [])
             if movement["status"] == "in_transit"
+        )
+        candidates.extend(
+            int(report["expected_tick"])
+            for report in snapshot["projection"].get("resolution_reports", [])
+            if report.get("status") == "IN_TRANSIT"
         )
         return min(candidates) if candidates else None
 
@@ -3449,8 +4075,7 @@ class CrisisRunEngine:
             "maximum_tick": maximum_tick,
             "can_continue": (
                 run["status"] == "ACTIVE"
-                and next_tick is not None
-                and next_tick < maximum_tick
+                and (next_tick is not None or run.get("crisis_phase") == "RESOLUTION_PENDING")
             ),
             "runtime_mode": run["runtime_mode"],
             "runtime_phase": run.get("runtime_phase", "READY"),
@@ -3502,6 +4127,8 @@ class CrisisRunEngine:
                 for pressure in projection.get("pressures", [])
                 if pressure.get("status") == PressureStatus.APPLIED.value
             ],
+            "resolution": dict(projection.get("resolution", {})),
+            "settlement": dict(projection.get("settlement", {})),
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
@@ -3587,6 +4214,13 @@ class CrisisRunEngine:
                         "evidence_status": "observed",
                         "source": str(item.get("source", "")),
                         "reliability": str(item.get("reliability", "")),
+                    }
+                )
+            elif isinstance(item, dict) and item.get("kind") == "resolution":
+                known_situation.append(
+                    {
+                        "text": str(item.get("content", "危局已经形成局部结果。")),
+                        "evidence_status": "resolved",
                     }
                 )
         decisions = []
@@ -3721,6 +4355,10 @@ class CrisisRunEngine:
             "OPERATION_STARTED": "一项行动已经开始",
             "OPERATION_COMPLETED": "一项行动已经完成",
             "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
+            "RESOLUTION_GATE_REACHED": "局势进入不可逆节点",
+            "RESOLUTION_APPLIED": "危局形成局部结果",
+            "RESOLUTION_REPORT_DELIVERED": "危局结果传到一位主体",
+            "CRISIS_SETTLED": "危局已经结算",
             "MOVEMENT_STARTED": "一支队伍开始移动",
             "MOVEMENT_ARRIVED": "一支队伍抵达新的位置",
             "ACTOR_ACTION_RECORDED": "有人作出有限行动",
@@ -3854,6 +4492,14 @@ class CrisisRunEngine:
             entity = self.pack.entity_by_id.get(str(payload["entity_id"]))
             display_name = entity.display_name if entity is not None else str(payload["entity_id"])
             return f"{display_name}：{payload['before']} → {payload['after']}"
+        if event["event_type"] == "RESOLUTION_GATE_REACHED":
+            return "；".join(payload["readiness"].get("reasons", []))
+        if event["event_type"] == "RESOLUTION_APPLIED":
+            return str(payload["result"].get("summary", ""))
+        if event["event_type"] == "RESOLUTION_REPORT_DELIVERED":
+            return str(payload["report"].get("content", ""))
+        if event["event_type"] == "CRISIS_SETTLED":
+            return str(payload["outcome"].get("resolution_variant", ""))
         if event["event_type"] == "MOVEMENT_ARRIVED":
             return f"抵达{self.pack.location_by_id[payload['to']].display_name}"
         if event["event_type"] == "HUMAN_DECISION_APPLIED":
@@ -3897,6 +4543,20 @@ class CrisisRunEngine:
                 "pressure_id": pressure["id"],
                 "title": pressure["title"],
                 "content": pressure["description"],
+            }
+        if event["event_type"] == "RESOLUTION_APPLIED":
+            result = event["payload"]["result"]
+            return {
+                "type": wake["wake_type"],
+                "resolution_kind": result["kind"],
+                "content": result["summary"],
+            }
+        if event["event_type"] == "RESOLUTION_REPORT_DELIVERED":
+            report = event["payload"]["report"]
+            return {
+                "type": wake["wake_type"],
+                "resolution_kind": report["resolution_kind"],
+                "content": report["content"],
             }
         if event["event_type"].startswith("OFFER_"):
             offer = event["payload"].get("counter_offer") or event["payload"].get("offer", {})

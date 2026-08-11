@@ -52,8 +52,8 @@ def test_before_shanhaiguan_crisis_pack_is_complete():
 
     assert pack.crisis.id == "before-shanhaiguan"
     assert set(pack.actor_by_id) == {"li-zicheng", "wu-sangui", "dorgon"}
-    assert pack.crisis.checkpoint.safety_horizon_days == 9
-    assert pack.crisis.simulation_boundary.maximum_tick == 9
+    assert pack.crisis.checkpoint.safety_horizon_days == 30
+    assert pack.crisis.simulation_boundary.maximum_tick == 30
     assert [place.id for place in pack.crisis.corridor] == [
         "beijing",
         "yongping",

@@ -131,7 +131,11 @@ class LiveRuntimeManager:
         with self._lock:
             engine = self._engine()
             try:
-                return engine.advance_to_attention(run_id)
+                advancement = engine.advance_to_attention(run_id)
+                run = engine.db.worldline(run_id)
+                if run and run.get("runtime_mode") == "live" and run["status"] == "SEALED":
+                    self._cleanup(run_id)
+                return advancement
             except CrisisRunError:
                 run = engine.db.worldline(run_id)
                 if run and run.get("runtime_mode") == "live" and run["status"] == "ACTIVE":

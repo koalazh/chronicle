@@ -76,6 +76,8 @@ class ResolutionResult:
     kind: ResolutionKind
     variant: str
     ambiguity_used: bool
+    summary: str
+    immediate_actor_ids: tuple[str, ...]
     factors: tuple[str, ...]
     entity_effects: tuple[ResolutionEntityEffect, ...]
     agreement_effects: tuple[ResolutionAgreementEffect, ...]
@@ -87,6 +89,8 @@ class ResolutionResult:
             "kind": self.kind.value,
             "variant": self.variant,
             "ambiguity_used": self.ambiguity_used,
+            "summary": self.summary,
+            "immediate_actor_ids": list(self.immediate_actor_ids),
             "factors": list(self.factors),
             "entity_effects": [effect.to_dict() for effect in self.entity_effects],
             "agreement_effects": [effect.to_dict() for effect in self.agreement_effects],

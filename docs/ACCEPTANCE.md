@@ -29,7 +29,7 @@ uv run chronicle source validate
 uv run chronicle scenario validate
   Scenario valid: 3 Seats, 10 locations, 7 routes, fork=jiangnan-prince-command
 uv run chronicle crisis validate
-  Crisis Pack valid: 3 actors, 5 sources, 14 assertions, horizon 9 days
+  Crisis Pack valid: 3 actors, 5 sources, 14 assertions, horizon 30 days
 uv run pytest -q
   118 passed
 uv run ruff check .
@@ -83,7 +83,7 @@ git diff --check
 
 ## 6. 已知边界
 
-- 当前只实现 `before-shanhaiguan` Crisis Pack，没有 Battle Resolver；第 9 日或大型交战前必须停止；
+- 当前只实现 `before-shanhaiguan` Crisis Pack；其 curated Resolution 只结算该危局的局部结果，30 日仅为内部 Safety Horizon，抵达时会产生延期 Outcome；
 - SQLite/loopback 是本地单用户边界，没有远程认证或多租户合同；
 - V1/V2 API 和存储是 legacy 兼容面，不是 V3 正式产品路径；
 - Starlette TestClient 和 Pydantic settings 在当前依赖组合下各有一条第三方 warning；118 个测试与 lint/build checks 通过，但 warning 没有被误报为已消除；

@@ -115,7 +115,9 @@ Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler �
 
 每场 Crisis 引用一个已注册、版本固定的 Resolution Contract。当前 `shanhaiguan-v1` 位于 `chronicle/resolution/`：它只读取 Snapshot Projection 中的兵力投入、位置、通行/关口控制、Agreement 与已完成调查等 World Truth；不会读取 Actor 的私有 Plan/Belief/Memory、历史后续锚点，也不会调用 LLM。它先说明局势是否已经进入可结算节点，再以自然语言因素和结构化 Entity/Agreement effects 产出直接冲突、协商通行、退出或延期四类局部结果。
 
-只有当已建模条件落在真正的歧义带时，Contract 才使用 Run 已 pin 的 seed；同一 Projection、Contract version 与 seed 必须得到字节一致的结果。Resolver 本身不跳转到 Ending Page：下一阶段由 Scheduler 把返回的 effects 写入 Ledger/Projection，向合法主体传播结果，并让他们进入 Aftermath。
+只有当已建模条件落在真正的歧义带时，Contract 才使用 Run 已 pin 的 seed；同一 Projection、Contract version 与 seed 必须得到字节一致的结果。Resolver 本身不跳转到 Ending Page：Scheduler 将 Run 从 `OPEN` 写入 `RESOLUTION_PENDING`，再把纯结果写成 `RESOLUTION_APPLIED`、Entity/Agreement effects 和 Snapshot Projection，进入 `AFTERMATH`。
+
+结果不会自动进入所有主体视野。Contract 为可立即知情的主体显式列出 actor IDs；其余主体收到一条带模拟到达时刻的 resolution report。每位主体至少经历一次 `RESOLUTION_RESULT` Wake 后，Engine 才检查未完成的 Operation、Investigation、通信、Offer、报告和 Wake；局部现实稳定时，`CRISIS_SETTLED` 与 `RUN_SEALED` 在同一 Ledger commit 中生成 `outcome_json`。仅在内部 Safety Horizon 被耗尽时，才以 `SAFETY_HORIZON` 的延期 Outcome 封存，而不是以固定日期作为产品结局。
 
 ## Hermes 边界
 

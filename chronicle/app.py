@@ -28,6 +28,7 @@ from .hermes import bootstrap as bootstrap_hermes
 from .host import BranchEngine, ChronicleHost
 from .live_runtime import LiveRuntimeManager
 from .models import BranchAction, WakeType
+from .product_api import build_product_router
 from .runtime import WorldlineConflict, WorldlineError, WorldlineRuntime
 from .subject_continuity import SubjectContinuityError
 from .volume_runtime import VolumeRuntimeError
@@ -278,6 +279,8 @@ def create_app(
             detail=detail,
         )
 
+    app.include_router(build_product_router(host))
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "chronicle-host"}
@@ -298,6 +301,7 @@ def create_app(
             "runtime_mode": "live",
             "hermes_ready": hermes_ready,
             "hermes_status": readiness["status"],
+            "dev": active.dev,
         }
 
     @app.get("/api/crisis")

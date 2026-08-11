@@ -313,20 +313,24 @@ def test_sealed_worldline_rejects_low_level_event_append(host):
 def test_frontend_exposes_real_result_and_accessibility_contract():
     source = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in sorted((PROJECT_ROOT / "web").rglob("*.js"))
+        for path in (
+            PROJECT_ROOT / "web" / "app.js",
+            PROJECT_ROOT / "web" / "api.js",
+            PROJECT_ROOT / "web" / "state.js",
+            PROJECT_ROOT / "web" / "router.js",
+        )
     )
     index = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
-    assert "旁观这场危局" in source
-    assert "crisisCoverPage" in source
-    assert "surfaceMarkup" in source
-    assert "corridorMarkup" not in source
-    assert "封存后全景" in source
+    assert "此刻哪里值得我去活？" in source
+    assert "active_knots" in source
+    assert "data-action=\"inhabit\"" in source
+    assert "data-action=\"leave-life\"" in source
     assert "AbortController" in source
     assert "aria-live" in source or "aria-live" in index
-    assert "observationCopies" not in source
-    assert "map-svg" not in source
-    assert "Worldline Tree" not in source
+    assert "/api/worldlines" in source
+    assert "Watch" not in source
+    assert "Takeover" not in source
 
 
 def test_lazy_profile_compensates_partial_install(app_config, monkeypatch):

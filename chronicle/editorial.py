@@ -44,3 +44,29 @@ def watch_attention(events: list[dict[str, Any]]) -> dict[str, Any] | None:
             "event_type": event_type,
         }
     return None
+
+
+VOLUME_ATTENTION_EVENT_TYPES = {
+    "CRISIS_ACTIVATED": "PRESENCE_OPPORTUNITY",
+    "CRISIS_CHECKPOINT_ENTERED": "PRESENCE_OPPORTUNITY",
+    "MESSAGE_DELIVERED": "DECISION",
+    "CRISIS_PRESSURE_APPLIED": "MEANING",
+    "CRISIS_SETTLED": "MEANING",
+    "FIELD_EVENT_APPLIED": "MEANING",
+}
+
+
+def volume_attention(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Classify already-committed events for the V5 editorial shell."""
+
+    for event in events:
+        event_type = str(event.get("event_type", ""))
+        kind = VOLUME_ATTENTION_EVENT_TYPES.get(event_type)
+        if kind is None:
+            continue
+        return {
+            "kind": kind,
+            "tick": int(event.get("tick", 0)),
+            "event_id": str(event.get("id", "")),
+        }
+    return None

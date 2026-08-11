@@ -188,6 +188,28 @@ class VolumeRuntime:
             "safety_horizon_tick": self._volume_horizon(),
             "human_lifetime_id": "",
         }
+        profile_records: dict[str, dict[str, Any]] = {}
+        if runtime_mode == "live":
+            profile_inputs = [
+                {
+                    **lifetime,
+                    "id": lifetime["seat"],
+                    "lifetime_id": lifetime["seat"],
+                }
+                for lifetime in lifetime_values
+            ]
+            try:
+                profile_records = hermes.materialize_lifetime_profiles(
+                    self.host.config,
+                    worldline_id,
+                    profile_inputs,
+                    volume_id=self.volume_id,
+                    content_version=content_version,
+                    content_hash=volume_content_hash,
+                    runtime_epoch=runtime_epoch,
+                )
+            except RuntimeError as exc:
+                raise hermes.HermesRuntimeError(str(exc)) from exc
         try:
             worldline = self.db.create_worldline_bundle(
                 values, events, lifetime_values, initial_projection
@@ -215,12 +237,20 @@ class VolumeRuntime:
                     )
                 )
         except sqlite3.IntegrityError as exc:
+            if profile_records:
+                hermes.cleanup_volume_runtime(
+                    self.host.config,
+                    worldline_id,
+                    [record["profile"] for record in profile_records.values()],
+                    server_names=[record["world_server_name"] for record in profile_records.values()],
+                )
             raise VolumeRuntimeConflict("an active Volume Worldline already exists") from exc
         return {
             "worldline": worldline,
             "lifetimes": self.db.worldline_lifetimes(worldline_id),
             "bindings": bindings,
             "projection": initial_projection,
+            "profile_records": profile_records,
         }
 
     def worldline(self, worldline_id: str) -> dict[str, Any]:

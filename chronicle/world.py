@@ -470,6 +470,14 @@ class WorldAffordanceSession:
                         and expires_tick >= self.service.pack.crisis.simulation_boundary.maximum_tick
                     ):
                         result = {"status": "rejected", "code": "crosses_simulation_boundary"}
+                    elif self.service.pack.same_agreement_terms(
+                        validated_terms, list(offer.get("terms", []))
+                    ):
+                        result = {
+                            "status": "accepted",
+                            "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}",
+                            "counter_normalized_to_accept": True,
+                        }
                     else:
                         result = {
                             "status": "accepted",

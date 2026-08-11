@@ -453,6 +453,7 @@ class HermesActorDriver:
                     "可用调查及其 target/method 已在私有视野 available_investigations 中列出；"
                     "manage_offer(action, offer_id, recipient, terms, message, expires_after_days, idempotency_key)，"
                     "可用条件、待回应 Offer 与生效 Agreement 已在私有视野中列出；"
+                    "只有结构化 terms 真正变化时才使用 COUNTER；若同意现有条款，应使用 ACCEPT。"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
                     "引用 ID 必须传对象 id 字段的裸字符串，不能把 target、targets、recipient、offer 或 term.subject 的完整对象原样传入；"
@@ -3584,6 +3585,11 @@ class CrisisRunEngine:
         payload = operation["payload"]
         result = operation["result"]
         action = OfferAction(str(payload["action"]))
+        normalized_counter = action == OfferAction.COUNTER and bool(
+            result.get("counter_normalized_to_accept")
+        )
+        if normalized_counter:
+            action = OfferAction.ACCEPT
         offers = projection.setdefault("offers", [])
         if action == OfferAction.PROPOSE:
             terms = [AgreementTerm.model_validate(term) for term in payload["terms"]]
@@ -3749,11 +3755,14 @@ class CrisisRunEngine:
 
         if action == OfferAction.ACCEPT:
             offer["status"] = OfferStatus.ACCEPTED.value
+            accepted_payload = {"offer": offer, "visibility": visible_actor_ids}
+            if normalized_counter:
+                accepted_payload["normalized_from"] = OfferAction.COUNTER.value
             accepted = self._event(
                 run_id,
                 tick,
                 "OFFER_ACCEPTED",
-                {"offer": offer, "visibility": visible_actor_ids},
+                accepted_payload,
                 seat_id=actor_id,
                 causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
             )

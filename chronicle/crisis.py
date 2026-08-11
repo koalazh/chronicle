@@ -424,6 +424,12 @@ class CrisisPack:
             )
         return term.type.value, term.subject, term.value
 
+    @classmethod
+    def same_agreement_terms(cls, left: list[Any], right: list[Any]) -> bool:
+        return len(left) == len(right) and sorted(
+            cls._agreement_term_key(term) for term in left
+        ) == sorted(cls._agreement_term_key(term) for term in right)
+
     def offer_terms_request(
         self,
         issuer_id: str,

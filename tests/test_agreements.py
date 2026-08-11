@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from chronicle.crisis import AgreementTerm
 from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 
@@ -9,6 +11,24 @@ def _passage_terms(perspective: dict) -> list[dict[str, str]]:
         item
         for item in perspective["available_offer_terms"]
         if item["type"] == "passage" and item["subject"]["id"] == "shanhai-pass"
+    )
+    return [
+        {
+            "type": term["type"],
+            "subject": term["subject"]["id"],
+            "value": term["value"],
+            "description": term["description"],
+        }
+    ]
+
+
+def _terms_with_value(perspective: dict, value: str) -> list[dict[str, str]]:
+    term = next(
+        item
+        for item in perspective["available_offer_terms"]
+        if item["type"] == "passage"
+        and item["subject"]["id"] == "shanhai-pass"
+        and item["value"] == value
     )
     return [
         {
@@ -169,7 +189,7 @@ def test_accepted_agreement_unlocks_another_actor_operation_and_survives_restart
     assert agreement_wake["status"] == "COMPLETED"
 
 
-def test_countered_offer_can_be_accepted_with_a_complete_source_lineage(app_config):
+def test_counter_with_changed_terms_can_be_accepted_with_a_complete_source_lineage(app_config):
     class CounterDriver:
         source = "fixture"
 
@@ -186,7 +206,7 @@ def test_countered_offer_can_be_accepted_with_a_complete_source_lineage(app_conf
                 world.manage_offer(
                     "COUNTER",
                     offer_id=perspective["trigger"]["offer_id"],
-                    terms=_passage_terms(perspective),
+                    terms=_terms_with_value(perspective, "limited"),
                     message="接受通行原则，但以共同处置为条件。",
                     idempotency_key="counter-offer",
                 )
@@ -203,7 +223,30 @@ def test_countered_offer_can_be_accepted_with_a_complete_source_lineage(app_conf
                 )
             return ActorTurnResult("保持有限行动。")
 
-    engine = CrisisRunEngine(app_config, actor_driver=CounterDriver())
+    base_pack = CrisisRunEngine(app_config).pack
+    passage = next(
+        term
+        for term in base_pack.crisis.offer_terms
+        if term.type.value == "passage" and term.subject == "shanhai-pass"
+    )
+    pack = replace(
+        base_pack,
+        crisis=base_pack.crisis.model_copy(
+            update={
+                "offer_terms": [
+                    *base_pack.crisis.offer_terms,
+                    passage.model_copy(
+                        update={
+                            "value": "limited",
+                            "description": "允许清军在限定条件下通过山海关通道。",
+                        }
+                    ),
+                ]
+            }
+        ),
+    )
+    pack.validate()
+    engine = CrisisRunEngine(app_config, pack=pack, actor_driver=CounterDriver())
     run_id = engine.create(RunMode.WATCH)["run"]["id"]
     engine.run_until_idle(run_id)
     snapshot = engine.db.worldline_snapshot(run_id)["projection"]
@@ -215,6 +258,42 @@ def test_countered_offer_can_be_accepted_with_a_complete_source_lineage(app_conf
     assert counter["parent_offer_id"] == parent["id"]
     assert agreement["status"] == "ACTIVE"
     assert agreement["source_offer_ids"] == [parent["id"], counter["id"]]
+
+
+def test_counter_without_a_material_term_change_accepts_the_original_offer(app_config):
+    class ReaffirmingDriver:
+        source = "fixture"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id == "wu-sangui" and wake["wake_type"] == "ORIENT":
+                world.manage_offer(
+                    "PROPOSE",
+                    recipient="dorgon",
+                    terms=_passage_terms(perspective),
+                    message="先提出通行条件。",
+                    idempotency_key="initial-offer",
+                )
+            elif actor_id == "dorgon" and wake["wake_type"] == "OFFER_CHANGE":
+                world.manage_offer(
+                    "COUNTER",
+                    offer_id=perspective["trigger"]["offer_id"],
+                    terms=_passage_terms(perspective),
+                    message="条款不变，但希望重申共同处置的来意。",
+                    idempotency_key="reaffirm-offer",
+                )
+            return ActorTurnResult("保持有限行动。")
+
+    engine = CrisisRunEngine(app_config, actor_driver=ReaffirmingDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    engine.run_until_idle(run_id)
+    snapshot = engine.db.worldline_snapshot(run_id)["projection"]
+    events = engine.db.worldline_events(run_id)
+
+    assert len(snapshot["offers"]) == 1
+    assert snapshot["offers"][0]["status"] == "ACCEPTED"
+    assert snapshot["agreements"][0]["source_offer_ids"] == [snapshot["offers"][0]["id"]]
+    accepted = next(event for event in events if event["event_type"] == "OFFER_ACCEPTED")
+    assert accepted["payload"]["normalized_from"] == "COUNTER"
 
 
 def test_offer_can_be_rejected_then_a_later_offer_withdrawn(app_config):

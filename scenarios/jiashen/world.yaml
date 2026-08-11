@@ -2,6 +2,28 @@ locations_path: locations.yaml
 routes_path: routes.yaml
 location_aliases:
   beijing: capital
-entities: []
+entities:
+  - id: north-affairs-recognition
+    type: DOCUMENT
+    display_name: 北方军情公开记录
+    initial_state: PENDING
+    state_labels: {PENDING: 尚未进入南方可接触的公开记录, AVAILABLE: 已进入南京可接触的公开记录}
+    assertion_ids: [n013]
 institutional_state: {}
-historical_field: []
+historical_field:
+  - id: north-south-recognition-bridge
+    tick: 9
+    status: PENDING
+    assertion_ids: [n013]
+    effects:
+      - {subject: north-affairs-recognition, state: AVAILABLE}
+    messages:
+      - id: north-affairs-public-record
+        source_crisis_id: before-shanhaiguan
+        sender: public-record
+        recipients: [shi-kefa, ma-shiying, han-zanzhou]
+        content: 沿线公开文书传入南京：山海关方向的战事与清军入关消息已进入可核验的北方军情记录；它说明北方秩序正在重排，但没有替南方裁定继统或江北安排。
+        delivery_offset: 1
+        source: historical_field
+        assertion_ids: [n013]
+        disputed: false

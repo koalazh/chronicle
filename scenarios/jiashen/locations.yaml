@@ -75,3 +75,9 @@ locations:
     x: 55
     y: 72
     kind: command
+  - id: yangzhou
+    display_name: 扬州
+    runtime_alias: Jiangbei Supervision
+    x: 57
+    y: 77
+    kind: command

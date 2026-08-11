@@ -2,7 +2,7 @@ id: jiashen
 title: 甲申
 subtitle: 崇祯十七年
 native_period: 崇祯十七年
-description: 两场彼此独立的历史危局；每一局都从自己的校验过的起点开始，不构成连续战役。
+description: 同一甲申 Volume 中并行展开、彼此相邻而不自动替代的北方、南京与江北因果 Knot。
 lifetimes_path: lifetimes.yaml
 world_path: world.yaml
 crises:
@@ -10,3 +10,5 @@ crises:
     path: crises/before-shanhaiguan
   - id: nanjing-succession
     path: crises/nanjing-succession
+  - id: southern-consolidation
+    path: crises/southern-consolidation

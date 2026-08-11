@@ -290,6 +290,7 @@ def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set(
     assert [crisis["id"] for crisis in registry.summary()["crises"]] == [
         "before-shanhaiguan",
         "nanjing-succession",
+        "southern-consolidation",
     ]
 
 

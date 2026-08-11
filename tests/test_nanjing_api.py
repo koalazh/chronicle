@@ -27,6 +27,7 @@ def test_product_api_exposes_and_creates_the_nanjing_political_crisis(app_config
     assert [item["id"] for item in crises.json()["crises"]] == [
         "before-shanhaiguan",
         "nanjing-succession",
+        "southern-consolidation",
     ]
     assert crises.json()["crises"][1]["subtitle"] == "北都确报已至，谁能把候选变成可执行的现实"
     assert crises.json()["crises"][1]["native_date_window"] == "崇祯十七年四月下旬"

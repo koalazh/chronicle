@@ -3,13 +3,21 @@ from __future__ import annotations
 from .base import CrisisResolutionContract, ResolutionContractError
 from .nanjing_succession import NanjingSuccessionResolutionContract
 from .shanhaiguan import ShanhaiGuanResolutionContract
+from .southern_consolidation import SouthernConsolidationResolutionContract
 
 _CONTRACTS: dict[tuple[str, int], CrisisResolutionContract] = {
     (
         NanjingSuccessionResolutionContract.id,
         NanjingSuccessionResolutionContract.version,
     ): NanjingSuccessionResolutionContract(),
-    (ShanhaiGuanResolutionContract.id, ShanhaiGuanResolutionContract.version): ShanhaiGuanResolutionContract(),
+    (
+        ShanhaiGuanResolutionContract.id,
+        ShanhaiGuanResolutionContract.version,
+    ): ShanhaiGuanResolutionContract(),
+    (
+        SouthernConsolidationResolutionContract.id,
+        SouthernConsolidationResolutionContract.version,
+    ): SouthernConsolidationResolutionContract(),
 }
 
 

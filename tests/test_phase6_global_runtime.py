@@ -135,7 +135,7 @@ def test_active_crisis_presence_protects_one_unresolved_knot(host):
     with pytest.raises(WorldlineConflict, match="another inhabited"):
         host.worldline_runtime.inhabit(worldline_id, wu["id"])
 
-    # The independent Crisis remains inhabitable, while the original knot is protected.
+    # The parallel Crisis remains inhabitable, while the original knot is protected.
     shi = runtime.db.worldline_lifetime(worldline_id, "shi-kefa")
     assert shi is not None
     host.worldline_runtime.inhabit(worldline_id, shi["id"])

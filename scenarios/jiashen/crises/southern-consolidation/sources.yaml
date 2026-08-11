@@ -1,0 +1,32 @@
+sources:
+  - id: mingji-nanlue-1
+    work: 《明季南略》
+    locator: 卷一至卷三·南都甲乙纪·定策后续
+    url: https://zh.wikisource.org/wiki/明季南略/卷01
+    description: 记录南都定策、后续军政分工与江北督师安排；具体日期和先后需与其他材料交叉。
+  - id: mingji-yiwen-2
+    work: 《明季遗闻》
+    locator: 卷二·南都后续
+    url: https://zh.wikisource.org/wiki/明季遺聞/卷2
+    description: 用于交叉观察南京中枢、江北军政网络与后续安排；人物评价不直接转成世界规则。
+  - id: hongguang-shilu-chao-1
+    work: 《弘光实录钞》
+    locator: 卷一·崇祯十七年夏五月以后
+    url: https://www.shidianguji.com/book/CADAL02080058/chapter/1lampcfs43bc8
+    description: 用于交叉观察南都定策后的军政分工与督师安排；评论性文字须与事实层分开。
+
+assertions:
+  - id: s001
+    claim: 南京定策之后，史可法进入新的军政分工并请求督师江北，江北安排因此成为可继续处理的制度性问题。
+    provenance: historical
+    evidence_status: corroborated
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+    normalized_evidence: 三种材料均记录定策之后史可法的后续军政安排或督师江北相关节点；本 Knot 只使用“请求与安排成为现实问题”的边界，不把后续执行成功预设为事实。
+    notes: continuation reference from the Nanjing Knot; it is material for a new Knot, not an automatic actor action
+  - id: s002
+    claim: 江北督师安排需要通过公开文书、军政协调与可见位置继续形成现实杠杆，也可能停留在争议状态。
+    provenance: scenario_assumption
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+    normalized_evidence: 史料支持后续职位与军政分工的存在，但不支持把具体协调过程或结果自动化；本条将其收缩为可执行协调与争议两种显式状态。
+    notes: qualitative runtime boundary, not a claim that the historical coordination followed this exact sequence

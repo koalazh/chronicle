@@ -35,3 +35,11 @@ routes:
     from_location: fengyang-command
     to_location: nanjing
     travel_days: 1
+  - id: nanjing-to-yangzhou
+    from_location: nanjing
+    to_location: yangzhou
+    travel_days: 1
+  - id: yangzhou-to-nanjing
+    from_location: yangzhou
+    to_location: nanjing
+    travel_days: 1

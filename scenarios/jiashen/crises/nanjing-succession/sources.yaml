@@ -34,6 +34,11 @@ sources:
     locator: 《玉溪师范学院学报》2026 年第 2 期，摘要与参考文献
     url: https://yxsg.cbpt.cnki.net/portal/journal/portal/client/paper/3d347469dc3f664eb5e2fb30993afff4
     description: 现代研究将韩赞周的会议与程序权力作为独立问题讨论；用于检验不能把南京程序悄然交给 Host。
+  - id: mingji-nanlue-public-north
+    work: 《明季南略》
+    locator: 卷一至卷三·南都纪事后续；北方军情公开传递的交叉参照
+    url: https://zh.wikisource.org/wiki/明季南略/卷01
+    description: 用于确认南京政权后续可接触北方军情的材料边界；具体传递路径与日序不在本场固定。
 
 assertions:
   - id: n001
@@ -114,3 +119,10 @@ assertions:
     source_ids: [mingji-yiwen-2, han-zanzhou-modern-study]
     normalized_evidence: 《明季遗闻》将韩赞周列入四月末议立会议；现代研究依据相关材料将其召集议事、推进程序的职权作为继统中的独立作用讨论。
     notes: supports Actor classification; it does not assign a fixed candidate preference
+  - id: n013
+    claim: 山海关战事及清军入关后的北方局势后来进入南京政权可接触的公开军情范围；本卷不固定具体传递路径和日序。
+    provenance: historical
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-public-north, palace-nanming-overview]
+    normalized_evidence: 南都纪事与后续概览共同支持北方局势成为南京需要处理的公开军情背景，但不足以为本 Volume 固定单一传递路线或精确日期；因此只建模为延迟公开记录。
+    notes: bridge chronology is intentionally approximate; the runtime carries a public record rather than a narrator summary

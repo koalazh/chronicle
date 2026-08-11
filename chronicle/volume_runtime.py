@@ -567,6 +567,52 @@ class VolumeRuntime:
             )
             events.append(applied)
             field_events.append(field_event)
+            for field_message in field_event.get("messages", []):
+                recipients = field_message.get("recipients")
+                if recipients is None:
+                    recipients = [field_message.get("recipient", "")]
+                for recipient in recipients:
+                    recipient_id = str(recipient)
+                    if self.db.worldline_lifetime(worldline_id, recipient_id) is None:
+                        raise VolumeRuntimeError(
+                            f"historical field message recipient is missing: {recipient_id}"
+                        )
+                    message_id = str(field_message.get("id", "field-message"))
+                    arrival = target + max(1, int(field_message.get("delivery_offset", 1)))
+                    message = {
+                        "id": f"{worldline_id}:field:{field_event['id']}:message:{message_id}:{recipient_id}",
+                        "source_crisis_id": str(field_message.get("source_crisis_id", "")),
+                        "sender": str(field_message.get("sender", "public-record")),
+                        "recipient": recipient_id,
+                        "content": str(field_message.get("content", "")),
+                        "dispatch_tick": target,
+                        "delivery_tick": arrival,
+                        "arrival_tick": arrival,
+                        "status": "in_transit",
+                        "source": str(field_message.get("source", "historical_field")),
+                        "disputed": bool(field_message.get("disputed", False)),
+                        "assertion_ids": list(
+                            field_message.get("assertion_ids", field_event.get("assertion_ids", []))
+                            or []
+                        ),
+                    }
+                    projection.setdefault("messages", []).append(message)
+                    dispatch = self._event(
+                        worldline_id,
+                        target,
+                        "MESSAGE_DISPATCHED",
+                        message,
+                        provenance=Provenance.HISTORICAL.value,
+                        causal_parent_ids=[applied["id"]],
+                        event_id=(
+                            f"{worldline_id}:field:{field_event['id']}:message:{message_id}:"
+                            f"{recipient_id}:dispatch"
+                        ),
+                        runtime_epoch=row["runtime_epoch"],
+                    )
+                    message["dispatch_event_id"] = dispatch["id"]
+                    dispatch["payload"] = message
+                    events.append(dispatch)
 
         for message in sorted(projection.get("messages", []), key=lambda item: item["id"]):
             arrival = int(message.get("delivery_tick", message.get("arrival_tick", 0)))
@@ -585,6 +631,9 @@ class VolumeRuntime:
                     "recipient": message["recipient"],
                     "content": message["content"],
                     "delivery_tick": target,
+                    "source": message.get("source", ""),
+                    "assertion_ids": list(message.get("assertion_ids", [])),
+                    "disputed": bool(message.get("disputed", False)),
                 },
                 seat_id=message["recipient"],
                 provenance=Provenance.BRANCH_DERIVED.value,
@@ -606,6 +655,8 @@ class VolumeRuntime:
                 "content": message["content"],
                 "tick": target,
                 "disputed": bool(message.get("disputed", False)),
+                "source": message.get("source", ""),
+                "assertion_ids": list(message.get("assertion_ids", [])),
             }
             if not any(
                 isinstance(item, dict) and item.get("message_id") == message["id"]

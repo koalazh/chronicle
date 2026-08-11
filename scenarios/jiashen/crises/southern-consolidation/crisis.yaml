@@ -1,0 +1,207 @@
+id: southern-consolidation
+version: 1
+title: 江北整饬
+subtitle: 南京定策之后，督师江北如何从职位安排变成可执行的现实杠杆
+
+checkpoint:
+  native_date_window: 南都定策之后、江北督师安排形成前
+  summary: 南京定策已经留下新的军政分工问题；史可法的江北督师安排可以进入公开文书与协调，也可能在各方之间保持争议。
+  start_tick: 0
+  safety_horizon_days: 14
+  facts: [s001]
+  unresolved:
+    - 江北督师安排能否进入公开文书
+    - 南京与江北军政主体能否形成可执行协调
+    - 北方新消息进入南方后，既有安排是否仍能维持现实杠杆
+  in_transit: []
+
+simulation_boundary:
+  stop_before: 江北督师安排的后续历史展开；正常结局必须由本 Knot 的 Resolution 与 Settlement 形成
+  reason: 本 Knot 只承载南京定策之后的有限制度与协调窗口；精确日期、完整战局与后续任命不由本场自动推演。
+  maximum_tick: 12
+
+resolution_contract:
+  id: southern-consolidation-v1
+  version: 1
+
+surface:
+  kind: POLITICAL
+  title: 江北督师安排
+  description: 督师文书、江北军政协调与史可法的现实位置仍未汇合为稳定秩序。
+  subject_ids: [jiangbei-command, shi-kefa-leverage]
+  context_entity_ids: [jiangbei-mandate]
+
+participants: [shi-kefa, ma-shiying, han-zanzhou]
+
+actors:
+  - id: shi-kefa
+    display_name: 史可法
+    role_charter:
+      who: 南京兵部尚书，正在处理定策之后新的江北军政分工与督师安排。
+      responsibility: [把督师安排带入公开程序, 判断江北秩序的可执行边界, 在北方风险变化时保持南方判断能力]
+      authority: [提出或确认督师文书, 调查江北安排, 公开说明军政位置, 更新个人计划]
+      tensions: [公开职位与实际控制之间, 南京程序与江北现实之间, 北方新消息与南方判断之间]
+    initial_location: nanjing
+    initial_knowledge: [s001, s002]
+    initial_beliefs:
+      leverage: 督师安排只有进入公开文书并得到现实协调，才会成为可继续使用的杠杆。
+      uncertainty: 江北军政网络的配合程度不能由职位名称直接推出。
+    resources:
+      office: nanjing-ministry-of-war
+      jiangbei_leverage: present-but-unsecured
+      northern_reports: incomplete
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    asset_ids: [jiangbei-mandate, shi-kefa-leverage]
+
+  - id: ma-shiying
+    display_name: 马士英
+    role_charter:
+      who: 凤阳方向的军政主体，拥有江北网络与现实协调能力，需要判断督师安排如何与既有支持结合。
+      responsibility: [维持江北可用秩序, 判断公开安排是否可执行, 处理南京文书与地方军政之间的条件]
+      authority: [回应或拒绝公开协调, 调查江北军政状态, 提出现实条件, 更新个人计划]
+      tensions: [地方军政责任与南京文书之间, 既有网络与新职位之间, 快速协调与保留条件之间]
+    initial_location: fengyang-command
+    initial_knowledge: [s001, s002]
+    initial_beliefs:
+      network: 江北网络可以提供现实支撑，但不会因为一纸安排自动一致。
+      timing: 北方变化会压缩南京与江北继续协商的时间。
+    resources:
+      office: fengyang-governor
+      jiangbei_network: available-not-committed
+      courier_route: active
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    asset_ids: [jiangbei-command, shi-kefa-leverage]
+
+  - id: han-zanzhou
+    display_name: 韩赞周
+    role_charter:
+      who: 南京中枢程序一侧的关键主体，能够把督师安排带入正式文书与公开协调入口。
+      responsibility: [维持南京程序连续性, 处理公开文书, 判断军政安排何时进入可见制度入口]
+      authority: [推进或延后文书, 调查江北安排, 召集公开协调, 更新个人计划]
+      tensions: [程序确认与实际执行之间, 中枢公开性与地方条件之间, 尽快成文与避免争议之间]
+    initial_location: nanjing
+    initial_knowledge: [s001, s002]
+    initial_beliefs:
+      procedure: 督师安排需要经过公开程序，才不会停留在私下意向。
+      dispute: 文书形成并不等于各方已经对执行方式达成一致。
+    resources:
+      court_procedure: convenable
+      document_office: available
+      internal_access: active
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
+    asset_ids: [jiangbei-command]
+
+playable_actor_ids: [shi-kefa, ma-shiying, han-zanzhou]
+
+corridor:
+  - {id: nanjing, display_name: 南京, order: 0}
+  - {id: fengyang-command, display_name: 凤阳军政驻地, order: 1}
+  - {id: yangzhou, display_name: 扬州, order: 2}
+
+routes:
+  - {id: nanjing-to-yangzhou, from_location: nanjing, to_location: yangzhou, travel_days: 1}
+  - {id: yangzhou-to-nanjing, from_location: yangzhou, to_location: nanjing, travel_days: 1}
+
+entities:
+  - id: jiangbei-command
+    type: INSTITUTION
+    display_name: 江北军政协调
+    initial_state: PENDING
+    state_labels: {PENDING: 尚待形成公开协调, COORDINATING: 已进入可执行协调, CONTESTED: 公开协调陷入争议}
+    assertion_ids: [s001, s002]
+  - id: shi-kefa-leverage
+    type: ASSET
+    display_name: 史可法的江北现实杠杆
+    initial_state: PRESENT
+    state_labels: {PRESENT: 已有职位与网络基础, ENGAGED: 已被公开协调调用, CONTESTED: 现实杠杆受到争议}
+    assertion_ids: [s001, s002]
+  - id: jiangbei-mandate
+    type: DOCUMENT
+    display_name: 江北督师公开文书
+    initial_state: NOT_ISSUED
+    state_labels: {NOT_ISSUED: 尚未公开, ISSUED: 已进入公开文书}
+    assertion_ids: [s001, s002]
+
+operations:
+  - id: draft-jiangbei-mandate
+    display_name: 起草江北督师文书
+    description: 把南京定策之后的督师安排推进到可被其他主体看见的公开文书边界。
+    actor_ids: [shi-kefa, han-zanzhou]
+    targets:
+      - {id: mandate, entity_types: [DOCUMENT], allowed_entity_ids: [jiangbei-mandate]}
+    duration_kind: FIXED
+    duration_days: 1
+    preconditions:
+      - {subject: mandate, states: [NOT_ISSUED]}
+    completion_effects:
+      - {subject: mandate, state: ISSUED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [draft-jiangbei-mandate, contest-jiangbei-command]
+
+  - id: coordinate-jiangbei-command
+    display_name: 协调江北军政安排
+    description: 在公开文书已经出现后，把督师安排与江北军政网络推进到可执行协调状态。
+    actor_ids: [shi-kefa, ma-shiying, han-zanzhou]
+    targets:
+      - {id: command, entity_types: [INSTITUTION], allowed_entity_ids: [jiangbei-command]}
+      - {id: mandate, entity_types: [DOCUMENT], allowed_entity_ids: [jiangbei-mandate]}
+    duration_kind: FIXED
+    duration_days: 2
+    preconditions:
+      - {subject: mandate, states: [ISSUED]}
+      - {subject: command, states: [PENDING]}
+    completion_effects:
+      - {subject: command, state: COORDINATING}
+      - {subject: shi-kefa-leverage, state: ENGAGED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [coordinate-jiangbei-command, contest-jiangbei-command]
+
+  - id: contest-jiangbei-command
+    display_name: 保留江北协调争议
+    description: 公开文书或地方条件未能汇合时，把江北安排明确保留为争议状态。
+    actor_ids: [ma-shiying, han-zanzhou]
+    targets:
+      - {id: command, entity_types: [INSTITUTION], allowed_entity_ids: [jiangbei-command]}
+    duration_kind: FIXED
+    duration_days: 1
+    preconditions:
+      - {subject: command, states: [PENDING]}
+    completion_effects:
+      - {subject: command, state: CONTESTED}
+      - {subject: shi-kefa-leverage, state: CONTESTED}
+    visibility: PUBLIC
+    interruptibility: false
+    conflicts: [coordinate-jiangbei-command, contest-jiangbei-command]
+
+investigations:
+  - id: jiangbei-support-report
+    display_name: 调查江北支持状态
+    description: 通过军政记录与公开文书核对江北协调是否已经超出职位名称，形成可执行现实。
+    actor_ids: [shi-kefa, han-zanzhou]
+    target_ids: [jiangbei-command]
+    method: jiangbei-record
+    duration_days: 1
+    visibility: PRIVATE
+    observation:
+      content: 江北督师安排的公开文书与现实协调仍需分开核对；已有职位安排不等于各方已经完成执行协同。
+      source: jiangbei-record
+      source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+      reliability: MEDIUM
+      related_assertion_ids: [s001, s002]
+
+anchors:
+  - id: historical-jiangbei-supervision
+    title: 后续江北督师安排的历史参照
+    tick: 8
+    policy: REFERENCE_ONLY
+    assertion_ids: [s001]
+    actor_ids: [shi-kefa]
+    compatibility_preconditions:
+      - id: jiangbei-command-established
+        kind: ENTITY_STATE
+        description: 只有在江北军政协调已经形成时，才与“督师安排成为可执行现实”的历史参照相容。
+        subject: jiangbei-command
+        satisfied_values: [COORDINATING]
+        contradicted_values: [CONTESTED]

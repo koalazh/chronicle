@@ -111,6 +111,12 @@ Crisis Operation 可以声明它需要某个 `ACTIVE` Agreement；因此已接�
 
 Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler 对象。它只有 `EXOGENOUS`（固定时刻、无 actor-state 前提）与 `CONDITIONAL`（固定时刻检查小型 Entity state 前提）两种；每个对象都声明 effect、可见范围、provenance 与 assertion IDs，写入 `PENDING → APPLIED/SKIPPED` Ledger/Projection lifecycle。Pack validator 拒绝把带有 Decision Actor 的 post-checkpoint historical anchor 作为 Pressure 来源，因此真实历史后续不能成为 Canon Conveyor。山海关当前的“京东通行窗口收紧”明确是基于距离与时序的 `scenario_assumption`，不是任何一方的预设行动：它使新的东向调动不再可开始，而已经发生的行动和主体选择仍按各自的世界状态结算。
 
+## Resolution Contract
+
+每场 Crisis 引用一个已注册、版本固定的 Resolution Contract。当前 `shanhaiguan-v1` 位于 `chronicle/resolution/`：它只读取 Snapshot Projection 中的兵力投入、位置、通行/关口控制、Agreement 与已完成调查等 World Truth；不会读取 Actor 的私有 Plan/Belief/Memory、历史后续锚点，也不会调用 LLM。它先说明局势是否已经进入可结算节点，再以自然语言因素和结构化 Entity/Agreement effects 产出直接冲突、协商通行、退出或延期四类局部结果。
+
+只有当已建模条件落在真正的歧义带时，Contract 才使用 Run 已 pin 的 seed；同一 Projection、Contract version 与 seed 必须得到字节一致的结果。Resolver 本身不跳转到 Ending Page：下一阶段由 Scheduler 把返回的 effects 写入 Ledger/Projection，向合法主体传播结果，并让他们进入 Aftermath。
+
 ## Hermes 边界
 
 | Hermes 负责 | Chronicle 负责 |

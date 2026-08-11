@@ -132,6 +132,22 @@ def test_crisis_pack_supports_a_generic_two_to_five_actor_cast(tmp_path, actor_c
     assert pack.crisis.playable_actor_ids == [actor_ids[0]]
 
 
+def test_crisis_pack_requires_a_registered_resolution_contract(tmp_path):
+    root = tmp_path / "invalid-resolution-contract"
+    _write_generic_crisis(root, ["actor-a", "actor-b"])
+    crisis = yaml.safe_load((root / "crisis.yaml").read_text(encoding="utf-8"))
+    crisis["resolution_contract"] = {"id": "missing-contract", "version": 1}
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="resolution contract missing-contract/v1 is not registered",
+    ):
+        CrisisPack.load(root)
+
+
 def test_crisis_pack_rejects_a_playable_actor_that_is_not_in_the_cast(tmp_path):
     root = tmp_path / "invalid-playable"
     _write_generic_crisis(root, ["actor-a", "actor-b"])

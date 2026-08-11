@@ -789,6 +789,13 @@ class CrisisPack:
 
     def validate(self) -> None:
         errors: list[str] = []
+        from .resolution import resolution_contract_registered
+
+        contract = self.crisis.resolution_contract
+        if not resolution_contract_registered(contract.id, contract.version):
+            errors.append(
+                f"resolution contract {contract.id}/v{contract.version} is not registered"
+            )
         actor_ids = [actor.id for actor in self.crisis.actors]
         if len(actor_ids) != len(set(actor_ids)):
             errors.append("actors: ids must be unique")

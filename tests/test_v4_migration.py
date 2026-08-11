@@ -73,7 +73,7 @@ def test_new_crisis_run_pins_v4_content_and_seed(app_config):
     assert run["crisis_id"] == "before-shanhaiguan"
     assert run["crisis_version"] == 1
     assert run["crisis_hash"] == engine.pack.content_hash
-    assert run["resolution_contract_id"] == "legacy-v3-boundary"
+    assert run["resolution_contract_id"] == "shanhaiguan-v1"
     assert run["resolution_contract_version"] == 1
     assert run["resolution_seed"]
     assert run["crisis_phase"] == "OPEN"

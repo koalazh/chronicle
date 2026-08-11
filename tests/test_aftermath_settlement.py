@@ -244,6 +244,11 @@ def test_resolution_aware_actor_cannot_extend_aftermath_with_new_information_or_
         reason="再等一日重看局势。",
         idempotency_key="aftermath-revisit",
     ) == {"status": "rejected", "code": "aftermath_revisit_closed"}
+    assert world.communicate(
+        "wu-sangui",
+        "危局已形成结果，再次重申并不会改变当前世界。",
+        idempotency_key="aftermath-message",
+    ) == {"status": "rejected", "code": "aftermath_communication_closed"}
 
 
 class _OperationInterpreter:

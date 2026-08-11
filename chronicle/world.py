@@ -203,6 +203,25 @@ class WorldAffordanceSession:
             raise WorldAccessError("wake state is unavailable")
         return int(wake["tick"]), dict(snapshot["projection"])
 
+    def _aftermath_communication_is_grounded(
+        self,
+        recipient: str,
+        projection: dict[str, Any],
+    ) -> bool:
+        actor_id = self.identity.actor_id
+        for offer in projection.get("offers", []):
+            if (
+                offer.get("status") == OfferStatus.PROPOSED.value
+                and {offer.get("issuer"), offer.get("recipient")} == {actor_id, recipient}
+            ):
+                return True
+        return any(
+            agreement.get("status") == "ACTIVE"
+            and actor_id in agreement.get("parties", [])
+            and recipient in agreement.get("parties", [])
+            for agreement in projection.get("agreements", [])
+        )
+
     def communicate(
         self,
         recipient: str | dict[str, Any],
@@ -227,6 +246,11 @@ class WorldAffordanceSession:
             result = {"status": "rejected", "code": "invalid_content"}
             return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
         tick, projection = self._tick_and_projection()
+        if self._has_resolution_knowledge() and not self._aftermath_communication_is_grounded(
+            payload["recipient"], projection
+        ):
+            result = {"status": "rejected", "code": "aftermath_communication_closed"}
+            return self._stage("communicate", payload, result, idempotency_key=idempotency_key)
         start = projection["positions"][self.identity.actor_id]
         end = projection["positions"][payload["recipient"]]
         travel_days = self.service.route_days(start, end)

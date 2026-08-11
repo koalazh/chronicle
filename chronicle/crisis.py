@@ -664,6 +664,13 @@ class CrisisPack:
             ]
             if not valid_target_ids:
                 continue
+            enabled_by_agreement_ids = sorted(
+                {
+                    agreement_id
+                    for requirement in definition.agreement_requirements
+                    for agreement_id in self.active_agreement_ids(projection, requirement)
+                }
+            )
             affordances.append(
                 {
                     "id": definition.id,
@@ -672,6 +679,7 @@ class CrisisPack:
                     "kind": definition.kind.value,
                     "duration_kind": definition.duration_kind.value,
                     "duration_days": definition.duration_days,
+                    "enabled_by_agreement_ids": enabled_by_agreement_ids,
                     "targets": [
                         {
                             "id": target.id,

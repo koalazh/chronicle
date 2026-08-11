@@ -194,6 +194,12 @@ def test_accepted_agreement_unlocks_another_actor_operation_and_survives_restart
         item["id"] for item in restarted_view["available_operations"]
     }
     agreement = snapshot["agreements"][0]
+    enter_affordance = next(
+        item
+        for item in restarted_view["available_operations"]
+        if item["id"] == "enter-shanhai-pass"
+    )
+    assert enter_affordance["enabled_by_agreement_ids"] == [agreement["id"]]
     assert agreement["status"] == "FULFILLED"
     assert snapshot["positions"]["dorgon"] == "shanhaiguan"
 

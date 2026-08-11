@@ -420,7 +420,7 @@ class HermesActorDriver:
         )
         aftermath_rule = (
             "危局结果已经传到你：只处理仍未完成的 Offer、Agreement 或 Operation，"
-            "或发出直接收束所必需的通信；不得新开调查或安排 Revisit。"
+            "仅可向仍未完成 Offer 或生效 Agreement 的对方发送直接收束所必需的通信；不得新开调查或安排 Revisit。"
             "若没有未结世界对象，保持不行动也是处置。"
             if knows_resolution
             else ""
@@ -458,6 +458,8 @@ class HermesActorDriver:
                     "普通通信不能代替接受、拒绝或 Counter。"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
+                    "operate 的 targets 必须按该 Operation 的 target 顺序，从各自 options 中选择；不要猜测未列出的路线、地点或对象。"
+                    "若 Operation 的 enabled_by_agreement_ids 非空，说明该 Agreement 已经实际打开这项行动可能；先判断是否现在启动，不要只把它改写进计划。"
                     "引用 ID 必须传对象 id 字段的裸字符串，不能把 target、targets、recipient、offer 或 term.subject 的完整对象原样传入；"
                     "belief_updates 是可选项，若使用，每项必须是含 subject、assessment、confidence（low/medium/high）的对象。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"

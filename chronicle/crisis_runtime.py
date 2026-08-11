@@ -4330,7 +4330,9 @@ class CrisisRunEngine:
             "decisions": decisions,
             "role_charter": actor.role_charter.model_dump(mode="json"),
             "surface": self.pack.surface_projection(
-                snapshot["projection"], visible_actor_ids={actor_id}
+                snapshot["projection"],
+                visible_actor_ids={actor_id},
+                visible_entity_ids={item["id"] for item in perspective["known_entities"]},
             ),
         }
 

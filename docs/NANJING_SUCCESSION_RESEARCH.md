@@ -149,6 +149,6 @@ Pack 只设置两个 `REFERENCE_ONLY` 后续节点：五月初三的福王监国
 
 ## 实现与验证入口
 
-Phase 16 先为上述对象提供一个小型 `POLITICAL` surface：按福王、潞王、制度承认、可见军政支持和公开文书展示 known / unknown / unconfirmed，不画图、不做关系网。Phase 17 再注册 resolver、接入 Volume，并为以下事实写纯 deterministic tests：福王认可、替代候选认可、争议、延期、历史样本型汇合、相同 Projection/seed 的字节稳定结果，以及 Agreement 确实改变程序 Operation affordance。
+Phase 16 先为上述对象提供一个小型 `POLITICAL` surface：按福王、潞王、制度承认、可见军政支持和公开文书展示 known / unknown / unconfirmed，不画图、不做关系网。Pack 只需声明有序的 `subject_ids` 与 `context_entity_ids`；世界视图可显示实体状态，私有视图只会为当前合法知道的实体带回状态，未获确认的主体显示 `UNCONFIRMED`，其余事实显示 `UNKNOWN`。Phase 17 再注册 resolver、接入 Volume，并为以下事实写纯 deterministic tests：福王认可、替代候选认可、争议、延期、历史样本型汇合、相同 Projection/seed 的字节稳定结果，以及 Agreement 确实改变程序 Operation affordance。
 
 对应来源数据在 [`scenarios/jiashen/crises/nanjing-succession/sources.yaml`](../scenarios/jiashen/crises/nanjing-succession/sources.yaml)。在本文所述的 surface/resolver 尚未存在前，该目录故意不含 `crisis.yaml`，也不列入 `volume.yaml`；这避免把无法验证的策展草案伪装成可玩的 Crisis。

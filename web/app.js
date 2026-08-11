@@ -305,6 +305,7 @@ function homePage() {
 function surfaceMarkup(surface, options = {}) {
   if (!surface) return "";
   if (surface.kind === "SPATIAL") return spatialSurfaceMarkup(surface, options);
+  if (surface.kind === "POLITICAL") return politicalSurfaceMarkup(surface);
   return `<section class="surface-unavailable"><p>${escapeHtml(surface.title || "危局态势")}</p></section>`;
 }
 
@@ -350,6 +351,36 @@ function spatialSurfaceMarkup(surface, options = {}) {
     <div class="corridor-track">${nodes}</div>
     ${letters ? `<ol class="letters" aria-label="走廊中的书信">${letters}</ol>` : ""}
   </div>`;
+}
+
+function politicalSurfaceMarkup(surface) {
+  const stateMarkup = (entry) => {
+    if (entry.knowledge === "KNOWN") {
+      return `<strong>${escapeHtml(entry.state || "尚无定论")}</strong>`;
+    }
+    return `<strong class="political-unknown">${entry.knowledge === "UNCONFIRMED" ? "尚待确证" : "未获所知"}</strong>`;
+  };
+  const subjects = (surface.subjects || [])
+    .map(
+      (subject) => `<article class="political-subject">
+        <span>${escapeHtml(subject.type)}</span>
+        <h3>${escapeHtml(subject.display_name)}</h3>
+        ${stateMarkup(subject)}
+      </article>`,
+    )
+    .join("");
+  const context = (surface.context || [])
+    .map(
+      (entry) => `<li>
+        <span>${escapeHtml(entry.display_name)}</span>
+        ${stateMarkup(entry)}
+      </li>`,
+    )
+    .join("");
+  return `<section class="political-surface" aria-label="${escapeHtml(surface.title || "政治事实")}">
+    <div class="political-subjects">${subjects}</div>
+    ${context ? `<div class="political-context"><p>尚未定稿的政治事实</p><ul>${context}</ul></div>` : ""}
+  </section>`;
 }
 
 function runHeader(title, lede) {

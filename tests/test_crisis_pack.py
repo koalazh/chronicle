@@ -107,6 +107,134 @@ def test_spatial_surface_projects_locations_and_only_visible_actors():
     assert surface["messages"] == []
 
 
+def test_political_surface_projects_known_and_hidden_world_facts(tmp_path):
+    root = tmp_path / "political-surface"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["surface"] = {
+        "kind": "POLITICAL",
+        "title": "未定的政治事实",
+        "description": "主体、承认与支持仍须分别确认。",
+        "subject_ids": ["shanhai-pass"],
+        "context_entity_ids": ["wu-field-force"],
+    }
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    pack = CrisisPack.load(root)
+    world = pack.surface_projection(
+        {
+            "entities": {
+                "shanhai-pass": {"state": "CONTESTED"},
+                "wu-field-force": {"state": "READY"},
+            }
+        }
+    )
+    private = pack.surface_projection(
+        {
+            "entities": {
+                "shanhai-pass": {"state": "CONTESTED"},
+                "wu-field-force": {"state": "READY"},
+            }
+        },
+        visible_entity_ids={"shanhai-pass"},
+    )
+    uncertain = pack.surface_projection(
+        {
+            "entities": {
+                "shanhai-pass": {"state": "CONTESTED"},
+                "wu-field-force": {"state": "READY"},
+            }
+        },
+        visible_entity_ids=set(),
+    )
+
+    assert world == {
+        "kind": "POLITICAL",
+        "title": "未定的政治事实",
+        "description": "主体、承认与支持仍须分别确认。",
+        "subjects": [
+            {
+                "id": "shanhai-pass",
+                "type": "ASSET",
+                "display_name": "山海关通道",
+                "knowledge": "KNOWN",
+                "state": "CONTESTED",
+            }
+        ],
+        "context": [
+            {
+                "id": "wu-field-force",
+                "type": "FORCE",
+                "display_name": "关宁所部",
+                "knowledge": "KNOWN",
+                "state": "READY",
+            }
+        ],
+    }
+    assert private["subjects"] == world["subjects"]
+    assert private["context"] == [
+        {
+            "id": "wu-field-force",
+            "type": "FORCE",
+            "display_name": "关宁所部",
+            "knowledge": "UNKNOWN",
+        }
+    ]
+    assert uncertain["subjects"] == [
+        {
+            "id": "shanhai-pass",
+            "type": "ASSET",
+            "display_name": "山海关通道",
+            "knowledge": "UNCONFIRMED",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("surface", "message"),
+    [
+        (
+            {
+                "kind": "POLITICAL",
+                "title": "未定的政治事实",
+                "context_entity_ids": ["wu-field-force"],
+            },
+            "surface: POLITICAL requires subject_ids",
+        ),
+        (
+            {
+                "kind": "POLITICAL",
+                "title": "未定的政治事实",
+                "subject_ids": ["shanhai-pass"],
+                "context_entity_ids": ["missing-entity"],
+            },
+            "surface: POLITICAL references unknown entities missing-entity",
+        ),
+    ],
+)
+def test_political_surface_requires_referenced_entities(tmp_path, surface, message):
+    root = tmp_path / "invalid-political-surface"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["surface"] = surface
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(CrisisValidationError, match=message):
+        CrisisPack.load(root)
+
+
 def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set():
     registry = VolumeRegistry.load(PROJECT_ROOT / "scenarios" / "jiashen")
 

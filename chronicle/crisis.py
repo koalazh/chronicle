@@ -299,6 +299,8 @@ class CrisisSurfaceDefinition(StrictModel):
     kind: CrisisSurfaceKind
     title: str
     description: str = ""
+    subject_ids: list[str] = Field(default_factory=list)
+    context_entity_ids: list[str] = Field(default_factory=list)
 
 
 class CrisisDefinition(StrictModel):
@@ -773,37 +775,68 @@ class CrisisPack:
         projection: dict[str, Any],
         *,
         visible_actor_ids: set[str] | None = None,
+        visible_entity_ids: set[str] | None = None,
         include_messages: bool = False,
     ) -> dict[str, Any]:
         surface = self.crisis.surface
-        if surface.kind != CrisisSurfaceKind.SPATIAL:
-            raise CrisisValidationError([f"unsupported surface kind {surface.kind}"])
-        movements = {
-            movement["actor_id"]
-            for movement in projection.get("movements", [])
-            if movement.get("status") == "in_transit"
-        }
-        actor_ids = visible_actor_ids if visible_actor_ids is not None else set(self.actor_by_id)
-        return {
-            "kind": surface.kind.value,
-            "title": surface.title,
-            "description": surface.description,
-            "locations": [
-                location.model_dump(mode="json")
-                for location in sorted(self.crisis.corridor, key=lambda item: item.order)
-            ],
-            "actors": [
-                {
-                    "id": actor.id,
-                    "display_name": actor.display_name,
-                    "location": projection.get("positions", {}).get(actor.id, ""),
-                    "in_transit": actor.id in movements,
+        if surface.kind == CrisisSurfaceKind.SPATIAL:
+            movements = {
+                movement["actor_id"]
+                for movement in projection.get("movements", [])
+                if movement.get("status") == "in_transit"
+            }
+            actor_ids = visible_actor_ids if visible_actor_ids is not None else set(self.actor_by_id)
+            return {
+                "kind": surface.kind.value,
+                "title": surface.title,
+                "description": surface.description,
+                "locations": [
+                    location.model_dump(mode="json")
+                    for location in sorted(self.crisis.corridor, key=lambda item: item.order)
+                ],
+                "actors": [
+                    {
+                        "id": actor.id,
+                        "display_name": actor.display_name,
+                        "location": projection.get("positions", {}).get(actor.id, ""),
+                        "in_transit": actor.id in movements,
+                    }
+                    for actor in self.crisis.actors
+                    if actor.id in actor_ids
+                ],
+                "messages": list(projection.get("messages", [])) if include_messages else [],
+            }
+        if surface.kind == CrisisSurfaceKind.POLITICAL:
+            entities = projection.get("entities", {})
+
+            def political_entity(entity_id: str, hidden_knowledge: str) -> dict[str, str]:
+                entity = self.entity_by_id[entity_id]
+                item = {
+                    "id": entity.id,
+                    "type": entity.type.value,
+                    "display_name": entity.display_name,
                 }
-                for actor in self.crisis.actors
-                if actor.id in actor_ids
-            ],
-            "messages": list(projection.get("messages", [])) if include_messages else [],
-        }
+                if visible_entity_ids is not None and entity_id not in visible_entity_ids:
+                    item["knowledge"] = hidden_knowledge
+                    return item
+                item["knowledge"] = "KNOWN"
+                item["state"] = str(entities.get(entity_id, {}).get("state", entity.initial_state))
+                return item
+
+            return {
+                "kind": surface.kind.value,
+                "title": surface.title,
+                "description": surface.description,
+                "subjects": [
+                    political_entity(entity_id, "UNCONFIRMED")
+                    for entity_id in surface.subject_ids
+                ],
+                "context": [
+                    political_entity(entity_id, "UNKNOWN")
+                    for entity_id in surface.context_entity_ids
+                ],
+            }
+        raise CrisisValidationError([f"unsupported surface kind {surface.kind}"])
 
     def validate(self) -> None:
         errors: list[str] = []
@@ -850,6 +883,24 @@ class CrisisPack:
             for assertion_id in entity.assertion_ids:
                 if assertion_id not in known_assertions:
                     errors.append(f"entity {entity.id}: unknown assertion {assertion_id}")
+
+        surface = self.crisis.surface
+        surface_entity_ids = [*surface.subject_ids, *surface.context_entity_ids]
+        if surface.kind == CrisisSurfaceKind.SPATIAL and surface_entity_ids:
+            errors.append("surface: SPATIAL cannot declare political entities")
+        if surface.kind == CrisisSurfaceKind.POLITICAL:
+            if not surface.subject_ids:
+                errors.append("surface: POLITICAL requires subject_ids")
+            if not surface.context_entity_ids:
+                errors.append("surface: POLITICAL requires context_entity_ids")
+            if len(surface_entity_ids) != len(set(surface_entity_ids)):
+                errors.append("surface: political entity ids must be unique")
+            unknown_surface_entities = set(surface_entity_ids) - known_entities
+            if unknown_surface_entities:
+                errors.append(
+                    "surface: POLITICAL references unknown entities "
+                    + ", ".join(sorted(unknown_surface_entities))
+                )
 
         location_ids = [location.id for location in self.crisis.corridor]
         if len(location_ids) != len(set(location_ids)):

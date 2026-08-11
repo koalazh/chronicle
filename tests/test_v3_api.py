@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from chronicle.app import create_app
@@ -124,24 +125,34 @@ def test_takeover_api_enforces_perspective_lock_and_single_decision_slot(
     assert client.get(f"/api/runs/{run_id}/replay").status_code == 200
 
 
-def test_takeover_api_accepts_any_playable_actor(app_config, tmp_path):
-    config = replace(app_config, database_path=tmp_path / "li-takeover-api.db", dev=True)
+@pytest.mark.parametrize("human_actor_id", ["li-zicheng", "wu-sangui", "dorgon"])
+def test_takeover_api_accepts_each_playable_actor(
+    app_config, tmp_path, human_actor_id
+):
+    config = replace(
+        app_config,
+        database_path=tmp_path / f"{human_actor_id}-takeover-api.db",
+        dev=True,
+    )
     client = TestClient(create_app(config))
     created = client.post(
         "/api/runs",
         json={
             "crisis_id": "before-shanhaiguan",
             "mode": "TAKEOVER",
-            "human_actor_id": "li-zicheng",
+            "human_actor_id": human_actor_id,
             "live": False,
         },
     )
     run_id = created.json()["run"]["id"]
 
     assert created.status_code == 200
-    assert created.json()["run"]["human_actor"] == "li-zicheng"
-    assert client.get(f"/api/runs/{run_id}/perspective/li-zicheng").status_code == 200
-    assert client.get(f"/api/runs/{run_id}/perspective/wu-sangui").status_code == 403
+    assert created.json()["run"]["human_actor"] == human_actor_id
+    assert client.get(f"/api/runs/{run_id}/perspective/{human_actor_id}").status_code == 200
+    for other_actor_id in {"li-zicheng", "wu-sangui", "dorgon"} - {human_actor_id}:
+        assert client.get(
+            f"/api/runs/{run_id}/perspective/{other_actor_id}"
+        ).status_code == 403
     assert client.post(f"/api/runs/{run_id}/decision", json={"text": ""}).status_code == 200
 
 

@@ -163,6 +163,18 @@ class WorldAffordanceSession:
     def _actor(self):
         return self.service.pack.actor_by_id[self.identity.actor_id]
 
+    def _has_resolution_knowledge(self) -> bool:
+        lifetime = self.service.db.worldline_lifetime(
+            self.identity.run_id, self.identity.actor_id
+        )
+        return bool(
+            lifetime
+            and any(
+                isinstance(item, dict) and item.get("kind") == "resolution"
+                for item in lifetime["knowledge"]
+            )
+        )
+
     @staticmethod
     def _reference_id(value: Any) -> str:
         if isinstance(value, str):
@@ -313,6 +325,9 @@ class WorldAffordanceSession:
         }
         if "investigate" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
+            return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
+        if self._has_resolution_knowledge():
+            result = {"status": "rejected", "code": "aftermath_investigation_closed"}
             return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
         if not payload["question"] or len(payload["question"]) > 1200:
             result = {"status": "rejected", "code": "invalid_question"}
@@ -522,6 +537,8 @@ class WorldAffordanceSession:
         boundary = self.service.pack.crisis.simulation_boundary.maximum_tick
         if "schedule_revisit" not in self._actor().world_authority:
             result = {"status": "rejected", "code": "authority_denied"}
+        elif self._has_resolution_knowledge():
+            result = {"status": "rejected", "code": "aftermath_revisit_closed"}
         elif after_days <= 0 or not payload["reason"]:
             result = {"status": "rejected", "code": "invalid_revisit"}
         elif due_tick >= boundary:

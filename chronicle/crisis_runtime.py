@@ -403,6 +403,10 @@ class HermesActorDriver:
         wake: dict[str, Any],
         perspective: dict[str, Any],
     ) -> list[dict[str, str]]:
+        knows_resolution = any(
+            isinstance(item, dict) and item.get("kind") == "resolution"
+            for item in perspective.get("knowledge", [])
+        )
         memory_rule = (
             "这是 Reflection Wake；只有确有长期经验需要保留时才可调用 memory，否则保持不变。"
             if wake["wake_type"] == CrisisWakeType.REFLECTION.value
@@ -414,6 +418,22 @@ class HermesActorDriver:
             if wake["wake_type"] == CrisisWakeType.ORIENT.value
             else "只在本次触发确实改变判断时更新计划；没有新行动是合法结果。"
         )
+        aftermath_rule = (
+            "危局结果已经传到你：只处理仍未完成的 Offer、Agreement 或 Operation，"
+            "或发出直接收束所必需的通信；不得新开调查或安排 Revisit。"
+            "若没有未结世界对象，保持不行动也是处置。"
+            if knows_resolution
+            else ""
+        )
+        available_tools = [
+            "communicate",
+            "manage_offer",
+            "operate",
+            "update_plan",
+        ]
+        if not knows_resolution:
+            available_tools[1:1] = ["investigate"]
+            available_tools.append("schedule_revisit")
         return [
             {
                 "role": "system",
@@ -441,6 +461,7 @@ class HermesActorDriver:
                     "若 private_perspective.triggers 存在，它们是同一模拟时刻一并到达的触发；综合处置一次，不要分别重复计划或 Revisit。"
                     "不要声称工具尚未确认的结果。最终只用简体中文简短说明你如何处置本次触发。"
                     + orient_rule
+                    + aftermath_rule
                     + memory_rule
                 ),
             },
@@ -452,14 +473,7 @@ class HermesActorDriver:
                         "wake_type": wake["wake_type"],
                         "actor_id": actor_id,
                         "private_perspective": perspective,
-                        "available_world_tools": [
-                            "communicate",
-                            "investigate",
-                            "manage_offer",
-                            "operate",
-                            "update_plan",
-                            "schedule_revisit",
-                        ],
+                        "available_world_tools": available_tools,
                         "tool_budget": 8,
                     },
                     ensure_ascii=False,
@@ -2891,6 +2905,7 @@ class CrisisRunEngine:
     def _wake_batches(cls, wakes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         """Merge ordinary same-tick inputs into one logical Actor attention."""
         coalescible = {
+            CrisisWakeType.RESOLUTION_RESULT.value,
             CrisisWakeType.AGREEMENT_CHANGE.value,
             CrisisWakeType.OFFER_CHANGE.value,
             CrisisWakeType.OPERATION_RESULT.value,
@@ -4059,7 +4074,15 @@ class CrisisRunEngine:
             "revisits": current_revisits,
             "resources": dict(lifetime["resources"]),
             "authority": list(lifetime["authority"]),
-            **self._affordance_manifest(actor_id, projection, current_revisits),
+            **self._affordance_manifest(
+                actor_id,
+                projection,
+                current_revisits,
+                knows_resolution=any(
+                    isinstance(item, dict) and item.get("kind") == "resolution"
+                    for item in known
+                ),
+            ),
         }
 
     def _affordance_manifest(
@@ -4067,6 +4090,8 @@ class CrisisRunEngine:
         actor_id: str,
         projection: dict[str, Any],
         revisits: list[Any],
+        *,
+        knows_resolution: bool,
     ) -> dict[str, Any]:
         actor = self.pack.actor_by_id[actor_id]
         location_id = str(projection["positions"][actor_id])
@@ -4118,10 +4143,14 @@ class CrisisRunEngine:
             if investigation.get("actor_id") == actor_id
             and investigation.get("status") in {"PLANNED", "IN_PROGRESS"}
         ]
-        available_investigations = self.pack.investigation_affordances(
-            actor_id,
-            projection,
-            int(projection["tick"]),
+        available_investigations = (
+            []
+            if knows_resolution
+            else self.pack.investigation_affordances(
+                actor_id,
+                projection,
+                int(projection["tick"]),
+            )
         )
         available_offer_terms = self.pack.offer_term_affordances(actor_id)
         active_offers = [
@@ -4205,6 +4234,13 @@ class CrisisRunEngine:
         if active_offers or active_agreements:
             constraints.append(
                 {"kind": "agreement", "description": "已经提出或生效的条件会约束之后可采取的行动。"}
+            )
+        if knows_resolution:
+            constraints.append(
+                {
+                    "kind": "settlement",
+                    "description": "危局结果已经进入视野；新的调查和 Revisit 不再属于本场可结算的行动。",
+                }
             )
         constraints.extend(
             {"kind": "pressure", "description": str(pressure["description"])}

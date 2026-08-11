@@ -194,6 +194,58 @@ def test_settled_outcome_api_exposes_the_deterministic_summary(app_config, tmp_p
     assert payload["outcome"]["summary"] == payload["run"]["outcome"]
 
 
+def test_resolution_aware_actor_cannot_extend_aftermath_with_new_information_or_revisit(
+    app_config,
+):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    wake = next(
+        item
+        for item in engine.db.crisis_wakes(run_id, status="QUEUED")
+        if item["actor_id"] == "dorgon"
+    )
+    lifetime = engine.db.worldline_lifetime(run_id, "dorgon")
+    assert lifetime is not None
+    engine.db.update_worldline_lifetime(
+        run_id,
+        "dorgon",
+        knowledge_json=json.dumps(
+            [
+                *lifetime["knowledge"],
+                {
+                    "kind": "resolution",
+                    "event_id": "event-resolution",
+                    "resolution_kind": "NEGOTIATED_SETTLEMENT",
+                    "content": "危局已经形成局部结果。",
+                    "obtained_tick": 0,
+                },
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    engine.db.update_crisis_wake(wake["id"], status="RUNNING")
+    world = engine.world.fixture_session(wake["id"], "dorgon")
+    perspective = engine.actor_perspective(run_id, "dorgon")
+
+    assert perspective["available_investigations"] == []
+    assert any(
+        item["kind"] == "settlement"
+        for item in perspective["meaningful_world_constraints"]
+    )
+    assert world.investigate(
+        "山海关当前由谁守持？",
+        "shanhai-pass",
+        method="courier_report",
+        idempotency_key="aftermath-investigation",
+    ) == {"status": "rejected", "code": "aftermath_investigation_closed"}
+    assert world.schedule_revisit(
+        after_days=1,
+        reason="再等一日重看局势。",
+        idempotency_key="aftermath-revisit",
+    ) == {"status": "rejected", "code": "aftermath_revisit_closed"}
+
+
 class _OperationInterpreter:
     source = "fixture"
 

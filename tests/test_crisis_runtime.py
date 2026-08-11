@@ -322,6 +322,65 @@ def test_same_actor_triggers_share_one_fresh_frozen_wake(app_config):
     assert sum(event["event_type"] == "WAKE_COALESCED" for event in li_events) == 1
 
 
+def test_live_resolution_result_coalesces_with_same_tick_world_information(app_config):
+    class ResolutionCoalescingDriver:
+        source = "hermes"
+
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if wake["wake_type"] == "ORIENT":
+                world.update_plan(
+                    "建立初始处置",
+                    ["等待新的世界事实"],
+                    idempotency_key=f"{wake['id']}:orient-plan",
+                )
+            elif actor_id == "dorgon":
+                self.calls.append(
+                    {
+                        "wake_type": wake["wake_type"],
+                        "triggers": [item["wake_type"] for item in perspective["triggers"]],
+                    }
+                )
+            return ActorTurnResult("保持当前判断。")
+
+    driver = ResolutionCoalescingDriver()
+    engine = CrisisRunEngine(app_config, actor_driver=driver)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    assert engine.advance_one(run_id) is True
+    engine._queue_wake(run_id, "dorgon", "RESOLUTION_RESULT", 1)
+    engine._queue_wake(run_id, "dorgon", "MESSAGE", 1)
+    for _ in range(4):
+        assert engine.advance_one(run_id) is True
+        dorgon_wakes = [
+            wake
+            for wake in engine.db.crisis_wakes(run_id, tick=1)
+            if wake["actor_id"] == "dorgon"
+            and wake["wake_type"] in {"RESOLUTION_RESULT", "MESSAGE"}
+        ]
+        if dorgon_wakes and all(wake["status"] == "COMPLETED" for wake in dorgon_wakes):
+            break
+
+    assert driver.calls == [
+        {
+            "wake_type": "RESOLUTION_RESULT",
+            "triggers": ["RESOLUTION_RESULT", "MESSAGE"],
+        }
+    ]
+    dorgon_wakes = [
+        wake
+        for wake in engine.db.crisis_wakes(run_id, tick=1)
+        if wake["actor_id"] == "dorgon"
+        and wake["wake_type"] in {"RESOLUTION_RESULT", "MESSAGE"}
+    ]
+    primary = next(wake for wake in dorgon_wakes if not wake["result"].get("coalesced_with"))
+    coalesced = next(wake for wake in dorgon_wakes if wake["result"].get("coalesced_with"))
+    assert primary["wake_type"] == "RESOLUTION_RESULT"
+    assert coalesced["result"]["coalesced_with"] == primary["id"]
+
+
 def test_live_orient_without_world_operation_fails_closed(app_config):
     class SilentHermesDriver:
         source = "hermes"

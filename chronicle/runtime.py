@@ -264,6 +264,42 @@ class WorldlineRuntime:
             return None
         return self._active_response(row["id"])
 
+    def inhabit(self, worldline_id: str, lifetime_id: str) -> dict[str, Any]:
+        """Take the next step of one V5 Lifetime without running cognition."""
+
+        if not lifetime_id.strip():
+            raise WorldlineError("Lifetime id is required")
+        result = self._transition_volume_controller(
+            worldline_id,
+            lifetime_id,
+            "HUMAN",
+            event_type="LIFETIME_INHABITED",
+            reason="inhabit",
+        )
+        return self._volume_controller_response(result)
+
+    def leave(self, worldline_id: str) -> dict[str, Any]:
+        """Leave the current V5 Lifetime and hand an existing trigger to Hermes."""
+
+        row = self._volume(worldline_id)
+        lifetime_id = str(row.get("human_lifetime_id") or "")
+        if not lifetime_id:
+            return {
+                "worldline": self._public_volume_worldline(row),
+                "lifetime": None,
+                "event": None,
+                "handoff_wake_ids": [],
+                "idempotent": True,
+            }
+        result = self._transition_volume_controller(
+            worldline_id,
+            lifetime_id,
+            "AGENT",
+            event_type="LIFETIME_LEFT",
+            reason="leave",
+        )
+        return self._volume_controller_response(result)
+
     def sealed(self) -> list[dict[str, Any]]:
         return [
             self._public_worldline(row)
@@ -2230,6 +2266,71 @@ class WorldlineRuntime:
         if row is None or row["kind"] != WorldlineKind.BRANCH.value:
             raise WorldlineError("Worldline not found")
         return row
+
+    def _volume(self, worldline_id: str) -> dict[str, Any]:
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise WorldlineError("VOLUME Worldline not found")
+        return row
+
+    def _transition_volume_controller(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        controller: str,
+        *,
+        event_type: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        try:
+            return self.db.transition_volume_controller(
+                worldline_id,
+                lifetime_id,
+                controller,
+                event_type=event_type,
+                reason=reason,
+            )
+        except KeyError as exc:
+            raise WorldlineError(str(exc)) from exc
+        except (sqlite3.IntegrityError, ValueError) as exc:
+            raise WorldlineConflict(str(exc)) from exc
+
+    def _volume_controller_response(self, result: dict[str, Any]) -> dict[str, Any]:
+        lifetime = result["lifetime"]
+        return {
+            "worldline": self._public_volume_worldline(result["worldline"]),
+            "lifetime": {
+                "id": lifetime["id"],
+                "worldline_id": lifetime["worldline_id"],
+                "seat": lifetime["seat"],
+                "controller": lifetime["controller"],
+                "status": lifetime["status"],
+                "profile_name": lifetime["profile_name"],
+                "profile_state": lifetime["profile_state"],
+                "updated_at": lifetime["updated_at"],
+            },
+            "event": result["event"],
+            "handoff_wake_ids": result["handoff_wake_ids"],
+            "idempotent": result["idempotent"],
+        }
+
+    @staticmethod
+    def _public_volume_worldline(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "scenario_id": row["scenario_id"],
+            "kind": row["kind"],
+            "status": row["status"],
+            "current_tick": int(row["current_tick"]),
+            "runtime_epoch": row["runtime_epoch"],
+            "runtime_mode": row.get("runtime_mode", "fixture"),
+            "volume_id": row.get("volume_id", ""),
+            "volume_content_version": int(row.get("volume_content_version", 0)),
+            "volume_content_hash": row.get("volume_content_hash", ""),
+            "worldline_phase": row.get("worldline_phase", "LEGACY"),
+            "human_lifetime_id": row.get("human_lifetime_id", ""),
+            "updated_at": row["updated_at"],
+        }
 
     def _require_active_human(self, row: dict[str, Any]) -> None:
         if row["status"] != WorldlineStatus.ACTIVE.value:

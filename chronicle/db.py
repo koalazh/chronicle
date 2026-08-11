@@ -1978,6 +1978,140 @@ class ChronicleDB:
                 updates,
             )
 
+    def worldline_lifetime_by_id(
+        self, worldline_id: str, lifetime_id: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM worldline_lifetimes WHERE worldline_id = ? AND id = ?",
+                (worldline_id, lifetime_id),
+            ).fetchone()
+        return self._decode_worldline_lifetime(row) if row else None
+
+    def transition_volume_controller(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        controller: str,
+        *,
+        event_type: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Atomically hand one VOLUME Lifetime between HUMAN and AGENT control."""
+
+        if controller not in {"HUMAN", "AGENT"}:
+            raise ValueError(f"unknown controller: {controller}")
+        handoff_wake_ids: list[str] = []
+        event: dict[str, Any] | None = None
+        idempotent = False
+        with self.transaction() as connection:
+            worldline = connection.execute(
+                "SELECT * FROM worldlines WHERE id = ?", (worldline_id,)
+            ).fetchone()
+            if worldline is None:
+                raise KeyError(f"worldline not found: {worldline_id}")
+            if worldline["kind"] != "VOLUME":
+                raise sqlite3.IntegrityError("Inhabitation requires a VOLUME Worldline")
+            if worldline["status"] != "ACTIVE":
+                raise sqlite3.IntegrityError("Worldline is sealed")
+            lifetime = connection.execute(
+                "SELECT * FROM worldline_lifetimes WHERE worldline_id = ? AND id = ?",
+                (worldline_id, lifetime_id),
+            ).fetchone()
+            if lifetime is None:
+                raise KeyError(f"Lifetime not found: {lifetime_id}")
+            if lifetime["status"] != "ACTIVE":
+                raise sqlite3.IntegrityError("Lifetime is not active")
+
+            current_id = str(worldline["human_lifetime_id"] or "")
+            current_controller = str(lifetime["controller"])
+            if controller == "HUMAN":
+                if current_id == lifetime_id and current_controller == "HUMAN":
+                    idempotent = True
+                elif current_id:
+                    raise sqlite3.IntegrityError(
+                        "another Lifetime is already inhabited; leave it first"
+                    )
+                elif current_controller != "AGENT":
+                    raise sqlite3.IntegrityError("Lifetime controller state is inconsistent")
+            elif not current_id:
+                if current_controller == "AGENT":
+                    idempotent = True
+                else:
+                    raise sqlite3.IntegrityError("Lifetime controller state is inconsistent")
+            elif current_id != lifetime_id or current_controller != "HUMAN":
+                raise sqlite3.IntegrityError("the requested Lifetime is not inhabited")
+
+            if not idempotent:
+                wake_rows = connection.execute(
+                    "SELECT id, status FROM crisis_wakes "
+                    "WHERE worldline_id = ? AND actor_id IN (?, ?) "
+                    "AND status IN ('QUEUED', 'WAITING_HUMAN', 'RUNNING', 'STAGED') "
+                    "ORDER BY tick, id",
+                    (worldline_id, lifetime_id, lifetime["seat"]),
+                ).fetchall()
+                if any(row["status"] in {"RUNNING", "STAGED"} for row in wake_rows):
+                    raise sqlite3.IntegrityError(
+                        "cannot change controller while a Lifetime wake is running"
+                    )
+                desired_wake_status = "WAITING_HUMAN" if controller == "HUMAN" else "QUEUED"
+                for wake in wake_rows:
+                    if wake["status"] != desired_wake_status:
+                        connection.execute(
+                            "UPDATE crisis_wakes SET status = ?, updated_at = ? WHERE id = ?",
+                            (desired_wake_status, now_iso(), wake["id"]),
+                        )
+                    handoff_wake_ids.append(str(wake["id"]))
+                connection.execute(
+                    "UPDATE worldline_lifetimes SET controller = ?, profile_state = ?, updated_at = ? "
+                    "WHERE worldline_id = ? AND id = ?",
+                    (
+                        controller,
+                        "DORMANT" if controller == "HUMAN" else "ACTIVE",
+                        now_iso(),
+                        worldline_id,
+                        lifetime_id,
+                    ),
+                )
+                new_human_lifetime_id = lifetime_id if controller == "HUMAN" else ""
+                connection.execute(
+                    "UPDATE worldlines SET human_lifetime_id = ?, updated_at = ? WHERE id = ?",
+                    (new_human_lifetime_id, now_iso(), worldline_id),
+                )
+                event = {
+                    "id": f"presence-{uuid.uuid4().hex[:16]}",
+                    "worldline_id": worldline_id,
+                    "tick": int(worldline["current_tick"]),
+                    "event_type": event_type,
+                    "seat_id": lifetime["seat"],
+                    "payload": {
+                        "lifetime_id": lifetime_id,
+                        "seat": lifetime["seat"],
+                        "controller_from": current_controller,
+                        "controller_to": controller,
+                        "human_lifetime_id": new_human_lifetime_id,
+                        "reason": reason,
+                        "handoff_wake_ids": handoff_wake_ids,
+                    },
+                    "provenance": "branch_derived",
+                    "causal_parent_ids": [],
+                    "runtime_epoch": worldline["runtime_epoch"],
+                    "created_at": now_iso(),
+                }
+                event["sequence"] = self._insert_worldline_event(
+                    connection, worldline_id, event
+                )
+
+        updated_worldline = self.worldline(worldline_id) or {}
+        updated_lifetime = self.worldline_lifetime_by_id(worldline_id, lifetime_id) or {}
+        return {
+            "worldline": updated_worldline,
+            "lifetime": updated_lifetime,
+            "event": event,
+            "handoff_wake_ids": handoff_wake_ids,
+            "idempotent": idempotent,
+        }
+
     def create_agent_binding(self, values: dict[str, Any]) -> dict[str, Any]:
         record = {
             "id": values.get("id", f"binding-{uuid.uuid4().hex[:16]}"),
@@ -2174,6 +2308,14 @@ class ChronicleDB:
             )
         return self.crisis_wake(record["id"]) or {}
 
+    def create_subject_wake(self, values: dict[str, Any]) -> dict[str, Any]:
+        """V5 naming over the compatible crisis_wakes storage table."""
+
+        record = dict(values)
+        if "actor_id" not in record and "lifetime_id" in record:
+            record["actor_id"] = record["lifetime_id"]
+        return self.create_crisis_wake(record)
+
     def crisis_wake(self, wake_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -2200,6 +2342,17 @@ class ChronicleDB:
         with self._connect() as connection:
             rows = connection.execute(query, args).fetchall()
         return [self._decode_crisis_wake(row) for row in rows]
+
+    def subject_wakes(
+        self,
+        worldline_id: str,
+        *,
+        status: str | None = None,
+        tick: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """V5 naming over the compatible crisis_wakes storage table."""
+
+        return self.crisis_wakes(worldline_id, status=status, tick=tick)
 
     def running_crisis_wake(self, worldline_id: str, actor_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

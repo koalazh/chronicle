@@ -56,6 +56,10 @@ class CreateWorldlineRequest(BaseModel):
     live: bool = False
 
 
+class InhabitRequest(BaseModel):
+    lifetime_id: str = Field(min_length=1, max_length=128)
+
+
 class WorldlineInputRequest(BaseModel):
     text: str = Field(max_length=4000)
 
@@ -760,6 +764,26 @@ def create_app(
         active = host()
         try:
             return await asyncio.to_thread(worldline_runtime(active).context, worldline_id)
+        except WorldlineError as exc:
+            raise worldline_http_error(exc) from exc
+
+    @app.post("/api/worldlines/{worldline_id}/inhabit")
+    async def inhabit_worldline(
+        worldline_id: str, request: InhabitRequest
+    ) -> dict[str, Any]:
+        active = host()
+        try:
+            return await asyncio.to_thread(
+                worldline_runtime(active).inhabit, worldline_id, request.lifetime_id
+            )
+        except WorldlineError as exc:
+            raise worldline_http_error(exc) from exc
+
+    @app.post("/api/worldlines/{worldline_id}/leave")
+    async def leave_worldline(worldline_id: str) -> dict[str, Any]:
+        active = host()
+        try:
+            return await asyncio.to_thread(worldline_runtime(active).leave, worldline_id)
         except WorldlineError as exc:
             raise worldline_http_error(exc) from exc
 

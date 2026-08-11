@@ -44,6 +44,8 @@ surface:
   title: 山海关一线
   description: 北京、山海关与辽西之间，消息和兵力都必须经过现实的距离。
 
+participants: [li-zicheng, wu-sangui, dorgon]
+
 actors:
   - id: li-zicheng
     display_name: 李自成

@@ -42,6 +42,16 @@ locations:
     x: 82
     y: 53
     kind: capital
+  - id: yongping
+    display_name: 永平
+    runtime_alias: Eastern Corridor
+    x: 86
+    y: 42
+  - id: liaoxi
+    display_name: 辽西行军路
+    runtime_alias: Liaoxi Route
+    x: 88
+    y: 18
   - id: ningyuan
     display_name: 宁远
     runtime_alias: Eastern Garrison
@@ -53,3 +63,15 @@ locations:
     x: 91
     y: 30
     kind: pass
+  - id: nanjing
+    display_name: 南京
+    runtime_alias: Southern Capital
+    x: 48
+    y: 82
+    kind: capital
+  - id: fengyang-command
+    display_name: 凤阳军政驻地
+    runtime_alias: Jiangbei Command
+    x: 55
+    y: 72
+    kind: command

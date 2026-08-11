@@ -31,6 +31,8 @@ surface:
   subject_ids: [fu-prince, lu-prince]
   context_entity_ids: [nanjing-court, nanjing-recognition, jiangbei-military-backing, regency-proclamation]
 
+participants: [shi-kefa, ma-shiying, han-zanzhou]
+
 actors:
   - id: shi-kefa
     display_name: 史可法

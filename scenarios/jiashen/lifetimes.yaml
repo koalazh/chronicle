@@ -1,0 +1,91 @@
+lifetimes:
+  - id: li-zicheng
+    display_name: 李自成
+    genesis_context:
+      role: 大顺政权的最高决策者
+      provenance: existing_crisis_actor_definition
+    starting_location: beijing
+    initial_knowledge: [c002, c003, c010, c015]
+    initial_beliefs:
+      eastern_gate: 吴三桂仍可能通过条件与家属压力被纳入新秩序。
+      urgency: 北京秩序尚未稳固，东部问题不能无限等待。
+    initial_resources:
+      political_control: fragile
+      field_force: available-but-dispersed
+      courier_network: active
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+  - id: wu-sangui
+    display_name: 吴三桂
+    genesis_context:
+      role: 前明关宁军主将
+      provenance: existing_crisis_actor_definition
+    starting_location: shanhaiguan
+    initial_knowledge: [c002, c003, c010, c011, c015]
+    initial_beliefs:
+      balance: 单独长期对抗任一大方都存在风险。
+      correspondence: 两方承诺都需要通过行动和新消息验证。
+    initial_resources:
+      pass_control: contested-but-held
+      field_force: cohesive-limited
+      couriers: scarce
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+  - id: dorgon
+    display_name: 多尔衮
+    genesis_context:
+      role: 清朝摄政王与此次西征统帅
+      provenance: existing_crisis_actor_definition
+    starting_location: liaoxi
+    initial_knowledge: [c001, c002, c008, c015]
+    initial_beliefs:
+      central_plains: 明朝秩序正在崩解，西进可能出现新的政治机会。
+      shanhai: 山海关仍是进入关内的重要物理边界。
+    initial_resources:
+      command: expeditionary-army
+      mobility: high
+      artillery: following-column
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+  - id: shi-kefa
+    display_name: 史可法
+    genesis_context:
+      role: 南京兵部尚书
+      provenance: existing_crisis_actor_definition
+    starting_location: nanjing
+    initial_knowledge: [n001, n002, n003, n008]
+    initial_beliefs:
+      procedure: 继统必须进入南京可执行的程序，不能只停留在私下意见。
+      risk: 北方局势使留都无法无限延宕，但仓促形成的安排也会留下新的风险。
+    initial_resources:
+      office: nanjing-ministry-of-war
+      court_access: active
+      northern_reports: incomplete
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+  - id: ma-shiying
+    display_name: 马士英
+    genesis_context:
+      role: 凤阳总督
+      provenance: existing_crisis_actor_definition
+    starting_location: fengyang-command
+    initial_knowledge: [n001, n002, n003, n006, n008]
+    initial_beliefs:
+      backing: 没有可见的保护与支持，南京的程序难以成为稳定现实。
+      choice: 候选与程序的结合需要明确条件，不能只依赖后续传闻。
+    initial_resources:
+      office: fengyang-governor
+      jiangbei_network: available-not-committed
+      courier_route: active
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]
+  - id: han-zanzhou
+    display_name: 韩赞周
+    genesis_context:
+      role: 南京中枢程序一侧的关键主体
+      provenance: existing_crisis_actor_definition
+    starting_location: nanjing
+    initial_knowledge: [n001, n002, n008, n012]
+    initial_beliefs:
+      entry: 候选必须先进入可见程序，南京才可能形成可执行的承认。
+      pressure: 任何正式步骤都需要面对候选、支持与公开性尚未汇合的现实。
+    initial_resources:
+      court_procedure: convenable
+      document_office: available
+      internal_access: active
+    stable_authority: [communicate, investigate, manage_offer, update_plan, schedule_revisit, operate]

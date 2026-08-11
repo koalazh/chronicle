@@ -1,0 +1,7 @@
+locations_path: locations.yaml
+routes_path: routes.yaml
+location_aliases:
+  beijing: capital
+entities: []
+institutional_state: {}
+historical_field: []

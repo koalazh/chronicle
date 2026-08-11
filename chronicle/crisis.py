@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from pydantic import Field
 
-from .models import Assertion, HistoricalSource, Provenance, StrictModel
+from .models import Assertion, HistoricalSource, Location, Provenance, Route, StrictModel
 
 
 class CrisisValidationError(ValueError):
@@ -314,6 +314,7 @@ class CrisisDefinition(StrictModel):
     simulation_boundary: SimulationBoundary
     resolution_contract: ResolutionContractReference
     surface: CrisisSurfaceDefinition
+    participants: list[str] = Field(default_factory=list)
     actors: list[CrisisActorDefinition]
     playable_actor_ids: list[str]
     corridor: list[CorridorLocation]
@@ -338,6 +339,28 @@ class VolumeDefinition(StrictModel):
     native_period: str
     description: str
     crises: list[CrisisReference]
+    lifetimes_path: str = "lifetimes.yaml"
+    world_path: str = "world.yaml"
+
+
+class VolumeLifetimeDefinition(StrictModel):
+    id: str
+    display_name: str
+    genesis_context: dict[str, Any]
+    starting_location: str
+    initial_knowledge: list[str] = Field(default_factory=list)
+    initial_beliefs: dict[str, str] = Field(default_factory=dict)
+    initial_resources: dict[str, str | int] = Field(default_factory=dict)
+    stable_authority: list[str] = Field(default_factory=list)
+
+
+class VolumeWorldDefinition(StrictModel):
+    locations_path: str = "locations.yaml"
+    routes_path: str = "routes.yaml"
+    location_aliases: dict[str, str] = Field(default_factory=dict)
+    entities: list[CrisisEntity] = Field(default_factory=list)
+    institutional_state: dict[str, str] = Field(default_factory=dict)
+    historical_field: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -385,6 +408,10 @@ class CrisisPack:
     @property
     def actor_by_id(self) -> dict[str, CrisisActorDefinition]:
         return {actor.id: actor for actor in self.crisis.actors}
+
+    @property
+    def participant_ids(self) -> list[str]:
+        return list(self.crisis.participants or [actor.id for actor in self.crisis.actors])
 
     @property
     def assertion_by_id(self) -> dict[str, Assertion]:
@@ -1291,6 +1318,7 @@ class CrisisPack:
             "native_date_window": self.crisis.checkpoint.native_date_window,
             "checkpoint_summary": self.crisis.checkpoint.summary,
             "actors": [actor.id for actor in self.crisis.actors],
+            "participants": self.participant_ids,
             "playable_actor_ids": list(self.crisis.playable_actor_ids),
             "source_count": len(self.sources),
             "assertion_count": len(self.assertions),
@@ -1314,13 +1342,86 @@ def validate_crisis_pack(root: Path) -> list[str]:
 
 
 @dataclass(frozen=True)
-class VolumeRegistry:
+class VolumeWorld:
+    locations: tuple[Location, ...]
+    routes: tuple[Route, ...]
+    location_aliases: dict[str, str]
+    entities: tuple[CrisisEntity, ...]
+    institutional_state: dict[str, str]
+    historical_field: tuple[dict[str, Any], ...]
+
+    @property
+    def location_by_id(self) -> dict[str, Location]:
+        return {location.id: location for location in self.locations}
+
+    @property
+    def route_by_id(self) -> dict[str, Route]:
+        return {route.id: route for route in self.routes}
+
+    def resolve_location(self, location_id: str) -> str:
+        return self.location_aliases.get(location_id, location_id)
+
+
+@dataclass(frozen=True)
+class CrisisParticipant:
+    lifetime: VolumeLifetimeDefinition
+    overlay: CrisisActorDefinition
+
+    @property
+    def id(self) -> str:
+        return self.lifetime.id
+
+
+@dataclass(frozen=True)
+class ActiveWorldCatalog:
+    volume: "VolumePack"
+    crisis_ids: tuple[str, ...]
+    crisis_packs: dict[str, CrisisPack]
+
+    @property
+    def world(self) -> VolumeWorld:
+        return self.volume.world
+
+    def participants(self, crisis_id: str) -> tuple[CrisisParticipant, ...]:
+        return self.volume.participants(crisis_id)
+
+    def affordance_catalog(self) -> dict[str, Any]:
+        return {
+            "crisis_ids": list(self.crisis_ids),
+            "operations": {
+                crisis_id: [definition.id for definition in self.crisis_packs[crisis_id].crisis.operations]
+                for crisis_id in self.crisis_ids
+            },
+            "investigations": {
+                crisis_id: [
+                    definition.id for definition in self.crisis_packs[crisis_id].crisis.investigations
+                ]
+                for crisis_id in self.crisis_ids
+            },
+            "offer_terms": {
+                crisis_id: [
+                    CrisisPack._agreement_term_key(term)
+                    for term in self.crisis_packs[crisis_id].crisis.offer_terms
+                ]
+                for crisis_id in self.crisis_ids
+            },
+            "pressures": {
+                crisis_id: [definition.id for definition in self.crisis_packs[crisis_id].crisis.pressures]
+                for crisis_id in self.crisis_ids
+            },
+        }
+
+
+@dataclass(frozen=True)
+class VolumePack:
     root: Path
     volume: VolumeDefinition
+    lifetimes: dict[str, VolumeLifetimeDefinition]
+    world: VolumeWorld
     packs: dict[str, CrisisPack]
 
     @classmethod
-    def load(cls, root: Path) -> "VolumeRegistry":
+    def load(cls, root: Path) -> "VolumePack":
         root = root.resolve()
         volume = VolumeDefinition.model_validate(_read_yaml(root / "volume.yaml"))
         errors: list[str] = []
@@ -1331,9 +1432,8 @@ class VolumeRegistry:
             errors.append("volume: crisis ids must be unique")
         packs: dict[str, CrisisPack] = {}
         for reference in volume.crises:
-            candidate = (root / reference.path).resolve()
-            if root not in candidate.parents:
-                errors.append(f"volume: crisis {reference.id} path escapes the volume")
+            candidate = _volume_child_path(root, reference.path, f"crisis {reference.id}", errors)
+            if candidate is None:
                 continue
             try:
                 pack = CrisisPack.load(candidate)
@@ -1346,9 +1446,117 @@ class VolumeRegistry:
                 )
                 continue
             packs[reference.id] = pack
+
+        lifetimes = cls._load_lifetimes(root, volume, packs, errors)
+        world = cls._load_world(root, volume, errors)
+        location_ids = set(world.location_by_id)
+        for alias, target in world.location_aliases.items():
+            if target not in location_ids:
+                errors.append(f"volume: location alias {alias} targets unknown location {target}")
+        for lifetime in lifetimes.values():
+            if world.resolve_location(lifetime.starting_location) not in location_ids:
+                errors.append(
+                    f"volume: lifetime {lifetime.id} has unknown starting location "
+                    f"{lifetime.starting_location}"
+                )
+        entity_ids = [entity.id for entity in world.entities]
+        if len(entity_ids) != len(set(entity_ids)):
+            errors.append("volume: shared entity ids must be unique")
+        for route in world.routes:
+            if route.from_location not in location_ids or route.to_location not in location_ids:
+                errors.append(f"volume: shared route {route.id} has an unknown endpoint")
+        for crisis_id, pack in packs.items():
+            participant_ids = pack.participant_ids
+            if len(participant_ids) != len(set(participant_ids)):
+                errors.append(f"crisis {crisis_id}: participant ids must be unique")
+            unknown_lifetimes = set(participant_ids) - set(lifetimes)
+            if unknown_lifetimes:
+                errors.append(
+                    f"crisis {crisis_id}: unknown lifetime participants "
+                    + ", ".join(sorted(unknown_lifetimes))
+                )
+            actor_ids = set(pack.actor_by_id)
+            if set(participant_ids) != actor_ids:
+                errors.append(
+                    f"crisis {crisis_id}: participant ids must match the legacy actor overlays"
+                )
         if errors:
             raise CrisisValidationError(errors)
-        return cls(root=root, volume=volume, packs=packs)
+        return cls(root=root, volume=volume, lifetimes=lifetimes, world=world, packs=packs)
+
+    @staticmethod
+    def _load_lifetimes(
+        root: Path,
+        volume: VolumeDefinition,
+        packs: dict[str, CrisisPack],
+        errors: list[str],
+    ) -> dict[str, VolumeLifetimeDefinition]:
+        path = _volume_child_path(root, volume.lifetimes_path, "lifetimes", errors)
+        if path is not None and path.exists():
+            try:
+                items = _read_yaml(path).get("lifetimes", [])
+                lifetimes = [VolumeLifetimeDefinition.model_validate(item) for item in items]
+                result: dict[str, VolumeLifetimeDefinition] = {}
+                for lifetime in lifetimes:
+                    if lifetime.id in result:
+                        errors.append(f"volume: duplicate lifetime id {lifetime.id}")
+                        continue
+                    result[lifetime.id] = lifetime
+                return result
+            except (CrisisValidationError, TypeError, ValueError) as exc:
+                errors.append(f"volume: lifetimes are invalid: {exc}")
+                return {}
+
+        derived: dict[str, VolumeLifetimeDefinition] = {}
+        for pack in packs.values():
+            for actor in pack.crisis.actors:
+                candidate = VolumeLifetimeDefinition(
+                    id=actor.id,
+                    display_name=actor.display_name,
+                    genesis_context={"legacy_role": actor.role_charter.who},
+                    starting_location=actor.initial_location,
+                    initial_knowledge=list(actor.initial_knowledge),
+                    initial_beliefs=dict(actor.initial_beliefs),
+                    initial_resources=dict(actor.resources),
+                    stable_authority=list(actor.world_authority),
+                )
+                existing = derived.get(candidate.id)
+                if existing is not None and existing != candidate:
+                    errors.append(f"volume: conflicting legacy lifetime definition {candidate.id}")
+                    continue
+                derived[candidate.id] = candidate
+        return derived
+
+    @staticmethod
+    def _load_world(
+        root: Path, volume: VolumeDefinition, errors: list[str]
+    ) -> VolumeWorld:
+        path = _volume_child_path(root, volume.world_path, "world", errors)
+        definition = VolumeWorldDefinition()
+        if path is not None and path.exists():
+            try:
+                definition = VolumeWorldDefinition.model_validate(_read_yaml(path))
+            except (CrisisValidationError, TypeError, ValueError) as exc:
+                errors.append(f"volume: world is invalid: {exc}")
+        locations_path = _volume_child_path(root, definition.locations_path, "shared locations", errors)
+        routes_path = _volume_child_path(root, definition.routes_path, "shared routes", errors)
+        try:
+            locations_data = _read_yaml(locations_path) if locations_path is not None else {}
+            routes_data = _read_yaml(routes_path) if routes_path is not None else {}
+            locations = tuple(Location.model_validate(item) for item in locations_data.get("locations", []))
+            routes = tuple(Route.model_validate(item) for item in routes_data.get("routes", []))
+        except (CrisisValidationError, TypeError, ValueError) as exc:
+            errors.append(f"volume: shared world is invalid: {exc}")
+            locations = ()
+            routes = ()
+        return VolumeWorld(
+            locations=locations,
+            routes=routes,
+            location_aliases=dict(definition.location_aliases),
+            entities=tuple(definition.entities),
+            institutional_state=dict(definition.institutional_state),
+            historical_field=tuple(definition.historical_field),
+        )
 
     @property
     def default_pack(self) -> CrisisPack:
@@ -1360,6 +1568,18 @@ class VolumeRegistry:
         except KeyError as exc:
             raise CrisisValidationError([f"volume: unknown crisis {crisis_id}"]) from exc
 
+    def participants(self, crisis_id: str) -> tuple[CrisisParticipant, ...]:
+        pack = self.pack(crisis_id)
+        return tuple(
+            CrisisParticipant(lifetime=self.lifetimes[actor_id], overlay=pack.actor_by_id[actor_id])
+            for actor_id in pack.participant_ids
+        )
+
+    def active_catalog(self, crisis_ids: list[str] | tuple[str, ...]) -> ActiveWorldCatalog:
+        selected = tuple(dict.fromkeys(crisis_ids))
+        packs = {crisis_id: self.pack(crisis_id) for crisis_id in selected}
+        return ActiveWorldCatalog(volume=self, crisis_ids=selected, crisis_packs=packs)
+
     def summary(self) -> dict[str, Any]:
         return {
             "id": self.volume.id,
@@ -1367,8 +1587,26 @@ class VolumeRegistry:
             "subtitle": self.volume.subtitle,
             "native_period": self.volume.native_period,
             "description": self.volume.description,
+            "lifetime_count": len(self.lifetimes),
+            "shared_location_count": len(self.world.locations),
+            "shared_route_count": len(self.world.routes),
             "crises": [self.packs[reference.id].summary() for reference in self.volume.crises],
         }
+
+
+def _volume_child_path(
+    root: Path, relative: str, label: str, errors: list[str]
+) -> Path | None:
+    candidate = (root / relative).resolve()
+    if root not in candidate.parents:
+        errors.append(f"volume: {label} path escapes the volume")
+        return None
+    return candidate
+
+
+# Compatibility name retained for V2/V3/V4 callers while V5 content ownership is
+# represented by VolumePack.
+VolumeRegistry = VolumePack
 
 
 def validate_volume(root: Path) -> list[str]:

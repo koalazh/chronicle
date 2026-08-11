@@ -27,3 +27,11 @@ routes:
     from_location: ningyuan
     to_location: shanhaiguan
     travel_days: 4
+  - id: nanjing-to-fengyang
+    from_location: nanjing
+    to_location: fengyang-command
+    travel_days: 1
+  - id: fengyang-to-nanjing
+    from_location: fengyang-command
+    to_location: nanjing
+    travel_days: 1

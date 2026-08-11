@@ -1621,7 +1621,9 @@ class ChronicleDB:
         lifetime_updates: list[dict[str, Any]] | None = None,
         instance_creates: list[dict[str, Any]] | None = None,
         instance_updates: list[dict[str, Any]] | None = None,
+        wake_updates: list[dict[str, Any]] | None = None,
         wake_creates: list[dict[str, Any]] | None = None,
+        operation_updates: list[dict[str, Any]] | None = None,
         snapshot: dict[str, Any] | None = None,
         expected_current_tick: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -1772,6 +1774,41 @@ class ChronicleDB:
                         f"Lifetime is missing from Volume Worldline: {values.get('id', values.get('seat', ''))}"
                     )
 
+            for values in wake_updates or []:
+                update_values = dict(values)
+                for key in ("frozen_perspective", "result", "error"):
+                    if key in update_values:
+                        update_values[f"{key}_json"] = json.dumps(
+                            update_values.pop(key), ensure_ascii=False, sort_keys=True
+                        )
+                allowed = {
+                    "status",
+                    "hermes_session_id",
+                    "frozen_perspective_json",
+                    "result_json",
+                    "error_json",
+                }
+                fields = {key: value for key, value in update_values.items() if key in allowed}
+                if not fields:
+                    continue
+                assignments = ", ".join(f"{key} = :{key}" for key in fields)
+                fields.update(
+                    {
+                        "id": values["id"],
+                        "worldline_id": worldline_id,
+                        "updated_at": now_iso(),
+                    }
+                )
+                changed = connection.execute(
+                    f"UPDATE crisis_wakes SET {assignments}, updated_at = :updated_at "
+                    "WHERE id = :id AND worldline_id = :worldline_id",
+                    fields,
+                )
+                if changed.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        f"Wake is missing from Volume Worldline: {values['id']}"
+                    )
+
             for values in wake_creates or []:
                 record = {
                     "id": values.get("id", f"wake-{uuid.uuid4().hex[:16]}"),
@@ -1803,6 +1840,27 @@ class ChronicleDB:
                     ":hermes_session_id, :frozen_perspective_json, :result_json, :error_json, :created_at, :updated_at)",
                     record,
                 )
+
+            for values in operation_updates or []:
+                fields = {key: value for key, value in values.items() if key in {"status"}}
+                if "result" in values:
+                    fields["result_json"] = json.dumps(
+                        values["result"], ensure_ascii=False, sort_keys=True
+                    )
+                if not fields:
+                    continue
+                assignments = ", ".join(f"{key} = :{key}" for key in fields)
+                fields.update({"id": values["id"], "worldline_id": worldline_id})
+                changed = connection.execute(
+                    f"UPDATE crisis_wake_operations SET {assignments} "
+                    "WHERE id = :id AND wake_id IN "
+                    "(SELECT id FROM crisis_wakes WHERE worldline_id = :worldline_id)",
+                    fields,
+                )
+                if changed.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        f"Wake operation is missing from Volume moment: {values['id']}"
+                    )
 
             if snapshot is not None:
                 ledger_cursor = int(committed[-1]["sequence"]) if committed else int(

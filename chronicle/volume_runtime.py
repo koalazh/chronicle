@@ -442,6 +442,8 @@ class VolumeRuntime:
         row = self._active_worldline(worldline_id)
         current = int(row["current_tick"])
         projection = self._snapshot_projection(worldline_id, current)
+        if projection.get("pending_moment"):
+            return None
         candidates: list[int] = []
         candidates.extend(
             int(message.get("delivery_tick", message.get("arrival_tick", 0)))
@@ -487,6 +489,11 @@ class VolumeRuntime:
 
         row = self._active_worldline(worldline_id)
         current = int(row["current_tick"])
+        current_projection = self._snapshot_projection(worldline_id, current)
+        if current_projection.get("pending_moment"):
+            raise VolumeRuntimeConflict(
+                "a Pending Logical Moment must be staged and committed first"
+            )
         target = self._next_tick(worldline_id)
         if target is None:
             return {
@@ -746,6 +753,314 @@ class VolumeRuntime:
             "idempotent": False,
         }
 
+    def freeze_pending_moment(self, worldline_id: str) -> dict[str, Any]:
+        """Freeze all due Subject Wakes at the current global tick."""
+
+        row = self._active_worldline(worldline_id)
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        existing = projection.get("pending_moment")
+        if existing:
+            return {
+                "worldline": row,
+                "moment_id": existing["id"],
+                "pending_moment": existing,
+                "idempotent": True,
+            }
+        wakes = [
+            wake
+            for wake in self.db.subject_wakes(worldline_id, tick=tick)
+            if wake["status"] in {"QUEUED", "WAITING_HUMAN"}
+        ]
+        if not wakes:
+            raise VolumeRuntimeConflict("there are no due Subject Wakes to freeze")
+        wake_ids = sorted(str(wake["id"]) for wake in wakes)
+        moment_id = f"{worldline_id}:moment:{tick}:{stable_hash(wake_ids)[:12]}"
+        frozen_updates: list[dict[str, Any]] = []
+        for wake in sorted(wakes, key=lambda item: item["id"]):
+            lifetime = self._lifetime_for_actor(worldline_id, str(wake["actor_id"]))
+            if lifetime is None:
+                raise VolumeRuntimeError(f"Subject Wake Lifetime is missing: {wake['actor_id']}")
+            perspective = {
+                "moment_id": moment_id,
+                "worldline_id": worldline_id,
+                "lifetime_id": lifetime["id"],
+                "seat": lifetime["seat"],
+                "tick": tick,
+                "controller": lifetime["controller"],
+                "trigger_event_id": wake["trigger_event_id"],
+                "wake_type": wake["wake_type"],
+                "world": copy.deepcopy(projection),
+                "knowledge": list(lifetime["knowledge"]),
+                "beliefs": dict(lifetime["beliefs"]),
+            }
+            frozen_updates.append(
+                {
+                    "id": wake["id"],
+                    "frozen_perspective": perspective,
+                }
+            )
+        pending = {
+            "id": moment_id,
+            "tick": tick,
+            "wake_ids": wake_ids,
+            "phase": "FROZEN",
+        }
+        projection["pending_moment"] = pending
+        frozen = self._event(
+            worldline_id,
+            tick,
+            "MOMENT_FROZEN",
+            {"moment_id": moment_id, "tick": tick, "wake_ids": wake_ids},
+            provenance=Provenance.BRANCH_DERIVED.value,
+            event_id=f"{moment_id}:frozen",
+            runtime_epoch=row["runtime_epoch"],
+        )
+        projection["last_event_id"] = frozen["id"]
+        self.db.commit_volume_moment(
+            worldline_id,
+            [frozen],
+            current_tick=tick,
+            wake_updates=frozen_updates,
+            snapshot=projection,
+            expected_current_tick=tick,
+        )
+        return {
+            "worldline": self.db.worldline(worldline_id),
+            "moment_id": moment_id,
+            "pending_moment": pending,
+            "idempotent": False,
+        }
+
+    def stage_intent(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        intent: dict[str, Any],
+        *,
+        source: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Stage one Human or Agent intent without changing the Volume projection."""
+
+        row = self._active_worldline(worldline_id)
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        pending = projection.get("pending_moment")
+        if not pending:
+            raise VolumeRuntimeConflict("freeze the current logical moment before staging intent")
+        lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
+        if lifetime is None:
+            raise VolumeRuntimeError(f"Lifetime not found: {lifetime_id}")
+        seat = str(lifetime["seat"])
+        expected_source = "human" if lifetime["controller"] == "HUMAN" else "agent"
+        actual_source = source or expected_source
+        if actual_source != expected_source:
+            raise VolumeRuntimeConflict(
+                f"{seat} is controlled by {lifetime['controller']}, not {actual_source}"
+            )
+        wake = next(
+            (
+                candidate
+                for candidate_id in pending["wake_ids"]
+                if (candidate := self.db.crisis_wake(candidate_id)) is not None
+                and (
+                    candidate_lifetime := self._lifetime_for_actor(
+                        worldline_id, str(candidate["actor_id"])
+                    )
+                )
+                is not None
+                and candidate_lifetime["seat"] == seat
+            ),
+            None,
+        )
+        if wake is None:
+            raise VolumeRuntimeConflict(f"{seat} has no Wake in Pending Logical Moment")
+        if wake["status"] == "COMPLETED":
+            raise VolumeRuntimeConflict("this Wake has already completed")
+        if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "STAGED"}:
+            raise VolumeRuntimeConflict(f"Wake is not stageable: {wake['status']}")
+        if not isinstance(intent, dict) or str(intent.get("type", "wait")) not in {
+            "wait",
+            "message",
+        }:
+            raise VolumeRuntimeError("V5 Phase 7 supports wait and message intents")
+        intent = dict(intent)
+        intent.setdefault("type", "wait")
+        key = idempotency_key or stable_hash(
+            {"moment_id": pending["id"], "seat": seat, "intent": intent}
+        )
+        existing = next(
+            (
+                operation
+                for operation in self.db.crisis_wake_operations(wake["id"])
+                if operation["idempotency_key"] == key
+            ),
+            None,
+        )
+        operation = existing or self.db.add_crisis_wake_operation(
+            {
+                "wake_id": wake["id"],
+                "tool_name": "logical_intent",
+                "payload": {
+                    "moment_id": pending["id"],
+                    "lifetime_id": lifetime["id"],
+                    "seat": seat,
+                    "source": actual_source,
+                    "intent": intent,
+                },
+                "result": {"status": "accepted", "moment_id": pending["id"]},
+                "status": "PROPOSED",
+                "idempotency_key": key,
+            }
+        )
+        if wake["status"] != "STAGED":
+            self.db.update_crisis_wake(wake["id"], status="STAGED")
+        return {
+            "moment_id": pending["id"],
+            "lifetime_id": lifetime["id"],
+            "seat": seat,
+            "source": actual_source,
+            "operation": operation,
+            "idempotent": existing is not None,
+        }
+
+    def commit_pending_moment(self, worldline_id: str) -> dict[str, Any]:
+        """Commit all staged Human and Agent intents in deterministic seat order."""
+
+        row = self._active_worldline(worldline_id)
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        pending = projection.get("pending_moment")
+        if not pending:
+            prior = next(
+                (
+                    event
+                    for event in reversed(self.db.worldline_events(worldline_id))
+                    if event["event_type"] == "MOMENT_COMMITTED"
+                ),
+                None,
+            )
+            if prior is not None:
+                return {
+                    "worldline": row,
+                    "moment_id": prior["payload"]["moment_id"],
+                    "events": [],
+                    "idempotent": True,
+                }
+            raise VolumeRuntimeConflict("there is no Pending Logical Moment")
+
+        staged: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+        for wake_id in pending["wake_ids"]:
+            wake = self.db.crisis_wake(wake_id)
+            if wake is None or wake["status"] != "STAGED":
+                raise VolumeRuntimeConflict("all Human and Agent intents must be staged first")
+            operations = [
+                operation
+                for operation in self.db.crisis_wake_operations(wake_id)
+                if operation["payload"].get("moment_id") == pending["id"]
+                and operation["status"] == "PROPOSED"
+            ]
+            if len(operations) != 1:
+                raise VolumeRuntimeConflict("each frozen Wake must have exactly one staged intent")
+            lifetime = self._lifetime_for_actor(worldline_id, str(wake["actor_id"]))
+            if lifetime is None:
+                raise VolumeRuntimeError(f"Wake Lifetime is missing: {wake['actor_id']}")
+            staged.append((lifetime, wake, operations[0]))
+        staged.sort(key=lambda item: str(item[0]["seat"]))
+
+        events: list[dict[str, Any]] = []
+        wake_updates: list[dict[str, Any]] = []
+        operation_updates: list[dict[str, Any]] = []
+        committed_intent_ids: list[str] = []
+        for lifetime, wake, operation in staged:
+            intent = dict(operation["payload"]["intent"])
+            intent_event = self._event(
+                worldline_id,
+                tick,
+                "INTENT_COMMITTED",
+                {
+                    "moment_id": pending["id"],
+                    "wake_id": wake["id"],
+                    "seat": lifetime["seat"],
+                    "source": operation["payload"]["source"],
+                    "intent": intent,
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[wake["trigger_event_id"]] if wake["trigger_event_id"] else [],
+                event_id=f"{pending['id']}:intent:{lifetime['seat']}:{stable_hash(intent)[:12]}",
+                runtime_epoch=row["runtime_epoch"],
+            )
+            events.append(intent_event)
+            committed_intent_ids.append(intent_event["id"])
+            outcome: dict[str, Any] = {"status": "committed", "event_id": intent_event["id"]}
+            if intent["type"] == "message":
+                message = self._logical_message(
+                    worldline_id, pending["id"], lifetime["seat"], intent, tick
+                )
+                projection.setdefault("messages", []).append(message)
+                dispatch = self._event(
+                    worldline_id,
+                    tick,
+                    "MESSAGE_DISPATCHED",
+                    message,
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[intent_event["id"]],
+                    event_id=f"{pending['id']}:message:{lifetime['seat']}:{stable_hash(intent)[:12]}",
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                message["dispatch_event_id"] = dispatch["id"]
+                dispatch["payload"] = message
+                events.append(dispatch)
+                outcome.update(
+                    {"message_id": message["id"], "delivery_tick": message["delivery_tick"]}
+                )
+            operation_updates.append(
+                {"id": operation["id"], "status": "COMMITTED", "result": outcome}
+            )
+            wake_updates.append(
+                {
+                    "id": wake["id"],
+                    "status": "COMPLETED",
+                    "result": {"moment_id": pending["id"], **outcome},
+                }
+            )
+
+        moment_event = self._event(
+            worldline_id,
+            tick,
+            "MOMENT_COMMITTED",
+            {
+                "moment_id": pending["id"],
+                "tick": tick,
+                "intent_event_ids": committed_intent_ids,
+            },
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=committed_intent_ids,
+            event_id=f"{pending['id']}:committed",
+            runtime_epoch=row["runtime_epoch"],
+        )
+        events.append(moment_event)
+        projection.pop("pending_moment", None)
+        projection["last_event_id"] = moment_event["id"]
+        self.db.commit_volume_moment(
+            worldline_id,
+            events,
+            current_tick=tick,
+            wake_updates=wake_updates,
+            operation_updates=operation_updates,
+            snapshot=projection,
+            expected_current_tick=tick,
+        )
+        return {
+            "worldline": self.db.worldline(worldline_id),
+            "moment_id": pending["id"],
+            "events": events,
+            "idempotent": False,
+        }
+
     def _active_worldline(self, worldline_id: str) -> dict[str, Any]:
         row = self.db.worldline(worldline_id)
         if row is None or row["kind"] != WorldlineKind.VOLUME.value:
@@ -753,6 +1068,11 @@ class VolumeRuntime:
         if row["status"] != WorldlineStatus.ACTIVE.value:
             raise VolumeRuntimeConflict("Volume Worldline is sealed")
         return row
+
+    def _lifetime_for_actor(self, worldline_id: str, actor_id: str) -> dict[str, Any] | None:
+        return self.db.worldline_lifetime_by_id(
+            worldline_id, actor_id
+        ) or self.db.worldline_lifetime(worldline_id, actor_id)
 
     def _instance_for_crisis(self, worldline_id: str, crisis_id: str) -> dict[str, Any]:
         for instance in self.db.crisis_instances(worldline_id):
@@ -967,6 +1287,39 @@ class VolumeRuntime:
             "source": "checkpoint",
             "disputed": bool(message.disputed),
             "assertion_ids": list(message.assertion_ids),
+        }
+
+    def _logical_message(
+        self,
+        worldline_id: str,
+        moment_id: str,
+        sender: str,
+        intent: dict[str, Any],
+        tick: int,
+    ) -> dict[str, Any]:
+        recipient = str(intent.get("recipient", "")).strip()
+        content = str(intent.get("content", "")).strip()
+        if not recipient or self.db.worldline_lifetime(worldline_id, recipient) is None:
+            raise VolumeRuntimeError(f"unknown message recipient Lifetime: {recipient}")
+        if not content:
+            raise VolumeRuntimeError("message content is required")
+        delivery_tick = int(intent.get("delivery_tick", tick + 1))
+        if delivery_tick <= tick:
+            raise VolumeRuntimeError("message delivery must be after the current global tick")
+        intent_hash = stable_hash(intent)[:12]
+        return {
+            "id": f"{moment_id}:message:{sender}:{intent_hash}",
+            "source_crisis_id": str(intent.get("crisis_id", "")),
+            "sender": sender,
+            "recipient": recipient,
+            "content": content,
+            "dispatch_tick": tick,
+            "delivery_tick": delivery_tick,
+            "arrival_tick": delivery_tick,
+            "status": "in_transit",
+            "source": "logical_moment",
+            "disputed": False,
+            "assertion_ids": [],
         }
 
     @staticmethod

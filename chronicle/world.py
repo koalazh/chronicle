@@ -196,6 +196,34 @@ class WorldAffordanceSession:
             normalized.append(value)
         return normalized
 
+    def _normalized_operation_targets(
+        self,
+        definition_id: str,
+        targets: list[str],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> list[str]:
+        affordance = next(
+            (
+                item
+                for item in self.service.pack.operation_affordances(
+                    self.identity.actor_id, projection, tick
+                )
+                if item["id"] == definition_id
+            ),
+            None,
+        )
+        if affordance is None or len(targets) != len(affordance["targets"]):
+            return targets
+        normalized: list[str] = []
+        for target, target_spec in zip(targets, affordance["targets"], strict=True):
+            options = target_spec["options"]
+            if target == target_spec["id"] and len(options) == 1:
+                normalized.append(str(options[0]["id"]))
+            else:
+                normalized.append(target)
+        return normalized
+
     def _tick_and_projection(self) -> tuple[int, dict[str, Any]]:
         wake = self.service.db.crisis_wake(self.identity.wake_id)
         snapshot = self.service.db.worldline_snapshot(self.identity.run_id)
@@ -286,6 +314,12 @@ class WorldAffordanceSession:
             result = {"status": "rejected", "code": "missing_description"}
             return self._stage("operate", payload, result, idempotency_key=idempotency_key)
         tick, projection = self._tick_and_projection()
+        payload["targets"] = self._normalized_operation_targets(
+            payload["operation_definition_id"],
+            payload["targets"],
+            projection,
+            tick,
+        )
         request, code = self.service.pack.operation_request(
             self.identity.actor_id,
             payload["operation_definition_id"],

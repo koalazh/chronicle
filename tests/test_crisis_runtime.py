@@ -563,6 +563,28 @@ def test_operate_requires_a_currently_available_crisis_operation(app_config):
     assert conflicting == {"status": "rejected", "code": "operation_conflict"}
 
 
+def test_operate_normalizes_an_unambiguous_manifest_target_slot(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    wake = next(
+        item
+        for item in engine.db.crisis_wakes(run_id, status="QUEUED")
+        if item["actor_id"] == "dorgon"
+    )
+    engine.db.update_crisis_wake(wake["id"], status="RUNNING")
+
+    result = engine.world.fixture_session(wake["id"], "dorgon").operate(
+        "prepare_force",
+        ["force"],
+        "整备西征主力。",
+        idempotency_key="prepare-from-slot",
+    )
+
+    assert result["status"] == "accepted"
+    staged = engine.db.crisis_wake_operations(wake["id"])[0]
+    assert staged["payload"]["targets"] == ["qing-expedition-force"]
+
+
 def test_investigate_requires_a_currently_available_crisis_capability(app_config):
     engine = CrisisRunEngine(app_config)
     run_id = engine.create(RunMode.WATCH)["run"]["id"]

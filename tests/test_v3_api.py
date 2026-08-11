@@ -31,6 +31,9 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     }
     assert volume.json()["id"] == "jiashen"
     assert crises.json()["crises"][0]["id"] == "before-shanhaiguan"
+    assert volume.json()["crises"][0]["subtitle"] == "三封未决的信，四处仍在移动的人"
+    assert volume.json()["crises"][0]["native_date_window"] == "顺治元年四月中旬前"
+    assert volume.json()["crises"][0]["checkpoint_summary"]
     assert crisis_detail.json()["actors"][0]["playable"] is True
     assert created.status_code == 200
     run_id = created.json()["run"]["id"]

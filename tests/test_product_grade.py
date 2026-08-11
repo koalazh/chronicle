@@ -311,11 +311,14 @@ def test_sealed_worldline_rejects_low_level_event_append(host):
 
 
 def test_frontend_exposes_real_result_and_accessibility_contract():
-    source = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((PROJECT_ROOT / "web").rglob("*.js"))
+    )
     index = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
     assert "旁观这场危局" in source
-    assert "defaultPlayableActor" in source
+    assert "crisisCoverPage" in source
     assert "surfaceMarkup" in source
     assert "corridorMarkup" not in source
     assert "封存后全景" in source

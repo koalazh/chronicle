@@ -3,8 +3,14 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
+def _frontend_source() -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((ROOT / "web").rglob("*.js"))
+    )
+
+
 def test_frontend_uses_chinese_product_language():
-    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    source = _frontend_source()
     index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
     for forbidden in (
@@ -49,7 +55,7 @@ def test_frontend_uses_chinese_product_language():
         "送入这段历史",
         "暂不追加命令，继续",
         "回看这一局",
-        "三条人生如何相遇",
+        "几条人生如何相遇",
         "在你看不见的地方",
         "封存后全景",
         "封存卷册",
@@ -71,38 +77,40 @@ def test_frontend_uses_chinese_product_language():
     assert "corridorMarkup" not in source
     assert "成为吴三桂" not in source
     assert "吴三桂的书案" not in source
-    assert "defaultPlayableActor" in source
-    assert "state.crisis.title" in source
+    assert "volumePage" in source
+    assert "crisisCoverPage" in source
+    assert "data-human-actor-id" in source
 
 
 def test_product_start_is_live_only_and_fail_closed_in_the_ui():
-    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    source = _frontend_source()
 
     assert "crisis_id: state.crisis.summary.id" in source
     assert "payload.human_actor_id = actor.id" in source
     assert "body: JSON.stringify(payload)" in source
     assert "const useLive" not in source
-    assert "state.config.setup_required ? \"disabled\"" in source
+    assert "config?.setup_required" in source
     start_run = source[source.index("async function startRun"):source.index("async function continueRun")]
     assert 'state.config = await api("/api/config")' in start_run
     assert start_run.index('state.config = await api("/api/config")') < start_run.index("loadRunView()")
 
 
 def test_frontend_surfaces_boot_failure_instead_of_staying_on_placeholder():
-    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    source = _frontend_source()
     render = source[source.index("function render"):source.index("async function refreshActive")]
 
-    assert "观测台暂时打不开" in render
+    assert "卷册暂时打不开" in render
     assert "state.error" in render
     assert 'data-action="retry-boot"' in render
 
     boot = source[source.index("async function boot"):]
     assert "const bootTimeoutMs = 15_000" in boot
     assert 'api("/api/config", { timeoutMs: bootTimeoutMs })' in boot
+    assert 'api("/api/volume", { timeoutMs: bootTimeoutMs })' in boot
 
 
 def test_frontend_uses_a_scroll_activity_state_and_keeps_decisions_locked():
-    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    source = _frontend_source()
 
     for required in (
         "activity: null",
@@ -128,3 +136,25 @@ def test_frontend_uses_a_scroll_activity_state_and_keeps_decisions_locked():
 
     assert "当前模拟日已经提交过决定" not in source
     assert "当前没有新的触发；可以封存这一局。" not in source
+
+
+def test_frontend_uses_volume_and_generic_crisis_cover_modules():
+    source = _frontend_source()
+
+    for path in (
+        "web/api.js",
+        "web/state.js",
+        "web/router.js",
+        "web/pages/volume.js",
+        "web/pages/crisis.js",
+        "web/surfaces/spatial.js",
+        "web/surfaces/political.js",
+    ):
+        assert (ROOT / path).exists()
+
+    assert 'api("/api/volume"' in source
+    assert 'api(`/api/crises/${encodeURIComponent(crisisId)}`)' in source
+    assert 'location.hash = `#/crisis/${encodeURIComponent(crisisId)}`' in source
+    assert 'data-action="start-takeover" data-human-actor-id=' in source
+    assert "before-shanhaiguan" not in source
+    assert "wu-sangui" not in source

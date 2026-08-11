@@ -1,47 +1,28 @@
-const root = document.querySelector("#app");
+import { api } from "./api.js";
+import { escapeHtml } from "./components/html.js";
+import { crisisCoverPage } from "./pages/crisis.js";
+import { volumePage } from "./pages/volume.js";
+import { go, goCrisis, route } from "./router.js";
+import { state } from "./state.js";
+import { surfaceMarkup } from "./surfaces/index.js";
 
-const state = {
-  config: null,
-  crisis: null,
-  active: null,
-  page: "home",
-  lens: "world",
-  perspective: null,
-  world: null,
-  archive: [],
-  history: null,
-  replay: null,
-  replayLens: "then",
-  replayActor: "",
-  busy: false,
-  activity: null,
-  operationSeq: 0,
-  viewSeq: 0,
-  draftDecision: "",
-  notice: "",
-  error: "",
-};
+const root = document.querySelector("#app");
 
 function actorDisplayName(actorId) {
   const actors = state.crisis?.actors || [];
   return actors.find((actor) => actor.id === actorId)?.display_name || actorId;
 }
 
-function defaultPlayableActor() {
-  return state.crisis?.actors.find((actor) => actor.playable) || null;
+function crisisSummary(crisisId) {
+  return (state.volume?.crises || []).find((crisis) => crisis.id === crisisId) || null;
+}
+
+function crisisDisplayName(crisisId) {
+  return crisisSummary(crisisId)?.title || (crisisId ? "已封存危局" : "甲申旧卷");
 }
 
 function fallbackActorId() {
-  return state.active?.human_actor || state.crisis?.actors[0]?.id || "";
-}
-
-function escapeHtml(value = "") {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return state.active?.human_actor || state.replay?.actors?.[0]?.id || state.crisis?.actors[0]?.id || "";
 }
 
 function decisionOutcomeMarkup(decision) {
@@ -69,43 +50,6 @@ function decisionResultNotice(result) {
     : "决定已入卷，但没有请求真正执行；书案已标出。";
 }
 
-async function api(path, options = {}) {
-  const { timeoutMs = 180000, ...requestOptions } = options;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(path, {
-      ...requestOptions,
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json", ...(requestOptions.headers || {}) },
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = payload.detail;
-      const message = typeof detail === "object" && detail !== null ? detail.message : detail;
-      const error = new Error(message || `请求失败（${response.status}）`);
-      error.status = response.status;
-      if (typeof detail === "object" && detail !== null) Object.assign(error, detail);
-      throw error;
-    }
-    return payload;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function route() {
-  const value = location.hash.replace(/^#\/?/, "");
-  if (["home", "watch", "desk", "replay", "archive", "history", "setup", "dev"].includes(value)) {
-    state.page = value;
-  } else {
-    state.page = state.active ? (state.active.mode === "WATCH" ? "watch" : "desk") : "home";
-  }
-}
-
-function go(page) {
-  location.hash = `#/${page}`;
-}
 
 function runtimeLabel() {
   const phase = state.active?.runtime_mode === "live" ? state.active.runtime_phase : "";
@@ -238,7 +182,7 @@ function chrome(content, { compact = false } = {}) {
         <span class="brand-seal">甲</span><span>Chronicle · 甲申</span>
       </button>
       <nav class="main-nav" aria-label="主导航">
-        <button data-page="home" ${state.page === "home" ? 'aria-current="page"' : ""} ${disabled}>首页</button>
+        <button data-page="volume" ${state.page === "volume" ? 'aria-current="page"' : ""} ${disabled}>甲申</button>
         <button data-page="history" ${state.page === "history" ? 'aria-current="page"' : ""} ${disabled}>史实背景</button>
         <button data-page="archive" ${state.page === "archive" ? 'aria-current="page"' : ""} ${disabled}>封存卷册</button>
       </nav>
@@ -251,165 +195,50 @@ function chrome(content, { compact = false } = {}) {
     </div>`;
 }
 
-function homePage() {
-  const playableActor = defaultPlayableActor();
-  const actors = state.crisis.actors
-    .map(
-      (actor, index) => `
-      <article class="actor-intro">
-        <span class="folio">0${index + 1}</span>
-        <div>
-          <h3>${escapeHtml(actor.display_name)}</h3>
-          <p>${escapeHtml(actor.role_charter.who)}</p>
-          <small>${escapeHtml(actor.role_charter.tensions.join(" · "))}</small>
-        </div>
-      </article>`,
-    )
-    .join("");
-  return chrome(`
-    <section class="home-hero">
-      <div class="hero-mast">
-        <p class="kicker">一六四四 · 一段仍未决定的时间</p>
-        <h1>甲申</h1>
-        <p class="hero-subtitle">${escapeHtml(state.crisis.title)}</p>
-      </div>
-      <div class="hero-copy">
-        <p>${escapeHtml(state.crisis.checkpoint.summary)}</p>
-        <p class="runtime-note">${escapeHtml(runtimeLabel())}</p>
-        <div class="hero-actions">
-          <button class="primary" data-action="start-watch" ${state.busy || state.active || state.config.setup_required ? "disabled" : ""}>旁观这场危局</button>
-          <button class="secondary" data-action="start-takeover" ${state.busy || state.active || state.config.setup_required || !playableActor ? "disabled" : ""}>${playableActor ? `成为${escapeHtml(playableActor.display_name)}` : "暂无可成为的主体"}</button>
-        </div>
-        ${
-          state.active
-            ? `<button class="continue-existing" data-action="open-active">已有一局尚未封存，继续进入</button>`
-            : ""
-        }
-      </div>
-    </section>
-    <section class="home-corridor" aria-label="危局态势预览">
-      ${surfaceMarkup(state.crisis.surface, { preview: true })}
-    </section>
-    <section class="actor-intros">
-      <div class="section-heading"><span>${state.crisis.actors.length} 个主体</span><h2>各自知道一部分，也各自承担选择</h2></div>
-      ${actors}
-    </section>
-    <section class="boundary-note">
-      <span>本局止于</span>
-      <p>${escapeHtml(state.crisis.boundary.stop_before)}</p>
-      <small>${escapeHtml(state.crisis.boundary.reason)}</small>
-    </section>
-  `);
-}
-
-function surfaceMarkup(surface, options = {}) {
-  if (!surface) return "";
-  if (surface.kind === "SPATIAL") return spatialSurfaceMarkup(surface, options);
-  if (surface.kind === "POLITICAL") return politicalSurfaceMarkup(surface);
-  return `<section class="surface-unavailable"><p>${escapeHtml(surface.title || "危局态势")}</p></section>`;
-}
-
-function spatialSurfaceMarkup(surface, options = {}) {
-  const locations = surface.locations || [];
-  const actors = surface.actors || [];
-  const messages = surface.messages || [];
-  const actorAt = new Map();
-  actors.forEach((actor) => {
-    const items = actorAt.get(actor.location) || [];
-    items.push(actor);
-    actorAt.set(actor.location, items);
+function volumeHomePage() {
+  return volumePage({
+    volume: state.volume,
+    chrome,
+    active: state.active,
+    config: state.config,
+    interactionLocked,
   });
-  const nodes = locations
-    .map((location) => {
-      const present = actorAt.get(location.id) || [];
-      return `<div class="corridor-node" data-location="${escapeHtml(location.id)}">
-        <span class="node-mark"></span>
-        <strong>${escapeHtml(location.display_name)}</strong>
-        <div class="node-actors">
-          ${present
-            .map(
-              (actor) => `<span class="actor-chip ${options.ownActor === actor.id ? "own" : ""}">
-                ${options.hideOthers && options.ownActor !== actor.id ? "动向未知" : escapeHtml(actor.display_name)}
-              </span>`,
-            )
-            .join("")}
-        </div>
-      </div>`;
-    })
-    .join("");
-  const letters = messages
-    .slice(-5)
-    .map(
-      (message) => `<li>
-        <span>${message.status === "delivered" ? "已抵达" : "在途中"}</span>
-        <strong>${escapeHtml(actorDisplayName(message.sender))} → ${escapeHtml(actorDisplayName(message.recipient))}</strong>
-        ${options.preview ? "" : `<small>第 ${message.arrival_tick} 日抵达</small>`}
-      </li>`,
-    )
-    .join("");
-  return `<div class="corridor ${options.preview ? "preview" : ""}">
-    <div class="corridor-track">${nodes}</div>
-    ${letters ? `<ol class="letters" aria-label="走廊中的书信">${letters}</ol>` : ""}
-  </div>`;
 }
 
-function politicalSurfaceMarkup(surface) {
-  const entityTypeLabel = (type) => ({
-    CLAIMANT: "候选",
-    INSTITUTION: "制度程序",
-    ASSET: "现实条件",
-    DOCUMENT: "公开文书",
-    PERSON: "人物",
-    FORCE: "可见力量",
-    PLACE: "地点",
-  }[type] || "世界事实");
-  const stateMarkup = (entry) => {
-    if (entry.knowledge === "KNOWN") {
-      return `<strong>${escapeHtml(entry.state_label || entry.state || "尚无定论")}</strong>`;
-    }
-    return `<strong class="political-unknown">${entry.knowledge === "UNCONFIRMED" ? "尚待确证" : "未获所知"}</strong>`;
-  };
-  const subjects = (surface.subjects || [])
-    .map(
-      (subject) => `<article class="political-subject">
-        <span>${escapeHtml(entityTypeLabel(subject.type))}</span>
-        <h3>${escapeHtml(subject.display_name)}</h3>
-        ${stateMarkup(subject)}
-      </article>`,
-    )
-    .join("");
-  const context = (surface.context || [])
-    .map(
-      (entry) => `<li>
-        <span>${escapeHtml(entry.display_name)}</span>
-        ${stateMarkup(entry)}
-      </li>`,
-    )
-    .join("");
-  return `<section class="political-surface" aria-label="${escapeHtml(surface.title || "政治事实")}">
-    <div class="political-subjects">${subjects}</div>
-    ${context ? `<div class="political-context"><p>尚未定稿的政治事实</p><ul>${context}</ul></div>` : ""}
-  </section>`;
+function crisisPage() {
+  if (!state.crisis || state.crisis.summary.id !== state.crisisId) {
+    return chrome(loadingBlock());
+  }
+  return crisisCoverPage({
+    crisis: state.crisis,
+    chrome,
+    active: state.active,
+    config: state.config,
+    interactionLocked,
+    surfaceMarkup,
+  });
 }
 
 function runHeader(title, lede) {
   const run = state.active;
   const locked = interactionLocked() || runtimeTransitionLocked();
+  const period = state.crisis?.checkpoint?.native_date_window || state.volume?.native_period || "危局进行中";
   return `<header class="run-header">
     <div>
-      <p class="kicker">${escapeHtml(state.crisis.title)} · 第 ${run.current_tick} 日</p>
+      <p class="kicker">${escapeHtml(period)}</p>
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(lede)}</p>
     </div>
     <div class="run-actions">
-      <span class="day-count">${run.current_tick}<small> / ${run.maximum_tick} 日</small></span>
+      <span class="day-count"><small>危局已历</small>${run.current_tick}<small>日</small></span>
       <button class="quiet" data-action="seal-run" ${locked ? "disabled" : ""}>封存这一局</button>
     </div>
   </header>${runtimeFolio()}${activityBanner()}`;
 }
 
 function watchPage() {
-  if (!state.active) return homePage();
+  if (!state.active) return volumeHomePage();
+  if (!state.crisis || state.crisis.summary.id !== state.active.crisis_id) return chrome(loadingBlock());
   const lensButtons = [
     ["world", "世界"],
     ...(state.crisis?.actors || []).map((actor) => [actor.id, actor.display_name]),
@@ -438,10 +267,10 @@ function worldLens() {
       <div><span>世界视野</span><h2>${escapeHtml(state.world.surface?.title || "危局态势")}</h2></div>
       <p>旁观者可以看见世界事实，但人物的私下打算仍留在各自视角中。</p>
     </div>
-    ${surfaceMarkup(state.world.surface)}
+    ${surfaceMarkup(state.world.surface, { actorDisplayName })}
     <div class="world-marginalia">
       <article><span>仍在路上</span><strong>${inTransit}</strong><p>消息必须走完路程，收信人才会知道。</p></article>
-      <article><span>模拟边界</span><strong>第 ${state.active.maximum_tick} 日前</strong><p>进入大规模交战裁定前，本局停止。</p></article>
+      <article><span>危局走向</span><strong>尚未结算</strong><p>世界会继续推进，直到现实形成能够被可靠描述的答案。</p></article>
     </div>
   </section>`;
 }
@@ -466,7 +295,7 @@ function actorLens() {
       <span>人物视野</span><h2>${escapeHtml(view.actor.display_name)}</h2>
       <p>${escapeHtml(view.role_charter.who)}</p>
     </div>
-    ${surfaceMarkup(view.surface, { ownActor: view.actor.id })}
+    ${surfaceMarkup(view.surface, { ownActor: view.actor.id, actorDisplayName })}
     <p class="corridor-unknown">其他人物的当前位置与动向，尚未进入这一视野。</p>
     <div class="private-columns">
       <article>
@@ -487,7 +316,8 @@ function actorLens() {
 }
 
 function deskPage() {
-  if (!state.active) return homePage();
+  if (!state.active) return volumeHomePage();
+  if (!state.crisis || state.crisis.summary.id !== state.active.crisis_id) return chrome(loadingBlock());
   const view = state.perspective;
   const messages = (view?.knowledge || [])
     .filter((item) => typeof item === "object" && item.kind === "message")
@@ -568,7 +398,7 @@ function deskPage() {
       <div class="desk-main">
         <div class="desk-corridor">
           <span class="column-label">此刻所见的态势</span>
-          ${surfaceMarkup(view?.surface, { ownActor: view?.actor?.id })}
+          ${surfaceMarkup(view?.surface, { ownActor: view?.actor?.id, actorDisplayName })}
           <p class="corridor-unknown">其它主体的动向，尚未有可靠消息。</p>
           <div class="known-strip"><span>已经知道</span><ul>${knownSituation || '<li class="empty">尚无可确认的新情况。</li>'}</ul></div>
         </div>
@@ -620,7 +450,7 @@ function replayPage() {
     .map((actor) => `<button data-replay-actor="${escapeHtml(actor.id)}" ${state.replayActor === actor.id ? 'aria-current="true"' : ""}>${escapeHtml(actor.display_name)}</button>`)
     .join("");
   const replayTitle =
-    state.replay.run.mode === "WATCH" ? "三条人生如何相遇" : "在你看不见的地方";
+    state.replay.run.mode === "WATCH" ? "几条人生如何相遇" : "在你看不见的地方";
   const cleanupPending = state.replay.run.runtime_mode === "live"
     && state.replay.run.runtime_phase === "CLEANUP_PENDING"
     && state.replay.run.runtime_error_code;
@@ -647,8 +477,8 @@ function archivePage() {
     ? state.archive
         .map(
           (run) => `<article class="archive-row">
-            <div><span>${run.mode === "WATCH" ? "旁观" : run.mode === "TAKEOVER" ? "吴三桂" : "旧版留存"}</span><h2>${run.mode === "LEGACY_V2" ? "甲申旧卷" : "山海关之前"}</h2></div>
-            <p>封存于第 ${run.current_tick} 日<br><small>${escapeHtml(run.seal_reason || "已经结束")}</small></p>
+            <div><span>${run.mode === "WATCH" ? "旁观" : run.mode === "TAKEOVER" ? "成为关键主体" : "旧版留存"}</span><h2>${run.mode === "LEGACY_V2" ? "甲申旧卷" : escapeHtml(crisisDisplayName(run.crisis_id))}</h2></div>
+            <p>危局已历 ${run.current_tick} 日<br><small>${escapeHtml(run.seal_reason || "已经结束")}</small></p>
             ${run.mode !== "LEGACY_V2" ? `<div class="archive-actions"><button class="secondary" data-replay-id="${escapeHtml(run.id)}">打开回看</button>${run.runtime_phase === "CLEANUP_PENDING" && run.runtime_error_code ? `<button class="quiet" data-action="retry-cleanup" data-cleanup-id="${escapeHtml(run.id)}">再次收束</button>` : ""}</div>` : '<span class="legacy-mark">仅作历史留存</span>'}
           </article>`,
         )
@@ -702,15 +532,16 @@ function loadingBlock() {
 }
 
 function render() {
-  if (!state.crisis || !state.config) {
+  if (!state.volume || !state.config) {
     const bootMessage = state.error
-      ? `<p>观测台暂时打不开</p><small>${escapeHtml(state.error)}</small><button class="secondary" data-action="retry-boot">重新打开</button>`
-      : "<p>正在打开这段时间</p>";
+      ? `<p>卷册暂时打不开</p><small>${escapeHtml(state.error)}</small><button class="secondary" data-action="retry-boot">重新打开</button>`
+      : "<p>正在打开卷册</p>";
     root.innerHTML = `<div class="boot-state${state.error ? " boot-error" : ""}"><span>甲申</span>${bootMessage}</div>`;
     return;
   }
   const pages = {
-    home: homePage,
+    volume: volumeHomePage,
+    crisis: crisisPage,
     watch: watchPage,
     desk: deskPage,
     replay: replayPage,
@@ -719,7 +550,7 @@ function render() {
     setup: setupPage,
     dev: devPage,
   };
-  root.innerHTML = (pages[state.page] || homePage)();
+  root.innerHTML = (pages[state.page] || volumeHomePage)();
 }
 
 async function refreshActive(timeoutMs = 180000) {
@@ -728,9 +559,24 @@ async function refreshActive(timeoutMs = 180000) {
   syncDecisionActivity();
 }
 
+function selectedCrisisId() {
+  return state.active?.crisis_id || state.crisisId || state.volume?.crises?.[0]?.id || "";
+}
+
+async function loadCrisis(crisisId) {
+  if (!crisisId) return null;
+  if (state.crisis?.summary?.id === crisisId) return state.crisis;
+  const crisisSeq = ++state.crisisSeq;
+  const crisis = await api(`/api/crises/${encodeURIComponent(crisisId)}`);
+  if (crisisSeq !== state.crisisSeq) return null;
+  state.crisis = crisis;
+  return crisis;
+}
+
 async function loadRunView() {
   const run = state.active;
   if (!run) return;
+  await loadCrisis(run.crisis_id);
   const runId = run.id;
   const lens = state.lens;
   const page = state.page;
@@ -754,8 +600,15 @@ async function loadRunView() {
 }
 
 async function loadPageData() {
+  if (state.page === "crisis") await loadCrisis(state.crisisId);
+  if (["watch", "desk"].includes(state.page) && state.active) {
+    await loadCrisis(state.active.crisis_id);
+  }
   if (state.page === "archive") state.archive = (await api("/api/archive")).runs;
-  if (state.page === "history") state.history = await api("/api/history");
+  if (state.page === "history") {
+    const crisisId = selectedCrisisId();
+    state.history = crisisId ? await api(`/api/crises/${encodeURIComponent(crisisId)}/history`) : null;
+  }
   if (state.page === "dev" && state.active) state.dev = await api(`/api/dev/runs/${state.active.id}`);
   if (["watch", "desk"].includes(state.page)) await loadRunView();
 }
@@ -824,21 +677,24 @@ async function runAction(action, activity = null) {
   }
 }
 
-async function startRun(mode) {
+async function startRun(mode, humanActorId = "") {
+  if (!state.crisis?.summary?.id) throw new Error("请先打开一场危局。");
   const payload = {
     crisis_id: state.crisis.summary.id,
     mode,
     live: true,
   };
   if (mode === "TAKEOVER") {
-    const actor = defaultPlayableActor();
-    if (actor) payload.human_actor_id = actor.id;
+    const actor = state.crisis.actors.find((item) => item.id === humanActorId && item.playable);
+    if (!actor) throw new Error("请选择这场危局中可以成为的主体。");
+    payload.human_actor_id = actor.id;
   }
   const result = await api("/api/runs", {
     method: "POST",
     body: JSON.stringify(payload),
   });
   state.active = result.run;
+  state.crisisId = result.run.crisis_id;
   state.config = await api("/api/config");
   state.lens = "world";
   if (result.start_error) state.notice = result.start_error;
@@ -885,6 +741,7 @@ async function sealRun() {
     : "这一局已经封存，可以回看。";
   state.active = null;
   state.replay = await api(`/api/runs/${runId}/replay`);
+  state.crisisId = state.replay.run.crisis_id || state.crisisId;
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || fallbackActorId();
   state.page = "replay";
@@ -1025,6 +882,8 @@ async function reconcileActive() {
 
 async function openReplay(runId) {
   state.replay = await api(`/api/runs/${runId}/replay`);
+  state.crisisId = state.replay.run.crisis_id || state.crisisId;
+  await loadCrisis(state.crisisId);
   state.replayLens = state.replay.run.mode === "WATCH" ? "after" : "then";
   state.replayActor = state.replay.run.human_actor || fallbackActorId();
   state.page = "replay";
@@ -1040,6 +899,8 @@ root.addEventListener("click", (event) => {
   }
   const page = event.target.closest("[data-page]")?.dataset.page;
   if (page) return go(page);
+  const crisisId = event.target.closest("[data-crisis-id]")?.dataset.crisisId;
+  if (crisisId) return goCrisis(crisisId);
   const lens = event.target.closest("[data-lens]")?.dataset.lens;
   if (lens) {
     state.lens = lens;
@@ -1059,16 +920,17 @@ root.addEventListener("click", (event) => {
   if (replayId) return runAction(() => openReplay(replayId));
   const cleanupId = event.target.closest("[data-cleanup-id]")?.dataset.cleanupId;
   if (cleanupId) return runAction(() => retryCleanup(cleanupId), { kind: "seal", phase: "reconciling" });
+  const humanActorId = event.target.closest("[data-human-actor-id]")?.dataset.humanActorId || "";
   const capturedDecision = document.querySelector("#decision")?.value || "";
   const actions = {
-    "go-home": () => go("home"),
+    "go-home": () => go("volume"),
     "retry-boot": () => boot(),
     "start-watch": () => runAction(
       () => startRun("WATCH"),
       { kind: "runtime", phase: "bootstrapping" },
     ),
     "start-takeover": () => runAction(
-      () => startRun("TAKEOVER"),
+      () => startRun("TAKEOVER", humanActorId),
       { kind: "runtime", phase: "bootstrapping" },
     ),
     "open-active": () => go(state.active.mode === "WATCH" ? "watch" : "desk"),
@@ -1131,12 +993,15 @@ async function boot() {
   render();
   try {
     const bootTimeoutMs = 15_000;
-    [state.config, state.crisis] = await Promise.all([
+    [state.config, state.volume] = await Promise.all([
       api("/api/config", { timeoutMs: bootTimeoutMs }),
-      api("/api/crisis", { timeoutMs: bootTimeoutMs }),
+      api("/api/volume", { timeoutMs: bootTimeoutMs }),
     ]);
     await refreshActive(bootTimeoutMs);
-    if (state.active && !location.hash) state.page = state.active.mode === "WATCH" ? "watch" : "desk";
+    if (state.active && !location.hash) {
+      state.crisisId = state.active.crisis_id;
+      state.page = state.active.mode === "WATCH" ? "watch" : "desk";
+    }
     await loadPageData();
   } catch (error) {
     state.error = error.message;

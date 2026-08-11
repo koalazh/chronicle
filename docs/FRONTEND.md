@@ -1,22 +1,26 @@
 # Chronicle 前端合同
 
-本文合并页面产品约定与视觉约定。它回答“用户应该看到什么”，不把 Profile、Wake、数据库或技术日志当成用户心智；实现以 `web/app.js`、`web/index.html`、`web/styles.css` 和当前 API 为准。
+本文合并页面产品约定与视觉约定。它回答“用户应该看到什么”，不把 Profile、Wake、数据库或技术日志当成用户心智；实现以 `web/` 下的 ES modules、`web/index.html`、`web/styles.css` 和当前 API 为准。
+
+> V4 状态：Phase 18 已实现 Volume Home、Crisis Cover、任意 playable Actor 入口和 `SPATIAL` / `POLITICAL` Surface。Desk、Settlement、Replay/Compare 的 V4 细化仍由后续 Phase 完成；本文件不会把当前 fixture/API 或静态页面证据写成 live Hermes 验收。
 
 ## 首次打开
 
-用户第一次打开首页应立即明白四件事：这是“山海关之前”的一段有限危局；三位主体只知道已经抵达自己的信息；可以旁观，也可以成为吴三桂；封存后可以把当时视野与完整世界分开回看。
+用户第一次打开首页应立即明白四件事：这是“甲申”这一 Volume；其中有两场彼此独立的危局；每一场由少数主体在有限信息中行动；可以先旁观，或成为该场中任一可玩的关键主体。
 
-首页先讲检查点、三位主体、走廊、停止边界和两个入口，不先讲 Profile、Wake、Session 或数据库。模型服务未配置时，入口禁用并告诉用户去“设置”；内部异常不能原样倒进页面。
+首页先讲 Volume、两个 Crisis 的日期/一句危局描述和入口，不先讲 Profile、Wake、Session 或数据库。进入 Crisis Cover 后才展开该场的检查点、未决问题、主体、Surface 和入口。模型服务未配置时仍可阅读 Cover，开始入口禁用并告诉用户去“设置”；内部异常不能原样倒进页面。
 
 ## 页面合同
 
-### 首页
+### Volume 首页与 Crisis Cover
 
-展示“甲申”、危局标题、极短背景、走廊预览、三位主体当前责任，以及“旁观这场危局”和“成为吴三桂”两个入口。区分尚未配置、服务未就绪和已有一局未封存三种下一步。
+Volume 首页展示“甲申”、简短的卷册说明和两场 Crisis 的目录。它不把一场 alternate outcome 接到另一场的开始；每一场都从自己经校验的 checkpoint 启动。
+
+Crisis Cover 回答四件事：现在发生什么、真正未决的问题、谁在其中、可以旁观还是成为谁。入口从 `actors[].playable` 动态生成：一个 Watch 和每位 playable Actor 一个 Takeover。创建请求明确携带 `crisis_id` 与该 Actor ID，不由首页默认人选或历史 ID 推断。
 
 ### Watch
 
-提供世界、李自成、吴三桂、多尔衮四个视野。世界视野展示地点、在途/抵达的信件和公开事实；主体视野只展示该主体已经收到的 Knowledge、Belief、Plan、Revisit、位置和资源。切换视野不能改变 Run，也不能泄漏其他主体私态。
+提供世界和当前 Crisis Actor 集合生成的视野。世界视野展示地点、在途/抵达的信件和公开事实；主体视野只展示该主体已经收到的 Knowledge、Belief、Plan、Revisit、位置和资源。切换视野不能改变 Run，也不能泄漏其他主体私态。
 
 “继续”推进到下一个有意义的 simulated moment，而不是把日期机械加一天。消息抵达、移动完成和主体 Wake 都要被翻译成领域语言；没有 trigger 不产生 Wake。live 未 READY 时，前端禁用继续，后端也必须拒绝。
 
@@ -28,7 +32,7 @@
 
 ### 回看、卷册、史实和设置
 
-Watch 回看默认是“封存后全景”，标题为“三条人生如何相遇”；Takeover 回看默认是“当时可见”，第一屏回答“在你看不见的地方发生了什么”。回看要能读出“计划 → 发信 → 收信 → 收信人改计划”，不能只显示内部事件名或工具调用次数。
+Watch 回看默认是“封存后全景”，标题为“几条人生如何相遇”；Takeover 回看默认是“当时可见”，第一屏回答“在你看不见的地方发生了什么”。回看要能读出“计划 → 发信 → 收信 → 收信人改计划”，不能只显示内部事件名或工具调用次数。
 
 封存卷册只列已封存的危局，旧 V2 数据标成“旧版留存”；史实背景解释来源、证据状态、争议和建模边界；设置收集模型服务地址、API Key、模型和接口类型，“保存并核对”先测试 Provider，再保存 Secret。
 
@@ -40,11 +44,14 @@ Chronicle 是可交互的 Living Historical Document，不是策略游戏 HUD、
 
 当前 CSS 的语义 token 是 `--paper`、`--ink`、`--red`、`--blue`；标题使用 serif，界面信息使用 sans。视觉首先回答“谁知道什么”和“下一件有意义的事是什么”，不依靠头像、能力值、网络拓扑或“正在思考”动画制造主体感。
 
-## Crisis Corridor
+## Crisis Surface
 
-Corridor 是四个有序地点的关系：北京 → 永平 → 山海关 → 辽西行军路。它表达相对位置、距离和消息路线，不冒充精确地图。
+Surface 是 Crisis 自己提供的投影，前端只实现两种 renderer：
 
-桌面横向、手机纵向；信件显示“在途中”或“已抵达”和预计抵达日；未知主体不默认塞到北京；Takeover 只显示吴三桂合法知道的地点和人物信息。不能帮助理解地点、移动、延迟或已知/未知的装饰不应占用空间。
+- `SPATIAL`：有序地点、主体位置、在途消息与移动；山海关仍使用走廊表达相对位置、距离和消息路线，不冒充精确地图。
+- `POLITICAL`：候选、制度程序、可见支持和公开文书的“尚未定稿的政治事实”；南都不画关系图、不显示隐藏状态。
+
+Surface 在宽屏横向、手机按内容单列；信件显示“在途中”或“已抵达”和预计抵达日；未知主体不默认放入地点；Takeover 只显示该 Human Actor 合法知道的状态。不能帮助理解地点、政治事实、移动、延迟或已知/未知的装饰不应占用空间。
 
 ## 状态和响应式
 
@@ -60,12 +67,13 @@ live Run 的 `BOOTSTRAPPING`、`RECONCILING`、`FAILED`、`SEALING` 和 `CLEANUP
 
 | 用途 | 当前入口 |
 | --- | --- |
-| 危局与检查点 | `GET /api/crisis` |
+| Volume 与危局目录 | `GET /api/volume`、`GET /api/crises` |
+| 一场 Crisis Cover | `GET /api/crises/{crisis_id}` |
 | 设置与就绪状态 | `GET /api/config`、`POST /api/setup/test`、`POST /api/setup/configure` |
 | 创建/恢复一局 | `POST /api/runs`、`GET /api/runs/active`、`POST /api/runs/{id}/runtime/retry` |
 | 合法视野 | `GET /api/runs/{id}/world`、`GET /api/runs/{id}/perspective/{actor}` |
 | 推进/决定/封存 | `POST /api/runs/{id}/continue`、`POST /api/runs/{id}/decision`、`POST /api/runs/{id}/seal` |
-| 回看/卷册/史实 | `GET /api/runs/{id}/replay`、`GET /api/archive`、`GET /api/history` |
+| Outcome/回看/卷册/史实 | `GET /api/runs/{id}/outcome`、`GET /api/runs/{id}/replay`、`GET /api/archive`、`GET /api/crises/{id}/history` |
 | 原始诊断 | `/api/dev/*`，仅开发模式开放 |
 
 后端错误要翻译成下一步可执行的产品语言；主产品不展示 Profile、Wake、Session、Memory hash、Worldline、ActionType、HTTP 状态码、原始模型配置或数据库表名。

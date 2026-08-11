@@ -33,8 +33,10 @@ class ChronicleHost:
         self.db = db or ChronicleDB(config.database_path)
         self.pack = pack or ScenarioPack.load(config.scenario_path)
         from .runtime import WorldlineRuntime
+        from .volume_runtime import VolumeRuntime
 
         self.worldline_runtime = WorldlineRuntime(self)
+        self.volume_runtime = VolumeRuntime(self)
         self.worldline_runtime.ensure_canon_worldline()
 
     @property

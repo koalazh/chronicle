@@ -269,9 +269,27 @@ class WorldlineRuntime:
 
         if not lifetime_id.strip():
             raise WorldlineError("Lifetime id is required")
+        row = self.db.worldline(worldline_id)
+        if row is None:
+            raise WorldlineError("Worldline not found")
+        if row["kind"] != WorldlineKind.VOLUME.value:
+            result = self._transition_volume_controller(
+                worldline_id,
+                lifetime_id,
+                "HUMAN",
+                event_type="LIFETIME_INHABITED",
+                reason="inhabit",
+            )
+            return self._volume_controller_response(result)
+        target = self.db.worldline_lifetime_by_id(worldline_id, lifetime_id)
+        if target is None:
+            target = self.db.worldline_lifetime(worldline_id, lifetime_id)
+        if target is None:
+            raise WorldlineError("Lifetime not found")
+        self._assert_volume_presence_allowed(worldline_id, target["seat"])
         result = self._transition_volume_controller(
             worldline_id,
-            lifetime_id,
+            target["id"],
             "HUMAN",
             event_type="LIFETIME_INHABITED",
             reason="inhabit",
@@ -2294,6 +2312,36 @@ class WorldlineRuntime:
             raise WorldlineError(str(exc)) from exc
         except (sqlite3.IntegrityError, ValueError) as exc:
             raise WorldlineConflict(str(exc)) from exc
+
+    def _assert_volume_presence_allowed(self, worldline_id: str, target_seat: str) -> None:
+        """Protect an unresolved Crisis knot from cross-participant information arbitrage."""
+
+        from .crisis import VolumePack
+
+        active_statuses = {"ACTIVE", "RESOLUTION_PENDING", "AFTERMATH"}
+        active_instances = [
+            instance
+            for instance in self.db.crisis_instances(worldline_id)
+            if instance["status"] in active_statuses
+        ]
+        if not active_instances:
+            return
+        volume = VolumePack.load(self.host.config.volume_path)
+        inhabited_seats = {
+            str(event.get("payload", {}).get("seat") or event.get("seat_id") or "")
+            for event in self.db.worldline_events(worldline_id)
+            if event["event_type"] == "LIFETIME_INHABITED"
+        }
+        for instance in active_instances:
+            participants = set(volume.pack(instance["crisis_id"]).participant_ids)
+            if target_seat not in participants:
+                continue
+            prior_other = (inhabited_seats & participants) - {target_seat}
+            if prior_other:
+                raise WorldlineConflict(
+                    "this active Crisis Instance already has another inhabited Participant; "
+                    "settle it before switching sides"
+                )
 
     def _volume_controller_response(self, result: dict[str, Any]) -> dict[str, Any]:
         lifetime = result["lifetime"]

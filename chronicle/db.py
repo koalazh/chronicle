@@ -1612,6 +1612,216 @@ class ChronicleDB:
                 )
         return committed
 
+    def commit_volume_moment(
+        self,
+        worldline_id: str,
+        events: list[dict[str, Any]],
+        *,
+        current_tick: int,
+        lifetime_updates: list[dict[str, Any]] | None = None,
+        instance_creates: list[dict[str, Any]] | None = None,
+        instance_updates: list[dict[str, Any]] | None = None,
+        wake_creates: list[dict[str, Any]] | None = None,
+        snapshot: dict[str, Any] | None = None,
+        expected_current_tick: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Commit one V5 Volume moment without changing Worldline lifecycle state."""
+
+        committed: list[dict[str, Any]] = []
+        with self.transaction() as connection:
+            worldline = connection.execute(
+                "SELECT kind, status, current_tick, runtime_epoch FROM worldlines WHERE id = ?",
+                (worldline_id,),
+            ).fetchone()
+            if worldline is None or worldline["kind"] != "VOLUME":
+                raise sqlite3.IntegrityError("Volume moment requires a VOLUME Worldline")
+            if worldline["status"] != "ACTIVE":
+                raise sqlite3.IntegrityError("Volume Worldline is sealed")
+            if expected_current_tick is not None and int(worldline["current_tick"]) != int(
+                expected_current_tick
+            ):
+                raise sqlite3.IntegrityError("Volume clock changed before the moment was committed")
+
+            for event in events:
+                sequence = self._insert_worldline_event(connection, worldline_id, event)
+                committed_record = dict(event)
+                committed_record["sequence"] = sequence
+                committed_record["worldline_id"] = worldline_id
+                committed_record.setdefault("created_at", now_iso())
+                committed.append(committed_record)
+
+            update_sql = (
+                "UPDATE worldlines SET current_tick = ?, updated_at = ? "
+                "WHERE id = ? AND kind = 'VOLUME' AND status = 'ACTIVE'"
+            )
+            update_args: list[Any] = [int(current_tick), now_iso(), worldline_id]
+            if expected_current_tick is not None:
+                update_sql += " AND current_tick = ?"
+                update_args.append(int(expected_current_tick))
+            updated = connection.execute(update_sql, update_args)
+            if updated.rowcount != 1:
+                raise sqlite3.IntegrityError("Volume clock changed before the moment was committed")
+
+            for values in instance_creates or []:
+                outcome = values.get("outcome", values.get("outcome_json", {}))
+                record = {
+                    "id": values["id"],
+                    "worldline_id": worldline_id,
+                    "crisis_id": values["crisis_id"],
+                    "content_version": int(values.get("content_version", 0)),
+                    "content_hash": values.get("content_hash", ""),
+                    "status": values.get("status", "DORMANT"),
+                    "phase": values.get("phase", "DORMANT"),
+                    "activation_tick": int(values.get("activation_tick", current_tick)),
+                    "local_origin_tick": int(values.get("local_origin_tick", 0)),
+                    "resolution_contract_id": values.get("resolution_contract_id", ""),
+                    "resolution_contract_version": int(
+                        values.get("resolution_contract_version", 0)
+                    ),
+                    "resolution_seed": values.get("resolution_seed", ""),
+                    "settled_tick": values.get("settled_tick"),
+                    "outcome_json": outcome
+                    if isinstance(outcome, str)
+                    else json.dumps(outcome, ensure_ascii=False, sort_keys=True),
+                    "suppression_reason": values.get("suppression_reason", ""),
+                    "created_at": values.get("created_at", now_iso()),
+                    "updated_at": values.get("updated_at", now_iso()),
+                }
+                connection.execute(
+                    "INSERT INTO worldline_crisis_instances("
+                    "id, worldline_id, crisis_id, content_version, content_hash, status, phase, "
+                    "activation_tick, local_origin_tick, resolution_contract_id, resolution_contract_version, "
+                    "resolution_seed, settled_tick, outcome_json, suppression_reason, created_at, updated_at) "
+                    "VALUES (:id, :worldline_id, :crisis_id, :content_version, :content_hash, :status, :phase, "
+                    ":activation_tick, :local_origin_tick, :resolution_contract_id, :resolution_contract_version, "
+                    ":resolution_seed, :settled_tick, :outcome_json, :suppression_reason, :created_at, :updated_at)",
+                    record,
+                )
+
+            for values in instance_updates or []:
+                update_values = dict(values)
+                if "outcome" in update_values and "outcome_json" not in update_values:
+                    outcome = update_values.pop("outcome")
+                    update_values["outcome_json"] = (
+                        outcome
+                        if isinstance(outcome, str)
+                        else json.dumps(outcome, ensure_ascii=False, sort_keys=True)
+                    )
+                allowed = {
+                    "status",
+                    "phase",
+                    "settled_tick",
+                    "outcome_json",
+                    "suppression_reason",
+                }
+                fields = {key: value for key, value in update_values.items() if key in allowed}
+                if not fields:
+                    continue
+                assignments = ", ".join(f"{key} = :{key}" for key in fields)
+                fields.update({"id": values["id"], "worldline_id": worldline_id, "updated_at": now_iso()})
+                changed = connection.execute(
+                    f"UPDATE worldline_crisis_instances SET {assignments}, updated_at = :updated_at "
+                    "WHERE id = :id AND worldline_id = :worldline_id",
+                    fields,
+                )
+                if changed.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        f"Crisis Instance is missing from Volume Worldline: {values['id']}"
+                    )
+
+            for values in lifetime_updates or []:
+                update_values = dict(values)
+                for key in ("knowledge", "beliefs", "authority"):
+                    json_key = f"{key.removesuffix('s')}_json"
+                    if key in update_values and json_key not in update_values:
+                        update_values[json_key] = json.dumps(
+                            update_values.pop(key), ensure_ascii=False, sort_keys=True
+                        )
+                allowed = {
+                    "status",
+                    "controller",
+                    "profile_state",
+                    "profile_name",
+                    "profile_metadata_json",
+                    "memory_text",
+                    "memory_hash",
+                    "knowledge_json",
+                    "belief_json",
+                    "authority_json",
+                    "last_perspective_json",
+                    "wake_count",
+                }
+                fields = {key: value for key, value in update_values.items() if key in allowed}
+                if not fields:
+                    continue
+                assignments = ", ".join(f"{key} = :{key}" for key in fields)
+                fields.update({"worldline_id": worldline_id, "updated_at": now_iso()})
+                if values.get("id"):
+                    where = "worldline_id = :worldline_id AND id = :id"
+                    fields["id"] = values["id"]
+                else:
+                    where = "worldline_id = :worldline_id AND seat = :seat"
+                    fields["seat"] = values["seat"]
+                changed = connection.execute(
+                    f"UPDATE worldline_lifetimes SET {assignments}, updated_at = :updated_at "
+                    f"WHERE {where}",
+                    fields,
+                )
+                if changed.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        f"Lifetime is missing from Volume Worldline: {values.get('id', values.get('seat', ''))}"
+                    )
+
+            for values in wake_creates or []:
+                record = {
+                    "id": values.get("id", f"wake-{uuid.uuid4().hex[:16]}"),
+                    "worldline_id": worldline_id,
+                    "actor_id": values.get("actor_id", values.get("lifetime_id", "")),
+                    "wake_type": values["wake_type"],
+                    "tick": int(values["tick"]),
+                    "status": values.get("status", "QUEUED"),
+                    "source": values.get("source", "volume"),
+                    "trigger_event_id": values.get("trigger_event_id", ""),
+                    "hermes_session_id": values.get("hermes_session_id", ""),
+                    "frozen_perspective_json": json.dumps(
+                        values.get("frozen_perspective", {}), ensure_ascii=False, sort_keys=True
+                    ),
+                    "result_json": json.dumps(
+                        values.get("result", {}), ensure_ascii=False, sort_keys=True
+                    ),
+                    "error_json": json.dumps(
+                        values.get("error", {}), ensure_ascii=False, sort_keys=True
+                    ),
+                    "created_at": values.get("created_at", now_iso()),
+                    "updated_at": values.get("updated_at", now_iso()),
+                }
+                connection.execute(
+                    "INSERT OR IGNORE INTO crisis_wakes("
+                    "id, worldline_id, actor_id, wake_type, tick, status, source, trigger_event_id, "
+                    "hermes_session_id, frozen_perspective_json, result_json, error_json, created_at, updated_at) "
+                    "VALUES (:id, :worldline_id, :actor_id, :wake_type, :tick, :status, :source, :trigger_event_id, "
+                    ":hermes_session_id, :frozen_perspective_json, :result_json, :error_json, :created_at, :updated_at)",
+                    record,
+                )
+
+            if snapshot is not None:
+                ledger_cursor = int(committed[-1]["sequence"]) if committed else int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(sequence), 0) FROM worldline_events WHERE worldline_id = ?",
+                        (worldline_id,),
+                    ).fetchone()[0]
+                )
+                self._insert_snapshot(
+                    connection,
+                    {
+                        "worldline_id": worldline_id,
+                        "tick": int(current_tick),
+                        "ledger_cursor": ledger_cursor,
+                        "projection": snapshot,
+                    },
+                )
+        return committed
+
     def commit_worldline_seal(
         self,
         worldline_id: str,

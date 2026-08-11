@@ -312,6 +312,34 @@ def test_nanjing_recognition_remains_distinct_from_a_late_competing_claimant_ent
     assert late_entry_tick > resolution_tick
 
 
+def test_replay_offer_detail_does_not_duplicate_canonical_term_punctuation(app_config):
+    engine = CrisisRunEngine(app_config)
+    engine.select_crisis("nanjing-succession")
+    detail = engine._replay_detail(
+        {
+            "event_type": "OFFER_PROPOSED",
+            "payload": {
+                "offer": {
+                    "issuer": "han-zanzhou",
+                    "recipient": "ma-shiying",
+                    "terms": [
+                        {
+                            "type": "endorsement",
+                            "subject": "fu-prince",
+                            "value": "public_support",
+                            "description": "对福王进入南京程序作出可被对方依赖的公开支持安排。",
+                        }
+                    ],
+                    "message": "请明确回应这一公开支持条件。",
+                }
+            },
+        }
+    )
+
+    assert "安排。。" not in detail
+    assert detail.endswith("安排。请明确回应这一公开支持条件。")
+
+
 def test_nanjing_pressure_can_lead_to_a_deferred_world_resolution_before_safety_horizon(
     app_config,
 ):

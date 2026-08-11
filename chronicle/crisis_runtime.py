@@ -5473,7 +5473,8 @@ class CrisisRunEngine:
             )
             message = str(offer.get("message", ""))
             detail = f"{issuer} → {recipient}：{terms}"
-            return f"{detail}。{message}" if message else detail
+            separator = "" if detail.endswith(("。", "！", "？", "!", "?")) else "。"
+            return f"{detail}{separator}{message}" if message else detail
         if event["event_type"] in {
             "AGREEMENT_CREATED",
             "AGREEMENT_FULFILLED",

@@ -15,7 +15,9 @@ function agreementSentence(outcome) {
     .flatMap((agreement) => agreement.terms || [])
     .map((term) => String(term.description || "").trim())
     .filter(Boolean);
-  return terms.length ? `已经形成的条件仍留在结果之中：${terms.slice(0, 2).join("；")}。` : "";
+  const description = terms.slice(0, 2).join("；");
+  const ending = /[。！？!?]$/.test(description) ? "" : "。";
+  return terms.length ? `已经形成的条件仍留在结果之中：${description}${ending}` : "";
 }
 
 function assetSentence(outcome) {

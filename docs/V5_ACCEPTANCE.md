@@ -144,6 +144,8 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 随后在独立临时 Volume 上尝试 P0 候选链（同一 Wu Sangui Profile 的 `AGENT → HUMAN → AGENT → HUMAN`）。真实模型连续两次没有提交 `logical_intent`；驱动执行一次同一 fresh Session 的协议修复后仍 fail-closed，未生成隐式 `wait`，随后精确 Gateway stop 通过。该次是负向运行证据：说明协议边界有效，但不构成 P0 通过。
 
+在完成逐 Profile `/v1/models` 与 `/v1/toolsets` warm-up 后，于独立端口 `18651` 重复该候选，结果相同；因此当前证据不支持把失败归因于 Gateway/MCP 冷启动竞态。
+
 ### 隔离边界
 
 以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。

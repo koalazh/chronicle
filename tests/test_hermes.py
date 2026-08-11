@@ -63,8 +63,9 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
         "chronicle.hermes._run_cli",
         lambda *_args, **_kwargs: SimpleNamespace(
             stdout=(
-                "Connected (15ms)\nTools discovered: 4\n\n"
+                "Connected (15ms)\nTools discovered: 5\n\n"
                 "    communicate                         Send a message\n"
+                "    investigate                         Start an investigation\n"
                 "    operate                             Start an operation\n"
                 "    update_plan                         Update a plan\n"
                 "    schedule_revisit                    Schedule a revisit\n"
@@ -76,6 +77,7 @@ def test_mcp_probe_reports_only_live_discovered_tool_names(monkeypatch, app_conf
 
     assert probe_mcp_tools(app_config, "chronicle-world") == (
         "communicate",
+        "investigate",
         "operate",
         "schedule_revisit",
         "update_plan",

@@ -139,6 +139,21 @@ def test_private_perspective_exposes_a_grounded_affordance_manifest(app_config):
         "shanhai-pass",
     }
     assert {item["id"] for item in perspective["available_operations"]} == {"prepare_force"}
+    assert perspective["available_investigations"] == [
+        {
+            "id": "shanhai-pass-report",
+            "display_name": "查问山海关近况",
+            "description": "派出沿线使者核实关口控制与可见兵力态势；不能探知尚未公开的私下条件。",
+            "target": {
+                "id": "shanhai-pass",
+                "type": "ASSET",
+                "display_name": "山海关通道",
+            },
+            "method": "courier_report",
+            "duration_days": 2,
+            "expected_result_tick": 2,
+        }
+    ]
     assert perspective["active_operations"] == []
     assert perspective["active_investigations"] == []
     assert perspective["active_offers"] == []
@@ -412,6 +427,164 @@ def test_operate_requires_a_currently_available_crisis_operation(app_config):
     assert unavailable == {"status": "rejected", "code": "operation_precondition_unmet"}
     assert accepted["status"] == "accepted" and accepted["expected_complete_tick"] == 2
     assert conflicting == {"status": "rejected", "code": "operation_conflict"}
+
+
+def test_investigate_requires_a_currently_available_crisis_capability(app_config):
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+    wake = next(
+        item
+        for item in engine.db.crisis_wakes(run_id, status="QUEUED")
+        if item["actor_id"] == "dorgon"
+    )
+    engine.db.update_crisis_wake(wake["id"], status="RUNNING")
+    world = engine.world.fixture_session(wake["id"], "dorgon")
+
+    invalid_question = world.investigate(
+        "",
+        "shanhai-pass",
+        method="courier_report",
+        idempotency_key="empty-question",
+    )
+    unknown_target = world.investigate(
+        "关口现在由谁守持？",
+        "unknown-pass",
+        method="courier_report",
+        idempotency_key="unknown-target",
+    )
+    accepted = world.investigate(
+        "关口现在由谁守持？",
+        "shanhai-pass",
+        method="courier_report",
+        idempotency_key="pass-report",
+    )
+    duplicate = world.investigate(
+        "再派一名使者确认。",
+        "shanhai-pass",
+        method="courier_report",
+        idempotency_key="duplicate-report",
+    )
+
+    assert invalid_question == {"status": "rejected", "code": "invalid_question"}
+    assert unknown_target == {"status": "rejected", "code": "unknown_investigation_target"}
+    assert accepted["status"] == "accepted"
+    assert accepted["definition_id"] == "shanhai-pass-report"
+    assert accepted["expected_result_tick"] == 2
+    assert duplicate == {"status": "rejected", "code": "investigation_already_active"}
+    assert engine.db.worldline_snapshot(run_id)["projection"]["investigations"] == []
+
+
+def test_investigation_yields_a_delayed_private_sourced_observation(app_config):
+    investigation_ids: list[str] = []
+
+    class InvestigationDriver:
+        source = "fixture"
+
+        def run_wake(self, actor_id, wake, perspective, world):
+            if actor_id == "dorgon" and wake["wake_type"] == "ORIENT":
+                assert perspective["available_investigations"][0]["target"]["id"] == "shanhai-pass"
+                started = world.investigate(
+                    "山海关现在由谁守持，是否已有公开通行安排？",
+                    "shanhai-pass",
+                    method="courier_report",
+                    idempotency_key="pass-report",
+                )
+                investigation_ids.append(str(started["investigation_id"]))
+            elif actor_id == "dorgon" and wake["wake_type"] == "INVESTIGATION_RESULT":
+                observation = next(
+                    item
+                    for item in perspective["knowledge"]
+                    if isinstance(item, dict)
+                    and item.get("investigation_id") == investigation_ids[0]
+                )
+                assert observation["reliability"] == "MEDIUM"
+                world.update_plan(
+                    "暂不把关口开放视为既成事实。",
+                    ["等待可验证的公开安排", "保留既有行军准备"],
+                    belief_updates=[
+                        {
+                            "subject": "shanhai-pass-report",
+                            "assessment": "关口公开安排尚未得到证实。",
+                            "confidence": "medium",
+                        }
+                    ],
+                    idempotency_key="reassess-pass-report",
+                )
+            return ActorTurnResult("保持有限行动。")
+
+    engine = CrisisRunEngine(app_config, actor_driver=InvestigationDriver())
+    run_id = engine.create(RunMode.WATCH)["run"]["id"]
+
+    assert engine.advance_one(run_id) is True
+    started_projection = engine.db.worldline_snapshot(run_id)["projection"]
+    investigation = started_projection["investigations"][0]
+    assert investigation["status"] == "IN_PROGRESS"
+    assert investigation["started_tick"] == 0
+    assert investigation["expected_result_tick"] == 2
+    assert "observation" not in investigation
+    active_view = engine.actor_perspective(run_id, "dorgon")
+    assert active_view["active_investigations"][0]["id"] == investigation["id"]
+    assert "shanhai-pass" in {item["id"] for item in active_view["known_entities"]}
+    assert "尚无可核验的公开安排" not in str(active_view["knowledge"])
+
+    result = engine.run_until_idle(run_id)
+    projection = engine.db.worldline_snapshot(run_id)["projection"]
+    completed = projection["investigations"][0]
+    observation = completed["observation"]
+
+    assert completed["status"] == "COMPLETED"
+    assert observation["investigation_id"] == investigation["id"]
+    assert observation["content"] == (
+        "山海关仍由吴三桂一方守持；关口是否会为关外军队开放，"
+        "尚无可核验的公开安排。来报只能说明可见态势，不能确认双方私下条件。"
+    )
+    assert observation["source"] == "沿线来人与关口往来文书的交叉转述"
+    assert observation["source_ids"] == ["qing-shilu-shizu-4", "mingji-beilue-20"]
+    assert observation["reliability"] == "MEDIUM"
+    assert observation["obtained_tick"] == 2
+    assert observation["related_assertions"] == ["c002", "c012"]
+    assert observation["id"] and observation["event_id"]
+    started = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "INVESTIGATION_STARTED"
+        and event["payload"]["investigation"]["id"] == investigation["id"]
+    )
+    completed_event = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "INVESTIGATION_COMPLETED"
+        and event["payload"]["investigation"]["id"] == investigation["id"]
+    )
+    observed = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == "OBSERVATION_OBTAINED"
+        and event["payload"]["observation"]["id"] == observation["id"]
+    )
+    assert completed_event["causal_parent_ids"] == [started["id"]]
+    assert observed["causal_parent_ids"] == [completed_event["id"]]
+    investigation_wakes = [
+        wake for wake in result["wakes"] if wake["wake_type"] == "INVESTIGATION_RESULT"
+    ]
+    assert [(wake["actor_id"], wake["tick"], wake["trigger_event_id"]) for wake in investigation_wakes] == [
+        ("dorgon", 2, observed["id"])
+    ]
+
+    dorgon_view = engine.actor_perspective(run_id, "dorgon")
+    private_observation = next(
+        item
+        for item in dorgon_view["knowledge"]
+        if isinstance(item, dict) and item.get("investigation_id") == investigation["id"]
+    )
+    assert private_observation["source"] == observation["source"]
+    assert private_observation["reliability"] == "MEDIUM"
+    assert dorgon_view["beliefs"]["shanhai-pass-report"]["assessment"] == "关口公开安排尚未得到证实。"
+    li_view = engine.actor_perspective(run_id, "li-zicheng")
+    assert observation["content"] not in str(li_view["knowledge"])
+    assert observation["event_id"] not in {
+        item.get("event_id") for item in li_view["knowledge"] if isinstance(item, dict)
+    }
 
 
 def test_operation_completion_changes_asset_state_then_enables_movement(app_config):

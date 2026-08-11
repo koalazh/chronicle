@@ -271,6 +271,56 @@ class WorldAffordanceSession:
             existing.id in definition.conflicts or definition.id in existing.conflicts
         )
 
+    def investigate(
+        self,
+        question: str,
+        target: str,
+        *,
+        method: str = "",
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "question": question.strip() if isinstance(question, str) else "",
+            "target": target.strip() if isinstance(target, str) else "",
+            "method": method.strip() if isinstance(method, str) else "",
+        }
+        if "investigate" not in self._actor().world_authority:
+            result = {"status": "rejected", "code": "authority_denied"}
+            return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
+        if not payload["question"] or len(payload["question"]) > 1200:
+            result = {"status": "rejected", "code": "invalid_question"}
+            return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
+        tick, projection = self._tick_and_projection()
+        request, code = self.service.pack.investigation_request(
+            self.identity.actor_id,
+            payload["target"],
+            payload["method"],
+            projection,
+            tick,
+        )
+        if request is None:
+            result = {"status": "rejected", "code": code}
+        else:
+            already_staged = any(
+                existing["tool_name"] == "investigate"
+                and existing["status"] == "PROPOSED"
+                and existing["payload"].get("target") == payload["target"]
+                and existing["result"].get("definition_id") == request.definition.id
+                for existing in self.service.db.crisis_wake_operations(self.identity.wake_id)
+            )
+            result = (
+                {"status": "rejected", "code": "investigation_already_active"}
+                if already_staged
+                else {
+                    "status": "accepted",
+                    "investigation_id": f"investigation-{uuid.uuid4().hex[:16]}",
+                    "definition_id": request.definition.id,
+                    "expected_result_tick": request.expected_result_tick,
+                    "method": request.definition.method,
+                }
+            )
+        return self._stage("investigate", payload, result, idempotency_key=idempotency_key)
+
     def update_plan(
         self,
         objective: str,
@@ -336,5 +386,5 @@ def world_tool_signatures() -> dict[str, inspect.Signature]:
 
     return {
         name: inspect.signature(getattr(WorldAffordanceSession, name))
-        for name in ("communicate", "operate", "update_plan", "schedule_revisit")
+        for name in ("communicate", "investigate", "operate", "update_plan", "schedule_revisit")
     }

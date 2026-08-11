@@ -15,7 +15,7 @@ class DecisionInterpretationError(ValueError):
 
 
 class DecisionOperation(StrictModel):
-    tool: Literal["communicate", "operate", "update_plan", "schedule_revisit"]
+    tool: Literal["communicate", "investigate", "operate", "update_plan", "schedule_revisit"]
     arguments: dict[str, Any]
 
 
@@ -67,6 +67,22 @@ class FixtureDecisionInterpreter:
                     arguments={"after_days": 2, "reason": "两日后重新比较两方回应"},
                 )
             )
+        if "调查" in text or "查问" in text or "打听" in text:
+            investigation = next(
+                iter(perspective.get("available_investigations", [])),
+                None,
+            )
+            if investigation:
+                operations.append(
+                    DecisionOperation(
+                        tool="investigate",
+                        arguments={
+                            "question": text.strip(),
+                            "target": investigation["target"]["id"],
+                            "method": investigation["method"],
+                        },
+                    )
+                )
         if "整备" in text or "准备兵力" in text:
             prepare = next(
                 (
@@ -124,10 +140,12 @@ class ModelDecisionInterpreter:
                 "content": (
                     "你是 Chronicle 的 Human Decision Interpreter，不是历史主体，也不决定世界结果。"
                     "把用户一句自然语言决定解释成 0 到 8 个 World Affordance 请求。"
-                    "只可使用 communicate、operate、update_plan、schedule_revisit。"
+                    "只可使用 communicate、investigate、operate、update_plan、schedule_revisit。"
                     "不得伪造 actor_id/run_id/wake_id，不得加入用户没有表达的不可逆选择。"
                     "返回严格 JSON：{summary:string,operations:[{tool:string,arguments:object}]}。"
                     f"communicate 参数 recipient/content；{recipient_rule}"
+                    "investigate 参数 question/target/method；"
+                    "target 与 method 必须从 private_perspective.available_investigations 选择；"
                     "operate 参数 operation_definition_id/targets/description；"
                     "operation_definition_id 与 targets 必须从 private_perspective.available_operations 选择；"
                     "update_plan 参数 objective/steps/rationale/belief_updates/reconsider_when；"

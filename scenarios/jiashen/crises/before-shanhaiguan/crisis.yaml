@@ -61,7 +61,7 @@ actors:
       political_control: fragile
       field_force: available-but-dispersed
       courier_network: active
-    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
     asset_ids: [shun-eastern-force]
 
   - id: wu-sangui
@@ -80,7 +80,7 @@ actors:
       pass_control: contested-but-held
       field_force: cohesive-limited
       couriers: scarce
-    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
     asset_ids: [wu-field-force, shanhai-pass]
 
   - id: dorgon
@@ -99,7 +99,7 @@ actors:
       command: expeditionary-army
       mobility: high
       artillery: following-column
-    world_authority: [communicate, update_plan, schedule_revisit, operate]
+    world_authority: [communicate, investigate, update_plan, schedule_revisit, operate]
     asset_ids: [qing-expedition-force]
 
 playable_actor_ids: [wu-sangui, li-zicheng, dorgon]
@@ -155,6 +155,22 @@ operations:
     visibility: PRIVATE
     interruptibility: false
     conflicts: [prepare_force, move_force]
+
+investigations:
+  - id: shanhai-pass-report
+    display_name: 查问山海关近况
+    description: 派出沿线使者核实关口控制与可见兵力态势；不能探知尚未公开的私下条件。
+    actor_ids: [li-zicheng, wu-sangui, dorgon]
+    target_ids: [shanhai-pass]
+    method: courier_report
+    duration_days: 2
+    visibility: PRIVATE
+    observation:
+      content: 山海关仍由吴三桂一方守持；关口是否会为关外军队开放，尚无可核验的公开安排。来报只能说明可见态势，不能确认双方私下条件。
+      source: 沿线来人与关口往来文书的交叉转述
+      source_ids: [qing-shilu-shizu-4, mingji-beilue-20]
+      reliability: MEDIUM
+      related_assertion_ids: [c002, c012]
 
 corridor:
   - {id: beijing, display_name: 北京, order: 0}

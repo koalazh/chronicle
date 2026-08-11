@@ -181,6 +181,7 @@ def test_doctor_probes_active_v3_profiles_and_identity_specific_world_mcp(
         "chronicle.doctor.probe_mcp_tools",
         lambda _config, _server: (
             "communicate",
+            "investigate",
             "operate",
             "schedule_revisit",
             "update_plan",

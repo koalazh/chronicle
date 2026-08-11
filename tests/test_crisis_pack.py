@@ -36,6 +36,7 @@ def _write_generic_crisis(root: Path, actor_ids: list[str]) -> None:
     crisis["anchors"] = []
     crisis["entities"] = []
     crisis["operations"] = []
+    crisis["investigations"] = []
     (root / "crisis.yaml").write_text(
         yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -158,6 +159,46 @@ def test_crisis_pack_rejects_an_operation_reference_to_a_missing_entity(tmp_path
     with pytest.raises(
         CrisisValidationError,
         match="operation prepare_force: unknown precondition subject missing-force",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_investigation_reference_to_a_missing_entity(tmp_path):
+    root = tmp_path / "invalid-investigation-reference"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["investigations"][0]["target_ids"] = ["missing-target"]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="investigation shanhai-pass-report: unknown targets missing-target",
+    ):
+        CrisisPack.load(root)
+
+
+def test_crisis_pack_rejects_an_investigation_without_known_provenance(tmp_path):
+    root = tmp_path / "invalid-investigation-provenance"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["investigations"][0]["observation"]["source_ids"] = ["missing-source"]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="investigation shanhai-pass-report: unknown observation sources missing-source",
     ):
         CrisisPack.load(root)
 

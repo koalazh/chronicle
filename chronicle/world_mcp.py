@@ -42,6 +42,23 @@ def communicate(
 
 
 @mcp.tool()
+def investigate(
+    question: str,
+    target: str,
+    idempotency_key: str,
+    method: str = "",
+) -> dict[str, Any]:
+    """Start a delayed, source-bounded investigation of one available target."""
+
+    return _world().investigate(
+        question,
+        target,
+        method=method,
+        idempotency_key=idempotency_key,
+    )
+
+
+@mcp.tool()
 def operate(
     operation_definition_id: str,
     targets: list[str],

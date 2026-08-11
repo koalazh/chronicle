@@ -398,6 +398,88 @@ def test_human_operation_persists_then_changes_a_later_available_action(app_conf
     assert moved["operations"][0]["status"] == "COMMITTED"
 
 
+def test_human_investigation_survives_restart_until_a_sourced_observation(app_config):
+    class InvestigationInterpreter:
+        source = "fixture"
+
+        def interpret(self, text, perspective):
+            assert perspective["available_investigations"] == [
+                {
+                    "id": "shanhai-pass-report",
+                    "display_name": "查问山海关近况",
+                    "description": "派出沿线使者核实关口控制与可见兵力态势；不能探知尚未公开的私下条件。",
+                    "target": {
+                        "id": "shanhai-pass",
+                        "type": "ASSET",
+                        "display_name": "山海关通道",
+                    },
+                    "method": "courier_report",
+                    "duration_days": 2,
+                    "expected_result_tick": 2,
+                }
+            ]
+            return InterpretedDecision(
+                summary="先核实关口可见态势。",
+                operations=[
+                    DecisionOperation(
+                        tool="investigate",
+                        arguments={
+                            "question": "山海关是否已有可核验的公开通行安排？",
+                            "target": "shanhai-pass",
+                            "method": "courier_report",
+                        },
+                    )
+                ],
+            )
+
+    engine = CrisisRunEngine(app_config)
+    run_id = engine.create(RunMode.TAKEOVER)["run"]["id"]
+
+    started = engine.submit_human_decision(
+        run_id,
+        "先查问山海关近况。",
+        interpreter=InvestigationInterpreter(),
+    )
+    operation = started["operations"][0]
+    assert operation["tool_name"] == "investigate"
+    assert operation["status"] == "COMMITTED"
+    assert operation["payload"]["target"] == "shanhai-pass"
+    assert operation["result"]["expected_result_tick"] == 2
+
+    restarted = CrisisRunEngine(app_config)
+    in_progress = restarted.product_perspective(run_id, "wu-sangui")
+    assert in_progress["active_investigations"][0]["status"] == "IN_PROGRESS"
+    assert in_progress["active_investigations"][0]["expected_result_tick"] == 2
+    assert not any(
+        isinstance(item, dict) and item.get("investigation_id")
+        for item in in_progress["knowledge"]
+    )
+
+    result = restarted.run_until_idle(run_id)
+    recovered = CrisisRunEngine(app_config).product_perspective(run_id, "wu-sangui")
+    observation = next(
+        item
+        for item in recovered["knowledge"]
+        if isinstance(item, dict) and item.get("investigation_id")
+    )
+
+    assert recovered["active_investigations"] == []
+    assert observation["source"] == "沿线来人与关口往来文书的交叉转述"
+    assert observation["source_ids"] == ["qing-shilu-shizu-4", "mingji-beilue-20"]
+    assert observation["reliability"] == "MEDIUM"
+    assert observation["related_assertions"] == ["c002", "c012"]
+    assert any(
+        item.get("source") == observation["source"] and item.get("reliability") == "MEDIUM"
+        for item in recovered["known_situation"]
+    )
+    assert any(
+        wake["actor_id"] == "wu-sangui"
+        and wake["wake_type"] == "INVESTIGATION_RESULT"
+        and wake["status"] == "COMPLETED"
+        for wake in result["wakes"]
+    )
+
+
 def test_invalid_later_human_operation_leaves_no_partial_world_commit(app_config):
     class InvalidInterpreter:
         source = "fixture"

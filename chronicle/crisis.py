@@ -57,6 +57,12 @@ class OperationVisibility(StrEnum):
     PUBLIC = "PUBLIC"
 
 
+class ObservationReliability(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
 class RoleCharter(StrictModel):
     who: str
     responsibility: list[str]
@@ -117,6 +123,27 @@ class CrisisOperationDefinition(StrictModel):
     visibility: OperationVisibility = OperationVisibility.PRIVATE
     interruptibility: bool = False
     conflicts: list[str] = Field(default_factory=list)
+
+
+class InvestigationObservationDefinition(StrictModel):
+    content: str
+    source: str
+    source_ids: list[str]
+    reliability: ObservationReliability
+    related_assertion_ids: list[str]
+
+
+class CrisisInvestigationDefinition(StrictModel):
+    id: str
+    display_name: str
+    description: str
+    actor_ids: list[str]
+    target_ids: list[str]
+    method: str
+    duration_days: int = Field(ge=1)
+    required_assets: list[str] = Field(default_factory=list)
+    visibility: OperationVisibility = OperationVisibility.PRIVATE
+    observation: InvestigationObservationDefinition
 
 
 class CorridorLocation(StrictModel):
@@ -196,6 +223,7 @@ class CrisisDefinition(StrictModel):
     anchors: list[HistoricalAnchor]
     entities: list[CrisisEntity] = Field(default_factory=list)
     operations: list[CrisisOperationDefinition] = Field(default_factory=list)
+    investigations: list[CrisisInvestigationDefinition] = Field(default_factory=list)
 
 
 class CrisisReference(StrictModel):
@@ -219,6 +247,13 @@ class OperationRequest:
     target_map: dict[str, str]
     expected_complete_tick: int
     input_state: dict[str, str]
+
+
+@dataclass(frozen=True)
+class InvestigationRequest:
+    definition: CrisisInvestigationDefinition
+    target_id: str
+    expected_result_tick: int
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -266,6 +301,12 @@ class CrisisPack:
     @property
     def operation_by_id(self) -> dict[str, CrisisOperationDefinition]:
         return {operation.id: operation for operation in self.crisis.operations}
+
+    @property
+    def investigation_by_id(self) -> dict[str, CrisisInvestigationDefinition]:
+        return {
+            investigation.id: investigation for investigation in self.crisis.investigations
+        }
 
     def route_days(self, start: str, end: str) -> int | None:
         queue: list[tuple[int, str]] = [(0, start)]
@@ -432,6 +473,96 @@ class CrisisPack:
             )
         return affordances
 
+    def investigation_request(
+        self,
+        actor_id: str,
+        target_id: str,
+        method: str,
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[InvestigationRequest | None, str]:
+        actor = self.actor_by_id.get(actor_id)
+        if actor is None:
+            return None, "investigation_unavailable"
+        if target_id not in self.entity_by_id:
+            return None, "unknown_investigation_target"
+        candidates = [
+            definition
+            for definition in self.crisis.investigations
+            if actor_id in definition.actor_ids and target_id in definition.target_ids
+        ]
+        if not candidates:
+            return None, "investigation_unavailable"
+        if method:
+            candidates = [definition for definition in candidates if definition.method == method]
+            if not candidates:
+                return None, "unsupported_investigation_method"
+        elif len(candidates) > 1:
+            return None, "investigation_method_required"
+        if len(candidates) != 1:
+            return None, "investigation_unavailable"
+        definition = candidates[0]
+        if any(asset_id not in actor.asset_ids for asset_id in definition.required_assets):
+            return None, "investigation_asset_unavailable"
+        if any(
+            active.get("status") in {"PLANNED", "IN_PROGRESS"}
+            and active.get("actor_id") == actor_id
+            and active.get("definition_id") == definition.id
+            and active.get("target_id") == target_id
+            for active in projection.get("investigations", [])
+        ):
+            return None, "investigation_already_active"
+        expected_result_tick = tick + definition.duration_days
+        if expected_result_tick >= self.crisis.simulation_boundary.maximum_tick:
+            return None, "crosses_simulation_boundary"
+        return (
+            InvestigationRequest(
+                definition=definition,
+                target_id=target_id,
+                expected_result_tick=expected_result_tick,
+            ),
+            "",
+        )
+
+    def investigation_affordances(
+        self,
+        actor_id: str,
+        projection: dict[str, Any],
+        tick: int,
+    ) -> list[dict[str, Any]]:
+        entities = self.entity_by_id
+        affordances: list[dict[str, Any]] = []
+        for definition in self.crisis.investigations:
+            if actor_id not in definition.actor_ids:
+                continue
+            for target_id in definition.target_ids:
+                request, _ = self.investigation_request(
+                    actor_id,
+                    target_id,
+                    definition.method,
+                    projection,
+                    tick,
+                )
+                if request is None:
+                    continue
+                target = entities[target_id]
+                affordances.append(
+                    {
+                        "id": definition.id,
+                        "display_name": definition.display_name,
+                        "description": definition.description,
+                        "target": {
+                            "id": target.id,
+                            "type": target.type.value,
+                            "display_name": target.display_name,
+                        },
+                        "method": definition.method,
+                        "duration_days": definition.duration_days,
+                        "expected_result_tick": request.expected_result_tick,
+                    }
+                )
+        return affordances
+
     @property
     def content_hash(self) -> str:
         payload = {
@@ -593,6 +724,70 @@ class CrisisPack:
                     f"operation {operation.id}: unknown conflicts {', '.join(sorted(unknown_conflicts))}"
                 )
 
+        investigation_ids = [investigation.id for investigation in self.crisis.investigations]
+        if len(investigation_ids) != len(set(investigation_ids)):
+            errors.append("investigations: ids must be unique")
+        seen_investigation_capabilities: set[tuple[str, str, str]] = set()
+        actors_by_id = self.actor_by_id
+        for investigation in self.crisis.investigations:
+            if not investigation.actor_ids or len(investigation.actor_ids) != len(
+                set(investigation.actor_ids)
+            ):
+                errors.append(f"investigation {investigation.id}: actor ids must be unique and nonempty")
+            unknown_actors = set(investigation.actor_ids) - set(actor_ids)
+            if unknown_actors:
+                errors.append(
+                    "investigation "
+                    f"{investigation.id}: unknown actors {', '.join(sorted(unknown_actors))}"
+                )
+            if not investigation.method:
+                errors.append(f"investigation {investigation.id}: method is required")
+            if not investigation.target_ids or len(investigation.target_ids) != len(
+                set(investigation.target_ids)
+            ):
+                errors.append(f"investigation {investigation.id}: target ids must be unique and nonempty")
+            unknown_targets = set(investigation.target_ids) - known_entities
+            if unknown_targets:
+                errors.append(
+                    "investigation "
+                    f"{investigation.id}: unknown targets {', '.join(sorted(unknown_targets))}"
+                )
+            for actor_id in investigation.actor_ids:
+                actor = actors_by_id.get(actor_id)
+                if actor is None:
+                    continue
+                missing_assets = set(investigation.required_assets) - set(
+                    actor.asset_ids
+                )
+                if missing_assets:
+                    errors.append(
+                        "investigation "
+                        f"{investigation.id}: {actor_id} lacks assets {', '.join(sorted(missing_assets))}"
+                    )
+            observation = investigation.observation
+            if not observation.content or not observation.source:
+                errors.append(f"investigation {investigation.id}: observation content and source are required")
+            unknown_sources = set(observation.source_ids) - source_ids
+            if not observation.source_ids or unknown_sources:
+                errors.append(
+                    "investigation "
+                    f"{investigation.id}: unknown observation sources {', '.join(sorted(unknown_sources))}"
+                )
+            unknown_assertions = set(observation.related_assertion_ids) - known_assertions
+            if not observation.related_assertion_ids or unknown_assertions:
+                errors.append(
+                    "investigation "
+                    f"{investigation.id}: unknown related assertions {', '.join(sorted(unknown_assertions))}"
+                )
+            for actor_id in investigation.actor_ids:
+                for target_id in investigation.target_ids:
+                    capability = (actor_id, target_id, investigation.method)
+                    if capability in seen_investigation_capabilities:
+                        errors.append(
+                            "investigations: actor/target/method capabilities must be unambiguous"
+                        )
+                    seen_investigation_capabilities.add(capability)
+
         checkpoint = self.crisis.checkpoint
         if self.crisis.simulation_boundary.maximum_tick > checkpoint.safety_horizon_days:
             errors.append("boundary: maximum tick exceeds the safety horizon")
@@ -646,6 +841,9 @@ class CrisisPack:
             "playable_actor_ids": list(self.crisis.playable_actor_ids),
             "source_count": len(self.sources),
             "assertion_count": len(self.assertions),
+            "entity_count": len(self.crisis.entities),
+            "operation_count": len(self.crisis.operations),
+            "investigation_count": len(self.crisis.investigations),
             "horizon_days": self.crisis.checkpoint.safety_horizon_days,
             "maximum_tick": self.crisis.simulation_boundary.maximum_tick,
         }

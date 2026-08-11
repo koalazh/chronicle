@@ -66,7 +66,13 @@ def test_actor_distribution_declines_recent_builtin_toolset():
 async def test_world_mcp_exposes_only_identity_free_crisis_tools():
     tools = {tool.name: tool.inputSchema for tool in await mcp.list_tools()}
 
-    assert set(tools) == {"communicate", "operate", "update_plan", "schedule_revisit"}
+    assert set(tools) == {
+        "communicate",
+        "investigate",
+        "operate",
+        "update_plan",
+        "schedule_revisit",
+    }
     for schema in tools.values():
         assert not {"actor_id", "profile", "run_id", "wake_id"}.intersection(
             schema.get("properties", {})

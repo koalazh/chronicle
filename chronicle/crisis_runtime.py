@@ -52,6 +52,7 @@ class CrisisWakeType(StrEnum):
     ORIENT = "ORIENT"
     MESSAGE = "MESSAGE"
     OBSERVATION = "OBSERVATION"
+    INVESTIGATION_RESULT = "INVESTIGATION_RESULT"
     OPERATION_RESULT = "OPERATION_RESULT"
     REVISIT_DUE = "REVISIT_DUE"
     REFLECTION = "REFLECTION"
@@ -327,6 +328,8 @@ class HermesActorDriver:
                     "调用参数：update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)；"
                     "schedule_revisit(after_days, reason, idempotency_key)；"
                     "communicate(recipient, content, idempotency_key)；"
+                    "investigate(question, target, method, idempotency_key)，"
+                    "可用调查及其 target/method 已在私有视野 available_investigations 中列出；"
                     "operate(operation_definition_id, targets, description, idempotency_key)，"
                     "可用 Operation 及其 target 已在私有视野 available_operations 中列出。"
                     "每个 idempotency_key 在本次 Wake 内唯一。"
@@ -345,6 +348,7 @@ class HermesActorDriver:
                         "private_perspective": perspective,
                         "available_world_tools": [
                             "communicate",
+                            "investigate",
                             "operate",
                             "update_plan",
                             "schedule_revisit",
@@ -469,6 +473,7 @@ class CrisisRunEngine:
                 for entity in self.pack.crisis.entities
             },
             "operations": [],
+            "investigations": [],
         }
         events = [
             self._event(
@@ -955,6 +960,8 @@ class CrisisRunEngine:
         values["idempotency_key"] = idempotency_key
         if tool == "communicate":
             return world.communicate(**values)
+        if tool == "investigate":
+            return world.investigate(**values)
         if tool == "operate":
             return world.operate(**values)
         if tool == "update_plan":
@@ -1150,6 +1157,9 @@ class CrisisRunEngine:
         if self._operations_due(projection, next_tick):
             self._commit_operations(run_id, next_tick, projection)
             return True
+        if self._investigations_due(projection, next_tick):
+            self._commit_investigations(run_id, next_tick, projection)
+            return True
         if self._movements_due(projection, next_tick):
             self._commit_movements(run_id, next_tick, projection)
             return True
@@ -1258,6 +1268,11 @@ class CrisisRunEngine:
             int(operation["expected_complete_tick"])
             for operation in snapshot["projection"].get("operations", [])
             if operation["status"] == "IN_PROGRESS"
+        )
+        candidates.extend(
+            int(investigation["expected_result_tick"])
+            for investigation in snapshot["projection"].get("investigations", [])
+            if investigation["status"] == "IN_PROGRESS"
         )
         candidates.extend(
             int(movement["arrival_tick"])
@@ -1428,6 +1443,116 @@ class CrisisRunEngine:
                 run_id,
                 actor_id,
                 CrisisWakeType.OPERATION_RESULT,
+                tick,
+                trigger_event_id=trigger_event_id,
+            )
+
+    @staticmethod
+    def _investigations_due(projection: dict[str, Any], tick: int) -> list[dict[str, Any]]:
+        return [
+            investigation
+            for investigation in projection.get("investigations", [])
+            if investigation["status"] == "IN_PROGRESS"
+            and int(investigation["expected_result_tick"]) == tick
+        ]
+
+    def _investigation_visible_actor_ids(self, investigation: dict[str, Any]) -> list[str]:
+        definition = self.pack.investigation_by_id[str(investigation["definition_id"])]
+        if definition.visibility.value == "PUBLIC":
+            return sorted(self.pack.actor_by_id)
+        return [str(investigation["actor_id"])]
+
+    def _commit_investigations(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+    ) -> None:
+        due = self._investigations_due(projection, tick)
+        projection["tick"] = tick
+        events: list[dict[str, Any]] = []
+        knowledge_by_actor: dict[str, list[Any]] = {}
+        queued: set[tuple[str, str]] = set()
+        for investigation in due:
+            definition = self.pack.investigation_by_id[str(investigation["definition_id"])]
+            visible_actor_ids = self._investigation_visible_actor_ids(investigation)
+            investigation["status"] = "COMPLETED"
+            completed = self._event(
+                run_id,
+                tick,
+                "INVESTIGATION_COMPLETED",
+                {"investigation": investigation, "visibility": visible_actor_ids},
+                seat_id=investigation["actor_id"],
+                causal_parent_ids=[investigation["start_event_id"]]
+                if investigation.get("start_event_id")
+                else [],
+            )
+            investigation["completion_event_id"] = completed["id"]
+            events.append(completed)
+            observation = {
+                "id": f"observation-{uuid.uuid4().hex[:16]}",
+                "investigation_id": investigation["id"],
+                "content": definition.observation.content,
+                "source": definition.observation.source,
+                "source_ids": list(definition.observation.source_ids),
+                "reliability": definition.observation.reliability.value,
+                "obtained_tick": tick,
+                "related_assertions": list(definition.observation.related_assertion_ids),
+            }
+            investigation["observation"] = observation
+            observed = self._event(
+                run_id,
+                tick,
+                "OBSERVATION_OBTAINED",
+                {"observation": observation, "visibility": visible_actor_ids},
+                seat_id=investigation["actor_id"],
+                causal_parent_ids=[completed["id"]],
+            )
+            observation["event_id"] = observed["id"]
+            events.append(observed)
+            for actor_id in visible_actor_ids:
+                lifetime = self.db.worldline_lifetime(run_id, actor_id)
+                if lifetime is None:
+                    raise CrisisRunError("investigation observer life state is missing")
+                knowledge = knowledge_by_actor.setdefault(actor_id, list(lifetime["knowledge"]))
+                knowledge.append(
+                    {
+                        "kind": "observation",
+                        "event_id": observed["id"],
+                        "observation": observation["content"],
+                        "source": observation["source"],
+                        "source_ids": observation["source_ids"],
+                        "reliability": observation["reliability"],
+                        "obtained_tick": tick,
+                        "related_assertions": observation["related_assertions"],
+                        "investigation_id": investigation["id"],
+                    }
+                )
+                queued.add((actor_id, observed["id"]))
+        updates = [
+            {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+                "last_perspective_json": json.dumps(
+                    self._perspective_from(run_id, actor_id, projection, knowledge=knowledge),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+            for actor_id, knowledge in knowledge_by_actor.items()
+        ]
+        self.db.commit_worldline_moment(
+            run_id,
+            events,
+            current_tick=tick,
+            lifetime_updates=updates,
+            snapshot=projection,
+        )
+        for actor_id, trigger_event_id in sorted(queued):
+            self._queue_wake(
+                run_id,
+                actor_id,
+                CrisisWakeType.INVESTIGATION_RESULT,
                 tick,
                 trigger_event_id=trigger_event_id,
             )
@@ -2109,6 +2234,16 @@ class CrisisRunEngine:
             message["dispatch_event_id"] = dispatch["id"]
             events.append(dispatch)
             return dispatch["id"]
+        elif tool_name == "investigate":
+            return self._start_investigation(
+                run_id,
+                tick,
+                projection,
+                wake,
+                operation,
+                events,
+                causal_parent_id=causal_parent_id,
+            )
         elif tool_name == "operate":
             return self._start_operation(
                 run_id,
@@ -2120,6 +2255,63 @@ class CrisisRunEngine:
                 causal_parent_id=causal_parent_id,
             )
         return causal_parent_id
+
+    def _start_investigation(
+        self,
+        run_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        *,
+        causal_parent_id: str,
+    ) -> str:
+        actor_id = str(wake["actor_id"])
+        payload = operation["payload"]
+        result = operation["result"]
+        request, code = self.pack.investigation_request(
+            actor_id,
+            str(payload["target"]),
+            str(payload.get("method", "")),
+            projection,
+            tick,
+        )
+        if request is None:
+            raise CrisisRunError(f"accepted Investigation became unavailable: {code}")
+        if result["definition_id"] != request.definition.id:
+            raise CrisisRunError("accepted Investigation definition changed before commit")
+        if int(result["expected_result_tick"]) != request.expected_result_tick:
+            raise CrisisRunError("accepted Investigation result time changed before commit")
+        visible_actor_ids = (
+            sorted(self.pack.actor_by_id)
+            if request.definition.visibility.value == "PUBLIC"
+            else [actor_id]
+        )
+        started = {
+            "id": result["investigation_id"],
+            "definition_id": request.definition.id,
+            "actor_id": actor_id,
+            "question": payload["question"],
+            "target_id": request.target_id,
+            "method": request.definition.method,
+            "started_tick": tick,
+            "expected_result_tick": request.expected_result_tick,
+            "status": "IN_PROGRESS",
+            "visibility": request.definition.visibility.value,
+        }
+        projection.setdefault("investigations", []).append(started)
+        started_event = self._event(
+            run_id,
+            tick,
+            "INVESTIGATION_STARTED",
+            {"wake_id": wake["id"], "investigation": started, "visibility": visible_actor_ids},
+            seat_id=actor_id,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+        )
+        started["start_event_id"] = started_event["id"]
+        events.append(started_event)
+        return started_event["id"]
 
     def _start_operation(
         self,
@@ -2319,10 +2511,45 @@ class CrisisRunEngine:
             if operation.get("actor_id") == actor_id
             and operation.get("status") in {"PLANNED", "IN_PROGRESS"}
         ]
+        active_investigations = [
+            investigation
+            for investigation in projection.get("investigations", [])
+            if investigation.get("actor_id") == actor_id
+            and investigation.get("status") in {"PLANNED", "IN_PROGRESS"}
+        ]
+        available_investigations = self.pack.investigation_affordances(
+            actor_id,
+            projection,
+            int(projection["tick"]),
+        )
+        known_entity_ids = {item["id"] for item in known_entities}
+        investigation_target_ids = {
+            affordance["target"]["id"] for affordance in available_investigations
+        }
+        investigation_target_ids.update(
+            str(investigation["target_id"]) for investigation in active_investigations
+        )
+        for target_id in sorted(investigation_target_ids):
+            target = projected_entities.get(target_id)
+            if target is None or target_id in known_entity_ids:
+                continue
+            known_entities.append(
+                {
+                    "id": target_id,
+                    "type": target["type"],
+                    "display_name": target["display_name"],
+                    "state": target["state"],
+                }
+            )
+            known_entity_ids.add(target_id)
         constraints = [{"kind": "authority", "description": "只能使用当前职权内的行动。"}]
         if self.pack.crisis.routes:
             constraints.append(
                 {"kind": "travel_time", "description": "通信与行动需要沿已知路线或时程等待。"}
+            )
+        if available_investigations:
+            constraints.append(
+                {"kind": "information", "description": "调查会在模拟时间后带回带来源和可靠性的观察。"}
             )
         return {
             "contactable_actors": contactable_actors,
@@ -2332,7 +2559,8 @@ class CrisisRunEngine:
                 actor_id, projection, int(projection["tick"])
             ),
             "active_operations": active_operations,
-            "active_investigations": [],
+            "available_investigations": available_investigations,
+            "active_investigations": active_investigations,
             "active_offers": [],
             "active_agreements": [],
             "current_revisits": revisits,
@@ -2416,6 +2644,7 @@ class CrisisRunEngine:
             "messages": list(projection.get("messages", [])),
             "entities": list(projection.get("entities", {}).values()),
             "operations": list(projection.get("operations", [])),
+            "investigations": list(projection.get("investigations", [])),
             "boundary": self.pack.crisis.simulation_boundary.model_dump(mode="json"),
         }
 
@@ -2449,6 +2678,16 @@ class CrisisRunEngine:
                     result["reason"] = "收件人无法识别"
                 else:
                     result["reason"] = "这项请求未执行"
+            elif operation["tool_name"] == "investigate":
+                target_id = str(operation["payload"].get("target") or "")
+                target = self.pack.entity_by_id.get(target_id)
+                result["target"] = target.display_name if target else "未识别目标"
+                if operation["status"] == "COMMITTED":
+                    result["expected_result_tick"] = operation["result"].get(
+                        "expected_result_tick"
+                    )
+                else:
+                    result["reason"] = "这项调查未能开始"
             results.append(result)
         return results
 
@@ -2478,7 +2717,12 @@ class CrisisRunEngine:
                 )
             elif isinstance(item, dict) and item.get("kind") == "observation":
                 known_situation.append(
-                    {"text": str(item["observation"]), "evidence_status": "observed"}
+                    {
+                        "text": str(item["observation"]),
+                        "evidence_status": "observed",
+                        "source": str(item.get("source", "")),
+                        "reliability": str(item.get("reliability", "")),
+                    }
                 )
         decisions = []
         for event in self.db.worldline_events(run_id):
@@ -2516,6 +2760,7 @@ class CrisisRunEngine:
             "own_assets": perspective["own_assets"],
             "available_operations": perspective["available_operations"],
             "active_operations": perspective["active_operations"],
+            "available_investigations": perspective["available_investigations"],
             "active_investigations": perspective["active_investigations"],
             "active_offers": perspective["active_offers"],
             "active_agreements": perspective["active_agreements"],
@@ -2593,6 +2838,9 @@ class CrisisRunEngine:
             "REVISIT_FULFILLED": "一次重新判断已经发生",
             "COMMITMENT_SCHEDULED": "有人决定稍后再作判断",
             "COMMITMENT_FULFILLED": "一次约定的复查已经发生",
+            "INVESTIGATION_STARTED": "一项调查已经开始",
+            "INVESTIGATION_COMPLETED": "一项调查已经完成",
+            "OBSERVATION_OBTAINED": "一条调查观察已经抵达",
             "OPERATION_STARTED": "一项行动已经开始",
             "OPERATION_COMPLETED": "一项行动已经完成",
             "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
@@ -2669,6 +2917,19 @@ class CrisisRunEngine:
             return f"{sender} → {recipient}：{payload['content']}"
         if event["event_type"] == "PLAN_UPDATED":
             return str(payload["plan"]["objective"])
+        if event["event_type"] in {"INVESTIGATION_STARTED", "INVESTIGATION_COMPLETED"}:
+            investigation = payload["investigation"]
+            definition = self.pack.investigation_by_id.get(str(investigation["definition_id"]))
+            if definition is None:
+                return str(investigation.get("question", ""))
+            question = str(investigation.get("question", ""))
+            return f"{definition.display_name}：{question}" if question else definition.display_name
+        if event["event_type"] == "OBSERVATION_OBTAINED":
+            observation = payload["observation"]
+            return (
+                f"{observation['content']}"
+                f"（来源：{observation['source']}；可靠性：{observation['reliability']}）"
+            )
         if event["event_type"] in {"OPERATION_STARTED", "OPERATION_COMPLETED"}:
             operation = payload["operation"]
             definition = self.pack.operation_by_id.get(str(operation["definition_id"]))
@@ -2705,6 +2966,16 @@ class CrisisRunEngine:
                 "message_id": event["payload"]["id"],
                 "sender": event["payload"]["sender"],
                 "content": event["payload"]["content"],
+            }
+        if event["event_type"] == "OBSERVATION_OBTAINED":
+            observation = event["payload"]["observation"]
+            return {
+                "type": wake["wake_type"],
+                "observation_id": observation["id"],
+                "investigation_id": observation["investigation_id"],
+                "content": observation["content"],
+                "source": observation["source"],
+                "reliability": observation["reliability"],
             }
         return {"type": wake["wake_type"], "event_id": event["id"]}
 

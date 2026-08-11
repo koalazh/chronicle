@@ -37,7 +37,7 @@ Chronicle 的核心原则是：Host 负责现实，主体负责选择。没有�
 
 | 层 | 保存什么 | 谁能更新 |
 | --- | --- | --- |
-| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Operation、移动和世界效果 | Host 的确定性提交路径 |
+| Truth / Projection | 模拟日、位置、路线、消息、Entity/Asset 状态、Operation、Investigation、Observation、移动和世界效果 | Host 的确定性提交路径 |
 | Knowledge | 该主体已经收到的断言、信件和观察 | 送达与观察规则 |
 | Belief | 该主体对不确定事情的判断 | 主体通过 `update_plan` 提出 |
 | Plan / Revisit | 该主体准备做什么、何时重新判断 | 主体通过 `update_plan`、`schedule_revisit` 提出 |
@@ -54,11 +54,11 @@ Watch 的 controller map 将全部 Decision Actor 设为 Agent；Takeover 只将
 
 ### 推进
 
-Scheduler 只寻找已经存在的下一件事：Operation 完成、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
+Scheduler 只寻找已经存在的下一件事：Operation 完成、Investigation 结果、移动抵达、消息抵达、观察、Revisit 到期或 Reflection。没有 trigger 不创建 Wake，不使用墙钟 cron、heartbeat 或每日轮询。
 
 `ORIENT` 仍必须留下初始 Plan，但不会因为计划包含等待而强制安排 Revisit。Plan 只在目标、方法或重新判断条件确有变化时写入 `PLAN_UPDATED`；相同内容的重述只留下不进入主产品的 `PLAN_REAFFIRMED` Ledger 记录。Reflection 不再由 Plan 改写自动触发，只在后续的重大世界后果需要长期理解时排入。
 
-一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Operation、移动和观察排入未来时刻。
+一个 logical moment 的顺序固定为：应用本时刻到期的确定性效果（包括 Operation completion 与 Investigation result）；冻结所有主体合法的 Perspective；不同主体并发运行、同一主体串行运行；每个 Wake 最多提出 8 个 World tool 请求；所有 Wake 返回后统一校验和提交；本时刻产生的消息、Operation、Investigation、移动和观察排入未来时刻。
 
 因此模型返回顺序不能改变世界语义；拒绝、等待、沉默和 no-op 都是合法结果；消息不能在同 tick 递归唤醒收件人。
 
@@ -78,7 +78,7 @@ GatewayController 不是 daemon。它只是 `chronicle start` 管理的一个项
 
 ## Perspective 与隐私
 
-Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、自己拥有的 asset、进行中的自身 Operation、当前 Revisit、已知实体与可见世界约束；尚未实现的 Investigation、Offer 和 Agreement 在此阶段以空集合显式表示。
+Host 为每个主体构造自己的 Perspective，包含当前模拟日、自己的位置、已送达 Knowledge、私有 Belief、Plan、Revisit、Resource、Authority 及动态 affordance manifest。manifest 只列出该主体可联系的 Actor、可用 Crisis-defined Operation 和 target、可用 Investigation 和 target/method、自己拥有的 asset、进行中的自身 Operation/Investigation、当前 Revisit、已知实体与可见世界约束；尚未实现的 Offer 和 Agreement 仍以空集合显式表示。
 
 人物 Perspective 不包含世界全局投影、尚未送达的消息、其他主体的私有计划/Belief/Memory/Wake、checkpoint 之后的真实历史行动或战后结局。Takeover 活动期间，后端拒绝世界全局和其他主体 perspective；前端隐藏不构成权限控制。
 
@@ -89,6 +89,7 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 | 工具 | 主体表达什么 | Host 至少校验什么 |
 | --- | --- | --- |
 | `communicate(recipient, content, idempotency_key)` | 给另一主体发送一封信 | 收件人、内容、路线和抵达日 |
+| `investigate(question, target, method, idempotency_key)` | 对当前可用对象启动一项受来源限制的调查 | authority、目标、方法、所需 asset、时程、边界和同一调查是否已经进行 |
 | `operate(operation_definition_id, targets, description, idempotency_key)` | 启动 Crisis Pack 声明、需要模拟时间的行动 | authority、目标类型/归属、Asset 状态、冲突、路线、时程、边界和现实前提 |
 | `update_plan(objective, steps, rationale, belief_updates, reconsider_when, idempotency_key)` | 更新目标、方法、重新判断条件和必要的 Belief | 内容完整性、信念格式、语义 no-op 和幂等键 |
 | `schedule_revisit(after_days, reason, idempotency_key)` | 在未来模拟日重新判断 | 正数天数、原因、边界和幂等键 |
@@ -96,6 +97,8 @@ Hermes Agent 与 Human Decision Interpreter 共用同一组四种请求：
 工具参数不接受 actor、run 或 wake 身份。Agent 身份来自 Profile 私有 token，Human 身份来自当前控制者。调用先落为 `PROPOSED` 或 `REJECTED`，Wake 成功时才与 Ledger、Projection、Life State 一起提交；重复幂等键返回第一次结果，超过 8 次被拒绝。
 
 已接受的 `operate` 会写入 `OPERATION_STARTED` 与必要的起始 Asset state effect，随后以 `IN_PROGRESS` 留在 Projection，直到确定的 complete tick 才写入 `OPERATION_COMPLETED`、完成 effect 和对可见主体的 Observation/Wake。第一轮山海关 Operation 只实现启动与完成；取消和中断会在对应 Crisis 真实需要这些后果时再进入同一 lifecycle，而不是把 `interruptibility` 伪装成已经可用的按钮。
+
+已接受的 `investigate` 会写入 `INVESTIGATION_STARTED` 并以 `IN_PROGRESS` 留在 Projection；到达 Crisis Pack 固定的 result tick 后，Host 写入 `INVESTIGATION_COMPLETED` 与 `OBSERVATION_OBTAINED`，再把 Observation 交给可见主体并排入 `INVESTIGATION_RESULT` Wake。Observation 记录内容、来源、source IDs、可靠性、获得时刻与相关断言；它可以是部分或相互冲突的证据，绝不是即时的 `truth_lookup()`。当前山海关报告为私有观察，其他 Actor 不会因 Ledger 中存在该记录而自动得知。
 
 ## Hermes 边界
 

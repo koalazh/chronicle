@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from .compatibility import evaluate_historical_compatibility
 from .config import AppConfig
 from .crisis import (
     AgreementStatus,
@@ -1747,7 +1748,9 @@ class CrisisRunEngine:
                 for operation in projection.get("operations", [])
                 if operation.get("status") == "COMPLETED"
             ],
-            "historical_compatibility": [],
+            "historical_compatibility": evaluate_historical_compatibility(
+                self.pack, projection
+            ),
             "material_causal_roots": [str(resolution.get("event_id") or "")],
         }
 

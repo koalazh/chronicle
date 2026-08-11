@@ -263,15 +263,45 @@ anchors:
     policy: REFERENCE_ONLY
     assertion_ids: [c005]
     actor_ids: [dorgon]
+    compatibility_preconditions:
+      - id: dorgon-future-decision
+        kind: UNMODELED
+        description: 这封后续回书仍取决于多尔衮在本局之后的自主政治判断；模型不把该未来选择当作世界事实。
   - id: historical-li-eastward-march
     title: 李自成后来亲率军队东进
     tick: 6
     policy: REFERENCE_ONLY
     assertion_ids: [c006]
     actor_ids: [li-zicheng]
+    compatibility_preconditions:
+      - id: shun-force-remains-usable
+        kind: ENTITY_STATE
+        subject: shun-eastern-force
+        satisfied_values: [READY, MOVING, COMMITTED]
+        contradicted_values: [DEGRADED, WITHDRAWN]
+        description: 后来的东进至少需要大顺东向兵力没有在当前危局中失去可投入状态。
   - id: historical-shanhai-battle
     title: 山海关大规模交战
     tick: 9
     policy: REFERENCE_ONLY
     assertion_ids: [c006, c014]
     actor_ids: [li-zicheng, wu-sangui, dorgon]
+    compatibility_preconditions:
+      - id: qing-pass-access-remains-possible
+        kind: ENTITY_STATE
+        subject: shanhai-pass
+        satisfied_values: [OPEN, QING_CONTROL]
+        contradicted_values: [CLOSED]
+        description: 后来的关外主力进入关口接触空间至少需要山海关通道没有形成关闭状态。
+      - id: dorgon-reaches-the-pass
+        kind: ACTOR_POSITION
+        subject: dorgon
+        satisfied_values: [shanhaiguan]
+        contradicted_values: []
+        description: 后来的会合至少需要多尔衮一方已经进入山海关接触空间。
+      - id: shun-force-remains-committed
+        kind: ENTITY_STATE
+        subject: shun-eastern-force
+        satisfied_values: [COMMITTED]
+        contradicted_values: [DEGRADED, WITHDRAWN]
+        description: 后来的直接交战至少需要大顺东向兵力仍能在关口形成现实投入。

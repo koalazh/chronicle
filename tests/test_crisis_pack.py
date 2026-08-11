@@ -148,6 +148,34 @@ def test_crisis_pack_requires_a_registered_resolution_contract(tmp_path):
         CrisisPack.load(root)
 
 
+def test_crisis_pack_validates_explicit_historical_compatibility_references(tmp_path):
+    root = tmp_path / "invalid-compatibility-reference"
+    root.mkdir()
+    crisis = yaml.safe_load((CRISIS_ROOT / "crisis.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load((CRISIS_ROOT / "sources.yaml").read_text(encoding="utf-8"))
+    crisis["anchors"][0]["compatibility_preconditions"] = [
+        {
+            "id": "missing-entity",
+            "kind": "ENTITY_STATE",
+            "subject": "missing-entity",
+            "satisfied_values": ["OPEN"],
+            "description": "引用一个不存在的世界对象。",
+        }
+    ]
+    (root / "crisis.yaml").write_text(
+        yaml.safe_dump(crisis, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (root / "sources.yaml").write_text(
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        CrisisValidationError,
+        match="compatibility precondition missing-entity references unknown entity missing-entity",
+    ):
+        CrisisPack.load(root)
+
+
 def test_crisis_pack_rejects_a_playable_actor_that_is_not_in_the_cast(tmp_path):
     root = tmp_path / "invalid-playable"
     _write_generic_crisis(root, ["actor-a", "actor-b"])

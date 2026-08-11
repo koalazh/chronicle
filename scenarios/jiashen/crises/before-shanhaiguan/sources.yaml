@@ -112,12 +112,12 @@ assertions:
     normalized_evidence: 相关记载对各方兵数差异显著，因此 V3 第一场只保留可用、有限、分散等序数状态。
     notes: resource abstraction
   - id: c014
-    claim: 当本局需要裁定山海关大规模直接交战胜负时必须停止，模拟日上限只是一道安全边界。
-    provenance: scenario_assumption
+    claim: 多种材料均记山海关一带后来形成大规模直接交战，但对兵数、部署与细节先后并不一致。
+    provenance: historical
     evidence_status: corroborated
     source_ids: [qing-shilu-shizu-4, mingji-beilue-20, qingshi-gao-474, mingshi-309]
-    normalized_evidence: 历史材料明确后续进入大型交战，而本场危局的产品范围不含战役结算。
-    notes: product simulation boundary
+    normalized_evidence: 后来的直接交战只能作为 reference event；当前世界是否仍保留其必要前提，必须由显式模型事实检查。
+    notes: reference-only direct-conflict event; no historical result injection
   - id: c015
     claim: 本局把危局拖延后京东至山海关的新一轮通行窗口收紧，建模为不属于任一 Decision Actor 的外部压力。
     provenance: scenario_assumption

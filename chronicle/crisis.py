@@ -27,6 +27,12 @@ class HistoricalPolicy(StrEnum):
     REFERENCE_ONLY = "REFERENCE_ONLY"
 
 
+class HistoricalCompatibilityPreconditionKind(StrEnum):
+    ENTITY_STATE = "ENTITY_STATE"
+    ACTOR_POSITION = "ACTOR_POSITION"
+    UNMODELED = "UNMODELED"
+
+
 class CrisisSurfaceKind(StrEnum):
     SPATIAL = "SPATIAL"
     POLITICAL = "POLITICAL"
@@ -256,6 +262,15 @@ class CrisisCheckpoint(StrictModel):
     in_transit: list[InTransitMessage]
 
 
+class HistoricalCompatibilityPrecondition(StrictModel):
+    id: str
+    kind: HistoricalCompatibilityPreconditionKind
+    description: str
+    subject: str = ""
+    satisfied_values: list[str] = Field(default_factory=list)
+    contradicted_values: list[str] = Field(default_factory=list)
+
+
 class HistoricalAnchor(StrictModel):
     id: str
     title: str
@@ -264,6 +279,9 @@ class HistoricalAnchor(StrictModel):
     assertion_ids: list[str]
     actor_ids: list[str] = Field(default_factory=list)
     preconditions: list[str] = Field(default_factory=list)
+    compatibility_preconditions: list[HistoricalCompatibilityPrecondition] = Field(
+        default_factory=list
+    )
 
 
 class SimulationBoundary(StrictModel):
@@ -1090,6 +1108,61 @@ class CrisisPack:
                 errors.append(
                     f"anchor {anchor.id}: post-checkpoint actor actions must be REFERENCE_ONLY"
                 )
+            precondition_ids = [item.id for item in anchor.compatibility_preconditions]
+            if len(precondition_ids) != len(set(precondition_ids)):
+                errors.append(f"anchor {anchor.id}: compatibility precondition ids must be unique")
+            if anchor.compatibility_preconditions and anchor.policy != HistoricalPolicy.REFERENCE_ONLY:
+                errors.append(
+                    f"anchor {anchor.id}: compatibility contracts require REFERENCE_ONLY policy"
+                )
+            for precondition in anchor.compatibility_preconditions:
+                if not precondition.description:
+                    errors.append(
+                        f"anchor {anchor.id}: compatibility precondition {precondition.id} needs a description"
+                    )
+                if precondition.kind == HistoricalCompatibilityPreconditionKind.ENTITY_STATE:
+                    if precondition.subject not in known_entities:
+                        errors.append(
+                            f"anchor {anchor.id}: compatibility precondition {precondition.id} "
+                            f"references unknown entity {precondition.subject}"
+                        )
+                elif precondition.kind == HistoricalCompatibilityPreconditionKind.ACTOR_POSITION:
+                    if precondition.subject not in actor_ids:
+                        errors.append(
+                            f"anchor {anchor.id}: compatibility precondition {precondition.id} "
+                            f"references unknown actor {precondition.subject}"
+                        )
+                    unknown_locations = (
+                        set(precondition.satisfied_values)
+                        | set(precondition.contradicted_values)
+                    ) - known_locations
+                    if unknown_locations:
+                        errors.append(
+                            f"anchor {anchor.id}: compatibility precondition {precondition.id} "
+                            "references unknown locations "
+                            + ", ".join(sorted(unknown_locations))
+                        )
+                elif precondition.kind == HistoricalCompatibilityPreconditionKind.UNMODELED:
+                    if (
+                        precondition.subject
+                        or precondition.satisfied_values
+                        or precondition.contradicted_values
+                    ):
+                        errors.append(
+                            f"anchor {anchor.id}: unmodeled compatibility precondition "
+                            f"{precondition.id} cannot declare world values"
+                        )
+                if precondition.kind != HistoricalCompatibilityPreconditionKind.UNMODELED:
+                    if not precondition.satisfied_values:
+                        errors.append(
+                            f"anchor {anchor.id}: compatibility precondition {precondition.id} "
+                            "needs satisfied values"
+                        )
+                    if set(precondition.satisfied_values) & set(precondition.contradicted_values):
+                        errors.append(
+                            f"anchor {anchor.id}: compatibility precondition {precondition.id} "
+                            "has overlapping satisfied and contradicted values"
+                        )
         actor_reference_assertion_ids = {
             assertion_id
             for anchor in self.crisis.anchors

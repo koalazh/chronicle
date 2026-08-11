@@ -461,6 +461,22 @@ def create_app(
         except CrisisRunError as exc:
             raise crisis_http_error(exc) from exc
 
+    @app.get("/api/runs/{run_id}/outcome")
+    async def run_outcome(run_id: str) -> dict[str, Any]:
+        engine = crisis_engine()
+        try:
+            summary = engine.run_summary(run_id)
+            if summary["status"] != "SEALED":
+                raise CrisisRunConflict(
+                    "危局尚未结算，暂不能查看 Outcome。",
+                    code="outcome_not_ready",
+                    state=str(summary["crisis_phase"] or "OPEN"),
+                    tick=int(summary["current_tick"]),
+                )
+            return {"run": summary, "outcome": summary["outcome_json"]}
+        except CrisisRunError as exc:
+            raise crisis_http_error(exc) from exc
+
     @app.post("/api/runs/{run_id}/runtime/retry")
     async def retry_runtime(run_id: str) -> dict[str, Any]:
         active = current_config()

@@ -60,11 +60,18 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     assert continued["advanced"] is True
     assert continued["attention"]["mode"] == "WATCH"
     assert continued["moments"] > 1
+    outcome_pending = client.get(f"/api/runs/{run_id}/outcome")
     sealed = client.post(f"/api/runs/{run_id}/seal", json={"reason": "test_complete"})
+    outcome = client.get(f"/api/runs/{run_id}/outcome")
     replay = client.get(f"/api/runs/{run_id}/replay")
     archive = client.get("/api/archive")
 
     assert sealed.json()["run"]["status"] == "SEALED"
+    assert outcome_pending.status_code == 409
+    assert outcome_pending.json()["detail"]["code"] == "outcome_not_ready"
+    assert outcome.status_code == 200
+    assert outcome.json()["run"]["id"] == run_id
+    assert outcome.json()["outcome"] == {}
     assert replay.status_code == 200
     assert replay.json()["items"]
     assert any(item["id"] == run_id for item in archive.json()["runs"])
@@ -139,6 +146,14 @@ def test_historical_api_keeps_actor_future_anchors_reference_only(app_config):
         anchor["policy"] == "REFERENCE_ONLY"
         for anchor in history.json()["anchors"]
         if anchor["actor_ids"]
+    )
+    battle = next(
+        anchor
+        for anchor in history.json()["anchors"]
+        if anchor["id"] == "historical-shanhai-battle"
+    )
+    assert battle["compatibility_preconditions"][0]["id"] == (
+        "qing-pass-access-remains-possible"
     )
 
 

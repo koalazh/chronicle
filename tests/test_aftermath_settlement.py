@@ -100,6 +100,12 @@ def test_resolution_flows_through_aftermath_before_a_negotiated_settlement(app_c
     assert run["settlement_reason"] == "resolution_stabilized"
     assert run["outcome_json"]["settlement_type"] == "RESOLVED"
     assert run["outcome_json"]["resolution_variant"] == "PASSAGE_IMPLEMENTED"
+    compatibility = {
+        item["anchor_id"]: item["status"]
+        for item in run["outcome_json"]["historical_compatibility"]
+    }
+    assert compatibility["historical-dorgon-reply"] == "UNKNOWN"
+    assert compatibility["historical-shanhai-battle"] == "CONTINGENT"
     assert projection["resolution"]["status"] == "APPLIED"
     assert projection["settlement"]["status"] == "SETTLED"
     assert projection["entities"]["shanhai-pass"]["state"] == "OPEN"

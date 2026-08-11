@@ -119,6 +119,10 @@ Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler �
 
 结果不会自动进入所有主体视野。Contract 为可立即知情的主体显式列出 actor IDs；其余主体收到一条带模拟到达时刻的 resolution report。每位主体至少经历一次 `RESOLUTION_RESULT` Wake 后，Engine 才检查未完成的 Operation、Investigation、通信、Offer、报告和 Wake；局部现实稳定时，`CRISIS_SETTLED` 与 `RUN_SEALED` 在同一 Ledger commit 中生成 `outcome_json`。仅在内部 Safety Horizon 被耗尽时，才以 `SAFETY_HORIZON` 的延期 Outcome 封存，而不是以固定日期作为产品结局。
 
+## Historical Compatibility
+
+`REFERENCE_ONLY` 历史锚点可以声明少量显式的 Compatibility Preconditions：当前只支持 Entity state、Actor position，或明确标为 `UNMODELED` 的必要前提。Compatibility 逐条将 Snapshot World Truth 判为满足、仍待定、已矛盾或模型未知，再汇总为 `COMPATIBLE`、`CONTINGENT`、`INVALIDATED` 或 `UNKNOWN` 并写入 `outcome_json`。它只回答“这局世界是否仍保留已知后续的必要前提”，绝不替主体决定未来行动，也不模拟或断言之后的整段历史。
+
 ## Hermes 边界
 
 | Hermes 负责 | Chronicle 负责 |

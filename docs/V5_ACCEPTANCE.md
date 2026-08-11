@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` | V5 source-of-truth docs、隔离 live evidence、Hermes `logical_intent` Wake bridge；P0–P5/浏览器 proof 仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup 与 P0 负向重试证据；P0–P5/浏览器 proof 仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 

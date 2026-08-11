@@ -98,7 +98,15 @@ def test_takeover_api_enforces_perspective_lock_and_single_decision_slot(
     created = client.post("/api/runs", json={"mode": "TAKEOVER", "live": False})
     run_id = created.json()["run"]["id"]
 
-    assert client.get(f"/api/runs/{run_id}/perspective/wu-sangui").status_code == 200
+    perspective = client.get(f"/api/runs/{run_id}/perspective/wu-sangui")
+    assert perspective.status_code == 200
+    assert set(perspective.json()["desk"]) == {
+        "arrivals",
+        "unresolved",
+        "ongoing",
+        "agreements",
+    }
+    assert any(item["kind"] == "MESSAGE" for item in perspective.json()["desk"]["ongoing"])
     assert client.get(f"/api/runs/{run_id}/perspective/dorgon").status_code == 403
     assert client.get(f"/api/runs/{run_id}/world").status_code == 403
 

@@ -50,4 +50,10 @@ def test_product_api_exposes_and_creates_the_nanjing_political_crisis(app_config
 
     assert perspective.status_code == 200
     assert perspective.json()["surface"]["kind"] == "POLITICAL"
+    assert set(perspective.json()["desk"]) == {
+        "arrivals",
+        "unresolved",
+        "ongoing",
+        "agreements",
+    }
     assert forbidden.status_code == 403

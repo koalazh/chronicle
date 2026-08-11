@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { escapeHtml } from "./components/html.js";
 import { crisisCoverPage } from "./pages/crisis.js";
+import { deskPage as deskDocumentPage } from "./pages/desk.js";
 import { volumePage } from "./pages/volume.js";
 import { go, goCrisis, route } from "./router.js";
 import { state } from "./state.js";
@@ -23,22 +24,6 @@ function crisisDisplayName(crisisId) {
 
 function fallbackActorId() {
   return state.active?.human_actor || state.replay?.actors?.[0]?.id || state.crisis?.actors[0]?.id || "";
-}
-
-function decisionOutcomeMarkup(decision) {
-  return (decision.operation_results || [])
-    .map((operation) => {
-      if (operation.status === "COMMITTED" && operation.tool === "communicate") {
-        const arrival = operation.arrival_tick == null ? "" : `，预计第 ${operation.arrival_tick} 日抵达`;
-        return `<small class="decision-outcome committed">已发出致${escapeHtml(operation.recipient)}${arrival}</small>`;
-      }
-      if (operation.status === "REJECTED") {
-        const recipient = operation.recipient ? `（致${escapeHtml(operation.recipient)}）` : "";
-        return `<small class="decision-outcome rejected">未执行${recipient}：${escapeHtml(operation.reason || "这项请求未执行")}</small>`;
-      }
-      return "";
-    })
-    .join("");
 }
 
 function decisionResultNotice(result) {
@@ -315,44 +300,8 @@ function actorLens() {
   </section>`;
 }
 
-function deskPage() {
-  if (!state.active) return volumeHomePage();
-  if (!state.crisis || state.crisis.summary.id !== state.active.crisis_id) return chrome(loadingBlock());
-  const view = state.perspective;
-  const messages = (view?.knowledge || [])
-    .filter((item) => typeof item === "object" && item.kind === "message")
-    .slice(-6)
-    .map(
-      (item) => `<article class="letter-sheet"><span>第 ${item.received_tick} 日抵达 · ${escapeHtml(actorDisplayName(item.sender))}</span><p>${escapeHtml(item.content)}</p></article>`,
-    )
-    .join("");
-  const knownSituation = (view?.known_situation || [])
-    .map((item) => `<li>${escapeHtml(item.text)}</li>`)
-    .join("");
-  const unresolved = (view?.revisits || [])
-    .filter((item) => ["PENDING", "DUE"].includes(item.status))
-    .map(
-      (item) => `<article class="matter-sheet ${item.status === "DUE" ? "due" : ""}"><span>${item.status === "DUE" ? "现在需要处置" : `第 ${item.due_tick} 日重新判断`}</span><p>${escapeHtml(item.reason)}</p></article>`,
-    )
-    .join("");
-  const decisions = (view?.decisions || [])
-    .slice(-5)
-    .map(
-      (item) => `<li><span>第 ${item.tick} 日</span>${escapeHtml(item.summary)}${decisionOutcomeMarkup(item)}</li>`,
-    )
-    .join("");
-  const outgoing = (view?.outgoing_messages || [])
-    .slice(-5)
-    .map(
-      (item) => `<li><span>${item.source === "checkpoint" ? "场景起始信" : "本局决定"} · ${item.status === "delivered" ? `第 ${item.arrival_tick} 日送达` : `预计第 ${item.arrival_tick} 日抵达`} · 致 ${escapeHtml(actorDisplayName(item.recipient))}</span>${escapeHtml(item.content)}</li>`,
-    )
-    .join("");
-  const resolved = (view?.revisits || [])
-    .filter((item) => item.status === "FULFILLED")
-    .slice(-3)
-    .map((item) => `<li><span>已经处理</span>${escapeHtml(item.reason)}</li>`)
-    .join("");
-  const committedDecision = (view?.decisions || [])
+function deskDecisionPanel() {
+  const committedDecision = (state.perspective?.decisions || [])
     .slice()
     .reverse()
     .find((item) => Number(item.tick) === Number(state.active.current_tick));
@@ -383,47 +332,39 @@ function deskPage() {
         <div><span class="column-label">${decisionSlotCommitted() ? "当前模拟日" : "这一页"}</span><strong>${decisionSlotCommitted() ? summaryTitle : state.activity ? busyCopy[0] : summaryTitle}</strong><p>${escapeHtml(decisionSlotCommitted() ? summaryCopy : decisionCopy || (state.activity ? busyCopy[1] : summaryCopy))}</p>${decisionSlotCommitted() ? `<small>${continueCopy}</small>` : ""}</div>
       </div>`
     : `<label for="decision">命令、回信或等待的理由</label>
-        <textarea id="decision" rows="8" placeholder="例如：先向关外追问通行与指挥条件，两日后若仍无北京的可靠答复，再重新比较。">${escapeHtml(state.draftDecision)}</textarea>
+        <textarea id="decision" rows="4" placeholder="写下此刻准备如何处置：可以谈条件、调查未知、启动行动，或决定等待。">${escapeHtml(state.draftDecision)}</textarea>
         <button class="primary wide" data-action="submit-decision">送入这段历史</button>
         <button class="quiet wide" data-action="silence">暂不追加命令，继续</button>`;
   const deskContinue = decisionSlotCommitted()
     ? `<footer class="continue-bar desk-continue">
-        <div><span>下一件有意义的事</span><small>送达、约定到期或主体的新行动</small></div>
+        <div><span>下一件有意义的事</span><small>新消息、行动结果或世界压力会让书案再次停下。</small></div>
         <button class="primary" data-action="continue-run" ${runMutationLocked() || !canContinue ? "disabled" : ""}>${canContinue ? "继续推进" : "暂无可推进事件"}</button>
       </footer>`
     : "";
-  return chrome(`
-    ${runHeader(`${view?.actor?.display_name || "你的"}书案`, "你只能看见进入自己视野的消息；其它主体仍会在视野之外行动。")}
-    <section class="desk-layout">
-      <div class="desk-main">
-        <div class="desk-corridor">
-          <span class="column-label">此刻所见的态势</span>
-          ${surfaceMarkup(view?.surface, { ownActor: view?.actor?.id, actorDisplayName })}
-          <p class="corridor-unknown">其它主体的动向，尚未有可靠消息。</p>
-          <div class="known-strip"><span>已经知道</span><ul>${knownSituation || '<li class="empty">尚无可确认的新情况。</li>'}</ul></div>
-        </div>
-        <div class="inbox">
-          <div class="section-heading"><span>新到</span><h2>${messages ? "送到案前的来书" : "路上仍有消息"}</h2></div>
-          ${messages || '<p class="empty-copy">尚无新信抵达。你可以等待，也可以先送出自己的话。</p>'}
-        </div>
-        <section class="unresolved-matters">
-          <div class="section-heading"><span>尚未解决</span><h2>留给此刻与未来的判断</h2></div>
-          ${unresolved || '<p class="empty-copy">没有已经到期或等待复查的事项。</p>'}
-        </section>
-        <section class="desk-record">
-          <div class="section-heading"><span>已经发出</span><h2>你的决定与仍在路上的话</h2></div>
-          <div class="desk-record-columns"><article><h3>决定</h3><ul>${decisions || '<li class="empty">尚未写下新的决定。</li>'}${resolved}</ul></article><article><h3>去信</h3><ul>${outgoing || '<li class="empty">尚未发出新的信。</li>'}</ul></article></div>
-        </section>
-      </div>
-      <aside class="decision-desk">
-        <p class="kicker">你要如何处置</p>
-        <h2>${decisionSlotCommitted() ? "这一日已入卷" : "写下一项决定"}</h2>
-        <p>可以在一句话里同时写信、准备行动并约定何时重新判断。世界只接受你有权做的部分。</p>
-        ${decisionDesk}
-        ${deskContinue}
-      </aside>
-    </section>
-  `);
+  return `<aside class="decision-desk">
+    <p class="kicker">处置</p>
+    <h2>${decisionSlotCommitted() ? "这一日已入卷" : "你准备怎么处置？"}</h2>
+    <p>可以写一封信、提出或回应条件、调查未知、启动行动，或选择等待。世界只会兑现你真正拥有的部分。</p>
+    ${decisionDesk}
+    ${deskContinue}
+  </aside>`;
+}
+
+function deskPage() {
+  if (!state.active) return volumeHomePage();
+  if (!state.crisis || state.crisis.summary.id !== state.active.crisis_id) return chrome(loadingBlock());
+  const view = state.perspective;
+  return deskDocumentPage({
+    chrome,
+    header: runHeader(
+      `${view?.actor?.display_name || "你的"}书案`,
+      "你只能看见进入自己视野的消息；其它主体仍会在视野之外行动。",
+    ),
+    view,
+    actorDisplayName,
+    surfaceMarkup,
+    decisionPanel: deskDecisionPanel(),
+  });
 }
 
 function replayPage() {
@@ -531,6 +472,12 @@ function loadingBlock() {
   return '<div class="loading-block">正在展开这一页……</div>';
 }
 
+function resizeDecisionTextarea(textarea) {
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.max(textarea.scrollHeight, 118)}px`;
+}
+
 function render() {
   if (!state.volume || !state.config) {
     const bootMessage = state.error
@@ -551,6 +498,7 @@ function render() {
     dev: devPage,
   };
   root.innerHTML = (pages[state.page] || volumeHomePage)();
+  resizeDecisionTextarea(root.querySelector("#decision"));
 }
 
 async function refreshActive(timeoutMs = 180000) {
@@ -974,6 +922,7 @@ root.addEventListener("submit", (event) => {
 root.addEventListener("input", (event) => {
   if (event.target.id === "decision" && !interactionLocked()) {
     state.draftDecision = event.target.value;
+    resizeDecisionTextarea(event.target);
   }
 });
 

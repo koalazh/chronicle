@@ -129,8 +129,10 @@ def test_frontend_uses_a_scroll_activity_state_and_keeps_decisions_locked():
         "setActivityPhase(seq, \"advancing\")",
         "can_continue",
         "desk-continue",
-        "operation_results",
-        "场景起始信",
+        "deskDocumentPage",
+        "你准备怎么处置？",
+        "resizeDecisionTextarea",
+        'rows="4"',
     ):
         assert required in source
 
@@ -147,6 +149,10 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
         "web/router.js",
         "web/pages/volume.js",
         "web/pages/crisis.js",
+        "web/pages/desk.js",
+        "web/components/letter.js",
+        "web/components/ongoing.js",
+        "web/components/agreement.js",
         "web/surfaces/spatial.js",
         "web/surfaces/political.js",
     ):
@@ -158,3 +164,22 @@ def test_frontend_uses_volume_and_generic_crisis_cover_modules():
     assert 'data-action="start-takeover" data-human-actor-id=' in source
     assert "before-shanhaiguan" not in source
     assert "wu-sangui" not in source
+
+
+def test_frontend_desk_consumes_only_product_world_objects():
+    source = _frontend_source()
+
+    for required in (
+        "view.desk",
+        "arrivals",
+        "unresolved",
+        "ongoing",
+        "agreements",
+        "arrivalLetterMarkup",
+        "ongoingMarkup",
+        "agreementMarkup",
+    ):
+        assert required in source
+
+    assert "known_situation || []" in source
+    assert "outgoing_messages || []" not in source

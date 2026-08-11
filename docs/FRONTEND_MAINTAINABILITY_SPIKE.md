@@ -29,11 +29,11 @@ web/
   router.js       hash 解析与跳转
   components/     无世界规则的可复用文书片段
   surfaces/       SPATIAL / POLITICAL 纯投影 renderer
-  pages/          Volume、Crisis Cover，后续逐页迁移
+  pages/          Volume、Crisis Cover、Desk，后续逐页迁移
   app.js          暂时保留生命周期、加载、mutation lock 与事件委托
 ```
 
-模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 在本阶段仍是生命周期 owner，后续 Desk、Settlement、Replay/Compare 才在保持相同 interaction contract 的前提下逐页迁移。
+模块不能读取或改写 Scheduler、权限或 Resolver；它们只接收已投影的 API 数据。`app.js` 仍是生命周期 owner；Desk 已在保持相同 interaction contract 的前提下迁移，Settlement、Replay/Compare 留待后续逐页迁移。
 
 ## Phase 18 迁移准则
 
@@ -49,3 +49,9 @@ web/
 - API fixture：两个 Crisis detail 都能驱动 Cover，任意 `playable` actor 能被带入 `POST /api/runs` payload。
 - 浏览器：后续以隔离 fixture server 检查 1440、768、390 的 Volume → Cover 路径；它只证明本地 fixture/API 的页面状态，不能替代 live Hermes 验收。
 - 不在本阶段引入 Compare、Settlement 页面、Operation/Offer composer 或真正 live Run 验收。
+
+## Phase 19 验证结果
+
+Desk 没有建立新的前端状态模型：后端在当前 Actor 的 `product_perspective` 中提供一个小型 `desk` 投影，里面只有该主体已合法收到的 arrivals、真实需要判断的 unresolved、自己的 ongoing 世界对象和自己参与的 active agreements。`web/pages/desk.js` 与三个无状态文书组件只呈现该投影；`app.js` 保留请求互斥、输入捕获、未知结果核对和事件委托。
+
+递归静态测试拒绝旧的 `outgoing_messages` Desk 拼接，并覆盖新模块边界。fixture/API 测试证明私有调查回报、来信式 Offer、协议与 ongoing 行动不会跨 Perspective 泄漏。隔离临时 fixture 浏览器在 Takeover 桌面中观察到来信、未决条件、进行中行动、协议、Surface、提交后回信和自动扩展输入框；390 宽度无横向溢出。该浏览器过程没有创建真实 Hermes Profile，仍仅是本地 fixture/API/UI 证据。

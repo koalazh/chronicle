@@ -4306,6 +4306,314 @@ class CrisisRunEngine:
             )
         return {entity_id for entity_id in visible if entity_id in self.pack.entity_by_id}
 
+    def _desk_term_text(self, term: dict[str, Any]) -> str:
+        description = str(term.get("description", "")).strip()
+        if description:
+            return description
+        subject_id = str(term.get("subject", ""))
+        subject = self.pack.entity_by_id.get(subject_id)
+        subject_name = subject.display_name if subject is not None else subject_id
+        value = str(term.get("value", "")).strip()
+        return f"{subject_name}：{value}" if value else subject_name
+
+    def _desk_party_names(self, parties: list[Any]) -> str:
+        return "、".join(
+            self.pack.actor_by_id.get(str(party)).display_name
+            if self.pack.actor_by_id.get(str(party)) is not None
+            else str(party)
+            for party in parties
+        )
+
+    def _desk_knowledge_arrival(
+        self,
+        item: dict[str, Any],
+        event_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        kind = str(item.get("kind", ""))
+        tick = int(item.get("received_tick", item.get("obtained_tick", 0)))
+        if kind == "message":
+            sender_id = str(item.get("sender", ""))
+            sender = self.pack.actor_by_id.get(sender_id)
+            return {
+                "kind": "MESSAGE",
+                "tick": tick,
+                "title": f"{sender.display_name if sender is not None else sender_id}的来信",
+                "content": str(item.get("content", "")),
+            }
+        if kind == "observation":
+            source_event = event_by_id.get(str(item.get("event_id", "")), {})
+            event_type = str(source_event.get("event_type", ""))
+            is_investigation = bool(item.get("investigation_id"))
+            title = (
+                "调查回报"
+                if is_investigation
+                else "行动回报"
+                if event_type in {"OPERATION_COMPLETED", "MOVEMENT_ARRIVED"}
+                else "新的观察"
+            )
+            arrival: dict[str, Any] = {
+                "kind": "INVESTIGATION" if is_investigation else "OBSERVATION",
+                "tick": tick,
+                "title": title,
+                "content": str(item.get("observation", "")),
+            }
+            if item.get("source"):
+                arrival["source"] = str(item["source"])
+            if item.get("reliability"):
+                arrival["reliability"] = str(item["reliability"])
+            return arrival
+        if kind == "pressure":
+            return {
+                "kind": "PRESSURE",
+                "tick": tick,
+                "title": str(item.get("title", "外部压力进入危局")),
+                "content": str(item.get("content", "")),
+            }
+        if kind == "resolution":
+            return {
+                "kind": "RESOLUTION",
+                "tick": tick,
+                "title": "危局已经形成局部结果",
+                "content": str(item.get("content", "")),
+            }
+        return None
+
+    def _desk_attention_entries(
+        self,
+        run_id: str,
+        actor_id: str,
+        tick: int,
+        event_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        arrivals: list[dict[str, Any]] = []
+        unresolved: list[dict[str, Any]] = []
+        interruptions = [
+            event
+            for event in self.db.worldline_events(run_id)
+            if event["event_type"] == "HUMAN_INTERRUPTION_READY"
+            and event["seat_id"] == actor_id
+            and int(event["tick"]) == tick
+        ]
+        for interruption in interruptions:
+            payload = interruption["payload"]
+            wake_type = str(payload.get("wake_type", ""))
+            source_event = event_by_id.get(str(payload.get("trigger_event_id", "")))
+            if source_event is None:
+                continue
+            source_type = str(source_event["event_type"])
+            source_payload = source_event["payload"]
+            if source_type.startswith("OFFER_"):
+                offer = source_payload.get("counter_offer") or source_payload.get("offer", {})
+                issuer_id = str(offer.get("issuer", ""))
+                issuer = self.pack.actor_by_id.get(issuer_id)
+                status_titles = {
+                    "OFFER_PROPOSED": "一项条件送到案前",
+                    "OFFER_COUNTERED": "对方提出新的条件",
+                    "OFFER_ACCEPTED": "对方接受了条件",
+                    "OFFER_REJECTED": "对方拒绝了条件",
+                    "OFFER_WITHDRAWN": "一项条件已被撤回",
+                    "OFFER_EXPIRED": "一项条件已经失效",
+                }
+                arrivals.append(
+                    {
+                        "kind": "OFFER",
+                        "tick": tick,
+                        "title": status_titles.get(source_type, "一项条件发生变化"),
+                        "content": str(offer.get("message", ""))
+                        or f"{issuer.display_name if issuer is not None else issuer_id}希望你明确以下条件。",
+                        "terms": [
+                            self._desk_term_text(term) for term in offer.get("terms", [])
+                        ],
+                    }
+                )
+                continue
+            if source_type.startswith("AGREEMENT_"):
+                agreement = source_payload.get("agreement", {})
+                status_titles = {
+                    "AGREEMENT_CREATED": "一项约定已经生效",
+                    "AGREEMENT_FULFILLED": "一项约定已经履行",
+                    "AGREEMENT_BREACHED": "一项约定已经被违背",
+                    "AGREEMENT_TERMINATED": "一项约定已经终止",
+                    "AGREEMENT_EXPIRED": "一项约定已经失效",
+                }
+                arrival = {
+                    "kind": "AGREEMENT",
+                    "tick": tick,
+                    "title": status_titles.get(source_type, "一项约定发生变化"),
+                    "content": f"涉及{self._desk_party_names(list(agreement.get('parties', [])))}。",
+                    "terms": [
+                        self._desk_term_text(term)
+                        for term in agreement.get("terms", [])
+                    ],
+                }
+                arrivals.append(arrival)
+                if source_type in {"AGREEMENT_BREACHED", "AGREEMENT_TERMINATED"}:
+                    unresolved.append(
+                        {
+                            "kind": "AGREEMENT",
+                            "title": "已有约定已经改变",
+                            "content": "这项约定不再能按原来的方式约束后续行动，需要重新判断。",
+                            "terms": arrival["terms"],
+                        }
+                    )
+                continue
+            if wake_type == CrisisWakeType.RESOLUTION_GATE.value:
+                unresolved.append(
+                    {
+                        "kind": "RESOLUTION_GATE",
+                        "title": "局势已进入不可逆节点",
+                        "content": "若仍有最后处置，应在此刻写下；随后世界会形成局部答案。",
+                    }
+                )
+        return arrivals, unresolved
+
+    def _desk_projection(
+        self,
+        run_id: str,
+        actor_id: str,
+        perspective: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        projection = snapshot["projection"]
+        event_by_id = {event["id"]: event for event in self.db.worldline_events(run_id)}
+        arrivals = [
+            arrival
+            for item in perspective["knowledge"]
+            if isinstance(item, dict)
+            if (arrival := self._desk_knowledge_arrival(item, event_by_id)) is not None
+        ]
+        attention_arrivals, attention_unresolved = self._desk_attention_entries(
+            run_id,
+            actor_id,
+            int(perspective["tick"]),
+            event_by_id,
+        )
+        arrivals.extend(attention_arrivals)
+
+        unresolved = list(attention_unresolved)
+        incoming_offers = [
+            offer for offer in perspective["active_offers"] if offer.get("recipient") == actor_id
+        ]
+        for offer in incoming_offers:
+            issuer_id = str(offer.get("issuer", ""))
+            issuer = self.pack.actor_by_id.get(issuer_id)
+            terms = [self._desk_term_text(term) for term in offer.get("terms", [])]
+            if not any(
+                arrival["kind"] == "OFFER"
+                and arrival["content"] == str(offer.get("message", ""))
+                and arrival.get("terms", []) == terms
+                for arrival in arrivals
+            ):
+                arrivals.append(
+                    {
+                        "kind": "OFFER",
+                        "tick": int(offer["created_tick"]),
+                        "title": f"{issuer.display_name if issuer is not None else issuer_id}提出条件",
+                        "content": str(offer.get("message", ""))
+                        or "对方希望你明确以下条件。",
+                        "terms": terms,
+                    }
+                )
+            unresolved.append(
+                {
+                    "kind": "OFFER",
+                    "title": f"{issuer.display_name if issuer is not None else issuer_id}等待你的答复",
+                    "content": str(offer.get("message", "")) or "对方希望你明确以下条件。",
+                    "terms": terms,
+                }
+            )
+        for revisit in perspective["current_revisits"]:
+            if revisit.get("status") != "DUE":
+                continue
+            unresolved.append(
+                {
+                    "kind": "REVISIT",
+                    "title": "此前留下的重新判断已经到期",
+                    "content": str(revisit.get("reason", "")),
+                }
+            )
+
+        ongoing: list[dict[str, Any]] = []
+        for operation in perspective["active_operations"]:
+            definition = self.pack.operation_by_id.get(str(operation.get("definition_id", "")))
+            ongoing.append(
+                {
+                    "kind": "OPERATION",
+                    "title": f"{definition.display_name if definition is not None else '一项行动'}正在进行",
+                    "content": str(operation.get("description", ""))
+                    or (definition.description if definition is not None else ""),
+                    "started_tick": int(operation["started_tick"]),
+                    "expected_tick": int(operation["expected_complete_tick"]),
+                }
+            )
+        for investigation in perspective["active_investigations"]:
+            definition = self.pack.investigation_by_id.get(
+                str(investigation.get("definition_id", ""))
+            )
+            target = self.pack.entity_by_id.get(str(investigation.get("target_id", "")))
+            ongoing.append(
+                {
+                    "kind": "INVESTIGATION",
+                    "title": f"{definition.display_name if definition is not None else '一项调查'}正在进行",
+                    "content": str(investigation.get("question", ""))
+                    or (target.display_name if target is not None else ""),
+                    "started_tick": int(investigation["started_tick"]),
+                    "expected_tick": int(investigation["expected_result_tick"]),
+                }
+            )
+        for message in projection.get("messages", []):
+            if message.get("sender") != actor_id or message.get("status") != "in_transit":
+                continue
+            recipient_id = str(message.get("recipient", ""))
+            recipient = self.pack.actor_by_id.get(recipient_id)
+            ongoing.append(
+                {
+                    "kind": "MESSAGE",
+                    "title": f"致{recipient.display_name if recipient is not None else recipient_id}的信仍在路上",
+                    "content": str(message.get("content", "")),
+                    "started_tick": int(message.get("dispatch_tick", perspective["tick"])),
+                    "expected_tick": int(message["arrival_tick"]),
+                }
+            )
+        for offer in perspective["active_offers"]:
+            if offer.get("issuer") != actor_id:
+                continue
+            recipient_id = str(offer.get("recipient", ""))
+            recipient = self.pack.actor_by_id.get(recipient_id)
+            ongoing.append(
+                {
+                    "kind": "OFFER",
+                    "title": f"正在等待{recipient.display_name if recipient is not None else recipient_id}回应条件",
+                    "content": str(offer.get("message", "")),
+                    "started_tick": int(offer["created_tick"]),
+                    "expected_tick": int(offer["expires_tick"])
+                    if offer.get("expires_tick") is not None
+                    else None,
+                    "terms": [self._desk_term_text(term) for term in offer.get("terms", [])],
+                }
+            )
+        ongoing.sort(key=lambda item: (int(item["started_tick"]), item["title"]))
+
+        agreements = []
+        for agreement in perspective["active_agreements"]:
+            parties = list(agreement.get("parties", []))
+            counterparts = [party for party in parties if party != actor_id]
+            agreements.append(
+                {
+                    "title": f"与{self._desk_party_names(counterparts or parties)}的约定",
+                    "content": "这项约定仍在约束后续行动。",
+                    "effective_tick": int(agreement["effective_tick"]),
+                    "terms": [self._desk_term_text(term) for term in agreement.get("terms", [])],
+                }
+            )
+        arrivals.sort(key=lambda item: (int(item["tick"]), item["title"], item["content"]))
+        return {
+            "arrivals": arrivals,
+            "unresolved": unresolved,
+            "ongoing": ongoing,
+            "agreements": agreements,
+        }
+
     def product_perspective(self, run_id: str, actor_id: str) -> dict[str, Any]:
         self._activate_run_pack(run_id)
         if actor_id not in self.pack.actor_by_id:
@@ -4390,6 +4698,7 @@ class CrisisRunEngine:
             "visible_pressures": perspective["visible_pressures"],
             "current_revisits": perspective["current_revisits"],
             "meaningful_world_constraints": perspective["meaningful_world_constraints"],
+            "desk": self._desk_projection(run_id, actor_id, perspective, snapshot),
             "known_situation": known_situation,
             "outgoing_messages": [
                 message

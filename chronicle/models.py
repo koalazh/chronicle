@@ -77,6 +77,16 @@ ACTION_CAUSAL_ENVELOPE: dict[ActionType, str] = {
 class WorldlineKind(StrEnum):
     CANON = "CANON"
     BRANCH = "BRANCH"
+    VOLUME = "VOLUME"
+
+
+class CrisisInstanceStatus(StrEnum):
+    DORMANT = "DORMANT"
+    ACTIVE = "ACTIVE"
+    RESOLUTION_PENDING = "RESOLUTION_PENDING"
+    AFTERMATH = "AFTERMATH"
+    SETTLED = "SETTLED"
+    SUPPRESSED = "SUPPRESSED"
 
 
 class WorldlineStatus(StrEnum):

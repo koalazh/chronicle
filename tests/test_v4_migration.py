@@ -7,7 +7,7 @@ from chronicle.crisis_runtime import CrisisRunEngine, RunMode
 from chronicle.db import ChronicleDB
 
 
-def test_v9_migration_seals_an_active_v3_crisis_as_legacy_without_rewriting_it(
+def test_v10_migration_seals_an_active_v3_crisis_as_legacy_without_rewriting_it(
     app_config, tmp_path
 ):
     path = tmp_path / "chronicle.db"
@@ -35,7 +35,7 @@ def test_v9_migration_seals_an_active_v3_crisis_as_legacy_without_rewriting_it(
     migrated = ChronicleDB(path)
     run = migrated.worldline(run_id)
 
-    assert migrated.get_meta("schema_version") == "9"
+    assert migrated.get_meta("schema_version") == "10"
     assert migrated.migration_backup_path is not None
     assert ".pre-v9." in migrated.migration_backup_path.name
     assert run["status"] == "SEALED"
@@ -47,6 +47,14 @@ def test_v9_migration_seals_an_active_v3_crisis_as_legacy_without_rewriting_it(
     assert lifetime["commitments"] == legacy_commitments
     assert lifetime["revisits"] == []
     assert {binding["status"] for binding in migrated.agent_bindings(run_id)} == {"REVOKED"}
+    for binding in migrated.agent_bindings(run_id):
+        actor_lifetime = migrated.worldline_lifetime(run_id, binding["role"])
+        assert binding["lifetime_id"] == actor_lifetime["id"]
+        assert binding["volume_id"] == "jiashen"
+        assert binding["content_version"] == 1
+        assert binding["content_hash"] == engine.pack.content_hash
+        assert binding["genesis_hash"] == actor_lifetime["genesis_hash"]
+        assert binding["runtime_epoch"] == run["runtime_epoch"]
     assert {wake["status"] for wake in migrated.crisis_wakes(run_id)} == {"CANCELLED"}
     seal = next(
         event
@@ -81,7 +89,7 @@ def test_new_crisis_run_pins_v4_content_and_seed(app_config):
     assert all(lifetime["revisits"] == [] for lifetime in engine.db.worldline_lifetimes(run_id))
 
 
-def test_v9_migration_marks_a_live_v3_run_for_safe_cleanup(app_config, tmp_path):
+def test_v10_migration_marks_a_live_v3_run_for_safe_cleanup(app_config, tmp_path):
     path = tmp_path / "live-chronicle.db"
     config = replace(app_config, database_path=path)
     engine = CrisisRunEngine(config)

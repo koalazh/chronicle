@@ -6,7 +6,7 @@ import sqlite3
 from chronicle.db import SCHEMA, V2_SCHEMA, V3_SCHEMA, ChronicleDB
 
 
-def test_v9_migration_backs_up_and_seals_active_v2(tmp_path):
+def test_v10_migration_backs_up_and_seals_active_v2(tmp_path):
     path = tmp_path / "chronicle.db"
     with sqlite3.connect(path) as connection:
         connection.executescript(SCHEMA)
@@ -32,7 +32,7 @@ def test_v9_migration_backs_up_and_seals_active_v2(tmp_path):
 
     db = ChronicleDB(path)
 
-    assert db.get_meta("schema_version") == "9"
+    assert db.get_meta("schema_version") == "10"
     assert db.migration_backup_path is not None
     assert ".pre-v7." in db.migration_backup_path.name
     assert db.worldline("legacy-active")["status"] == "SEALED"
@@ -49,7 +49,7 @@ def test_v9_migration_backs_up_and_seals_active_v2(tmp_path):
     }
 
 
-def test_v9_schema_preserves_preexisting_v6_tables(tmp_path):
+def test_v10_schema_preserves_preexisting_v6_tables(tmp_path):
     path = tmp_path / "chronicle.db"
     db = ChronicleDB(path)
     with db.transaction() as connection:
@@ -64,7 +64,7 @@ def test_v9_schema_preserves_preexisting_v6_tables(tmp_path):
 
     migrated = ChronicleDB(path)
 
-    assert migrated.get_meta("schema_version") == "9"
+    assert migrated.get_meta("schema_version") == "10"
     with migrated.transaction() as connection:
         row = connection.execute(
             "SELECT payload_json FROM preserved_v6_state WHERE id = 'keep-me'"

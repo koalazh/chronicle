@@ -343,6 +343,37 @@ WHERE kind IN ('BRANCH', 'CRISIS') AND status = 'ACTIVE';
 """
 
 
+V10_SCHEMA = """
+CREATE TABLE IF NOT EXISTS worldline_crisis_instances (
+    id TEXT PRIMARY KEY,
+    worldline_id TEXT NOT NULL REFERENCES worldlines(id),
+    crisis_id TEXT NOT NULL,
+    content_version INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    activation_tick INTEGER NOT NULL,
+    local_origin_tick INTEGER NOT NULL,
+    resolution_contract_id TEXT NOT NULL DEFAULT '',
+    resolution_contract_version INTEGER NOT NULL DEFAULT 0,
+    resolution_seed TEXT NOT NULL DEFAULT '',
+    settled_tick INTEGER,
+    outcome_json TEXT NOT NULL DEFAULT '{}',
+    suppression_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(worldline_id, crisis_id)
+);
+
+CREATE INDEX IF NOT EXISTS worldline_crisis_instances_lookup_idx
+ON worldline_crisis_instances(worldline_id, status, activation_tick, crisis_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS active_volume_worldline_singleton_idx
+ON worldlines((1))
+WHERE kind = 'VOLUME' AND status = 'ACTIVE';
+"""
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -559,6 +590,69 @@ class ChronicleDB:
                     "INSERT INTO app_meta(key, value) VALUES ('schema_version', '9') "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
                 )
+            version = 9
+        if version < 10:
+            if existing_before and self.migration_backup_path is None:
+                self.migration_backup_path = self._backup_before_v10()
+            with self.transaction() as connection:
+                for name, declaration in (
+                    ("worldline_phase", "TEXT NOT NULL DEFAULT 'LEGACY'"),
+                    ("volume_content_version", "INTEGER NOT NULL DEFAULT 0"),
+                    ("volume_content_hash", "TEXT NOT NULL DEFAULT ''"),
+                    ("boundary_policy_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("safety_horizon_tick", "INTEGER"),
+                    ("human_lifetime_id", "TEXT NOT NULL DEFAULT ''"),
+                ):
+                    self._add_column(connection, "worldlines", name, declaration)
+                for name, declaration in (
+                    ("lifetime_kind", "TEXT NOT NULL DEFAULT 'ACTOR'"),
+                    ("genesis_context_json", "TEXT NOT NULL DEFAULT '{}'"),
+                    ("profile_state", "TEXT NOT NULL DEFAULT 'UNBOUND'"),
+                ):
+                    self._add_column(connection, "worldline_lifetimes", name, declaration)
+                for name, declaration in (
+                    ("lifetime_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("binding_scope", "TEXT NOT NULL DEFAULT 'CRISIS'"),
+                    ("volume_id", "TEXT NOT NULL DEFAULT ''"),
+                    ("content_version", "INTEGER NOT NULL DEFAULT 0"),
+                    ("content_hash", "TEXT NOT NULL DEFAULT ''"),
+                    ("genesis_hash", "TEXT NOT NULL DEFAULT ''"),
+                    ("runtime_epoch", "TEXT NOT NULL DEFAULT ''"),
+                ):
+                    self._add_column(connection, "worldline_agent_bindings", name, declaration)
+                connection.executescript(V10_SCHEMA)
+                connection.execute(
+                    "UPDATE worldline_agent_bindings SET "
+                    "lifetime_id = COALESCE((SELECT id FROM worldline_lifetimes "
+                    "WHERE worldline_lifetimes.worldline_id = worldline_agent_bindings.worldline_id "
+                    "AND worldline_lifetimes.seat = worldline_agent_bindings.role), ''), "
+                    "volume_id = COALESCE((SELECT volume_id FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), ''), "
+                    "content_version = COALESCE((SELECT NULLIF(volume_content_version, 0) FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), "
+                    "(SELECT crisis_version FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), 0), "
+                    "content_hash = COALESCE((SELECT NULLIF(volume_content_hash, '') FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), "
+                    "(SELECT crisis_hash FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), ''), "
+                    "genesis_hash = COALESCE((SELECT genesis_hash FROM worldline_lifetimes "
+                    "WHERE worldline_lifetimes.worldline_id = worldline_agent_bindings.worldline_id "
+                    "AND worldline_lifetimes.seat = worldline_agent_bindings.role), ''), "
+                    "runtime_epoch = COALESCE((SELECT runtime_epoch FROM worldlines "
+                    "WHERE worldlines.id = worldline_agent_bindings.worldline_id), '') "
+                    "WHERE lifetime_id = ''"
+                )
+                connection.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS worldline_agent_bindings_lifetime_idx "
+                    "ON worldline_agent_bindings(worldline_id, lifetime_id) "
+                    "WHERE lifetime_id <> ''"
+                )
+                connection.execute(
+                    "INSERT INTO app_meta(key, value) VALUES ('schema_version', '10') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
+            version = 10
 
     @staticmethod
     def _add_column(
@@ -736,6 +830,19 @@ class ChronicleDB:
             source.close()
         return backup
 
+    def _backup_before_v10(self) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        backup = self.path.with_name(f"{self.path.stem}.pre-v10.{stamp}{self.path.suffix}")
+        source = self._connect()
+        destination = sqlite3.connect(backup)
+        try:
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+        return backup
+
     def _backup_before_v4(self) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         backup = self.path.with_name(f"{self.path.stem}.pre-v4.{stamp}{self.path.suffix}")
@@ -879,6 +986,14 @@ class ChronicleDB:
             ).fetchone()
         return dict(row) if row else None
 
+    def active_volume_worldline(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM worldlines WHERE kind = 'VOLUME' AND status = 'ACTIVE' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
     def active_run(self) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -903,9 +1018,13 @@ class ChronicleDB:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO worldlines(id, scenario_id, kind, status, entry_id, controller_seat, current_tick, "
-                "runtime_epoch, runtime_mode, seal_reason, outcome, pending_confirmation_json, created_at, updated_at) "
+                "runtime_epoch, runtime_mode, volume_id, volume_content_version, volume_content_hash, "
+                "worldline_phase, boundary_policy_id, safety_horizon_tick, human_lifetime_id, "
+                "seal_reason, outcome, pending_confirmation_json, created_at, updated_at) "
                 "VALUES (:id, :scenario_id, :kind, :status, :entry_id, :controller_seat, :current_tick, "
-                ":runtime_epoch, :runtime_mode, :seal_reason, :outcome, :pending_confirmation_json, :created_at, :updated_at)",
+                ":runtime_epoch, :runtime_mode, :volume_id, :volume_content_version, :volume_content_hash, "
+                ":worldline_phase, :boundary_policy_id, :safety_horizon_tick, :human_lifetime_id, "
+                ":seal_reason, :outcome, :pending_confirmation_json, :created_at, :updated_at)",
                 {
                     "id": values["id"],
                     "scenario_id": values.get("scenario_id", "jiashen"),
@@ -916,6 +1035,13 @@ class ChronicleDB:
                     "current_tick": values["current_tick"],
                     "runtime_epoch": values.get("runtime_epoch", ""),
                     "runtime_mode": values.get("runtime_mode", "fixture"),
+                    "volume_id": values.get("volume_id", ""),
+                    "volume_content_version": int(values.get("volume_content_version", 0)),
+                    "volume_content_hash": values.get("volume_content_hash", ""),
+                    "worldline_phase": values.get("worldline_phase", "LEGACY"),
+                    "boundary_policy_id": values.get("boundary_policy_id", ""),
+                    "safety_horizon_tick": values.get("safety_horizon_tick"),
+                    "human_lifetime_id": values.get("human_lifetime_id", ""),
                     "seal_reason": values.get("seal_reason", ""),
                     "outcome": values.get("outcome", ""),
                     "pending_confirmation_json": values.get("pending_confirmation_json", ""),
@@ -944,6 +1070,13 @@ class ChronicleDB:
             "current_tick": values["current_tick"],
             "runtime_epoch": values.get("runtime_epoch", ""),
             "runtime_mode": values.get("runtime_mode", "fixture"),
+            "volume_id": values.get("volume_id", ""),
+            "volume_content_version": int(values.get("volume_content_version", 0)),
+            "volume_content_hash": values.get("volume_content_hash", ""),
+            "worldline_phase": values.get("worldline_phase", "LEGACY"),
+            "boundary_policy_id": values.get("boundary_policy_id", ""),
+            "safety_horizon_tick": values.get("safety_horizon_tick"),
+            "human_lifetime_id": values.get("human_lifetime_id", ""),
             "seal_reason": values.get("seal_reason", ""),
             "outcome": values.get("outcome", ""),
             "pending_confirmation_json": values.get("pending_confirmation_json", ""),
@@ -953,9 +1086,13 @@ class ChronicleDB:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO worldlines(id, scenario_id, kind, status, entry_id, controller_seat, current_tick, "
-                "runtime_epoch, runtime_mode, seal_reason, outcome, pending_confirmation_json, created_at, updated_at) "
+                "runtime_epoch, runtime_mode, volume_id, volume_content_version, volume_content_hash, "
+                "worldline_phase, boundary_policy_id, safety_horizon_tick, human_lifetime_id, "
+                "seal_reason, outcome, pending_confirmation_json, created_at, updated_at) "
                 "VALUES (:id, :scenario_id, :kind, :status, :entry_id, :controller_seat, :current_tick, "
-                ":runtime_epoch, :runtime_mode, :seal_reason, :outcome, :pending_confirmation_json, :created_at, :updated_at)",
+                ":runtime_epoch, :runtime_mode, :volume_id, :volume_content_version, :volume_content_hash, "
+                ":worldline_phase, :boundary_policy_id, :safety_horizon_tick, :human_lifetime_id, "
+                ":seal_reason, :outcome, :pending_confirmation_json, :created_at, :updated_at)",
                 worldline,
             )
             last_sequence = 0
@@ -984,10 +1121,11 @@ class ChronicleDB:
                 connection.execute(
                     "INSERT INTO worldline_lifetimes(id, worldline_id, seat, controller, status, "
                     "parent_canon_lifetime, profile_name, profile_metadata_json, genesis_hash, memory_text, memory_hash, "
-                    "knowledge_json, belief_json, authority_json, created_at, updated_at) "
+                    "knowledge_json, belief_json, authority_json, lifetime_kind, genesis_context_json, profile_state, "
+                    "created_at, updated_at) "
                     "VALUES (:id, :worldline_id, :seat, :controller, :status, :parent_canon_lifetime, :profile_name, "
                     ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, :knowledge_json, :belief_json, "
-                    ":authority_json, :created_at, :updated_at)",
+                    ":authority_json, :lifetime_kind, :genesis_context_json, :profile_state, :created_at, :updated_at)",
                     {
                         "id": values_for_lifetime["id"],
                         "worldline_id": values["id"],
@@ -1011,6 +1149,13 @@ class ChronicleDB:
                         "authority_json": json.dumps(
                             values_for_lifetime.get("authority", []), ensure_ascii=False, sort_keys=True
                         ),
+                        "lifetime_kind": values_for_lifetime.get("lifetime_kind", "ACTOR"),
+                        "genesis_context_json": json.dumps(
+                            values_for_lifetime.get("genesis_context", {}),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "profile_state": values_for_lifetime.get("profile_state", "UNBOUND"),
                         "created_at": values_for_lifetime.get("created_at", now_iso()),
                         "updated_at": values_for_lifetime.get("updated_at", now_iso()),
                     },
@@ -1099,12 +1244,14 @@ class ChronicleDB:
                     "parent_canon_lifetime, profile_name, profile_metadata_json, genesis_hash, "
                     "memory_text, memory_hash, knowledge_json, belief_json, authority_json, "
                     "role_charter_json, plan_json, commitments_json, resources_json, "
-                    "last_perspective_json, revisits_json, wake_count, created_at, updated_at) "
+                    "last_perspective_json, revisits_json, wake_count, lifetime_kind, genesis_context_json, "
+                    "profile_state, created_at, updated_at) "
                     "VALUES (:id, :worldline_id, :seat, :controller, 'ACTIVE', '', :profile_name, "
                     ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, "
                     ":knowledge_json, :belief_json, :authority_json, :role_charter_json, "
                     ":plan_json, :commitments_json, :resources_json, :last_perspective_json, "
-                    ":revisits_json, 0, :created_at, :updated_at)",
+                    ":revisits_json, 0, :lifetime_kind, :genesis_context_json, :profile_state, "
+                    ":created_at, :updated_at)",
                     {
                         "id": lifetime["id"],
                         "worldline_id": values["id"],
@@ -1144,6 +1291,11 @@ class ChronicleDB:
                         "revisits_json": json.dumps(
                             lifetime.get("revisits", []), ensure_ascii=False, sort_keys=True
                         ),
+                        "lifetime_kind": lifetime.get("lifetime_kind", "ACTOR"),
+                        "genesis_context_json": json.dumps(
+                            lifetime.get("genesis_context", {}), ensure_ascii=False, sort_keys=True
+                        ),
+                        "profile_state": lifetime.get("profile_state", "UNBOUND"),
                         "created_at": lifetime.get("created_at", now_iso()),
                         "updated_at": lifetime.get("updated_at", now_iso()),
                     },
@@ -1615,6 +1767,107 @@ class ChronicleDB:
         item["projection"] = json.loads(item.pop("projection_json"))
         return item
 
+    def crisis_instance(self, instance_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM worldline_crisis_instances WHERE id = ?", (instance_id,)
+            ).fetchone()
+        return self._decode_crisis_instance(row) if row else None
+
+    def crisis_instances(
+        self, worldline_id: str, *, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM worldline_crisis_instances WHERE worldline_id = ?"
+        args: list[Any] = [worldline_id]
+        if status is not None:
+            query += " AND status = ?"
+            args.append(status)
+        query += " ORDER BY activation_tick, crisis_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, args).fetchall()
+        return [self._decode_crisis_instance(row) for row in rows]
+
+    @staticmethod
+    def _decode_crisis_instance(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        if "outcome_json" in item:
+            item["outcome"] = json.loads(item["outcome_json"])
+        return item
+
+    def create_crisis_instance(self, values: dict[str, Any]) -> dict[str, Any]:
+        worldline_id = str(values["worldline_id"])
+        worldline = self.worldline(worldline_id)
+        if worldline is None:
+            raise KeyError(f"worldline not found: {worldline_id}")
+        if worldline["kind"] != "VOLUME":
+            raise sqlite3.IntegrityError("Crisis Instances require a VOLUME Worldline")
+        if worldline["status"] != "ACTIVE":
+            raise sqlite3.IntegrityError("Crisis Instances require an active VOLUME Worldline")
+        outcome = values.get("outcome", values.get("outcome_json", {}))
+        record = {
+            "id": values["id"],
+            "worldline_id": worldline_id,
+            "crisis_id": values["crisis_id"],
+            "content_version": int(values.get("content_version", 0)),
+            "content_hash": values.get("content_hash", ""),
+            "status": values.get("status", "DORMANT"),
+            "phase": values.get("phase", "DORMANT"),
+            "activation_tick": int(values.get("activation_tick", 0)),
+            "local_origin_tick": int(values.get("local_origin_tick", 0)),
+            "resolution_contract_id": values.get("resolution_contract_id", ""),
+            "resolution_contract_version": int(values.get("resolution_contract_version", 0)),
+            "resolution_seed": values.get("resolution_seed", ""),
+            "settled_tick": values.get("settled_tick"),
+            "outcome_json": outcome if isinstance(outcome, str) else json.dumps(
+                outcome, ensure_ascii=False, sort_keys=True
+            ),
+            "suppression_reason": values.get("suppression_reason", ""),
+            "created_at": values.get("created_at", now_iso()),
+            "updated_at": values.get("updated_at", now_iso()),
+        }
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO worldline_crisis_instances("
+                "id, worldline_id, crisis_id, content_version, content_hash, status, phase, "
+                "activation_tick, local_origin_tick, resolution_contract_id, resolution_contract_version, "
+                "resolution_seed, settled_tick, outcome_json, suppression_reason, created_at, updated_at) "
+                "VALUES (:id, :worldline_id, :crisis_id, :content_version, :content_hash, :status, :phase, "
+                ":activation_tick, :local_origin_tick, :resolution_contract_id, :resolution_contract_version, "
+                ":resolution_seed, :settled_tick, :outcome_json, :suppression_reason, :created_at, :updated_at)",
+                record,
+            )
+        return self.crisis_instance(str(values["id"])) or {}
+
+    def update_crisis_instance(self, instance_id: str, **values: Any) -> dict[str, Any]:
+        if "outcome" in values and "outcome_json" not in values:
+            outcome = values.pop("outcome")
+            values["outcome_json"] = (
+                outcome
+                if isinstance(outcome, str)
+                else json.dumps(outcome, ensure_ascii=False, sort_keys=True)
+            )
+        allowed = {
+            "status",
+            "phase",
+            "settled_tick",
+            "outcome_json",
+            "suppression_reason",
+        }
+        updates = {key: value for key, value in values.items() if key in allowed}
+        if not updates:
+            return self.crisis_instance(instance_id) or {}
+        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        updates.update({"id": instance_id, "updated_at": now_iso()})
+        with self.transaction() as connection:
+            updated = connection.execute(
+                f"UPDATE worldline_crisis_instances SET {assignments}, updated_at = :updated_at "
+                "WHERE id = :id",
+                updates,
+            )
+            if updated.rowcount != 1:
+                raise KeyError(f"crisis instance not found: {instance_id}")
+        return self.crisis_instance(instance_id) or {}
+
     def create_worldline_lifetime(self, values: dict[str, Any]) -> dict[str, Any]:
         record = {
             "id": values["id"],
@@ -1631,6 +1884,11 @@ class ChronicleDB:
             "knowledge_json": json.dumps(values.get("knowledge", []), ensure_ascii=False),
             "belief_json": json.dumps(values.get("beliefs", {}), ensure_ascii=False, sort_keys=True),
             "authority_json": json.dumps(values.get("authority", []), ensure_ascii=False),
+            "lifetime_kind": values.get("lifetime_kind", "ACTOR"),
+            "genesis_context_json": json.dumps(
+                values.get("genesis_context", {}), ensure_ascii=False, sort_keys=True
+            ),
+            "profile_state": values.get("profile_state", "UNBOUND"),
             "created_at": values.get("created_at", now_iso()),
             "updated_at": values.get("updated_at", now_iso()),
         }
@@ -1638,10 +1896,11 @@ class ChronicleDB:
             connection.execute(
                 "INSERT INTO worldline_lifetimes(id, worldline_id, seat, controller, status, "
                 "parent_canon_lifetime, profile_name, profile_metadata_json, genesis_hash, memory_text, memory_hash, "
-                "knowledge_json, belief_json, authority_json, created_at, updated_at) VALUES "
+                "knowledge_json, belief_json, authority_json, lifetime_kind, genesis_context_json, profile_state, "
+                "created_at, updated_at) VALUES "
                 "(:id, :worldline_id, :seat, :controller, :status, :parent_canon_lifetime, :profile_name, "
                 ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, :knowledge_json, :belief_json, "
-                ":authority_json, :created_at, :updated_at)",
+                ":authority_json, :lifetime_kind, :genesis_context_json, :profile_state, :created_at, :updated_at)",
                 record,
             )
         return self.worldline_lifetime(str(values["worldline_id"]), str(values["seat"])) or {}
@@ -1669,6 +1928,7 @@ class ChronicleDB:
             "knowledge_json",
             "belief_json",
             "authority_json",
+            "genesis_context_json",
             "role_charter_json",
             "plan_json",
             "commitments_json",
@@ -1694,6 +1954,10 @@ class ChronicleDB:
             "knowledge_json",
             "belief_json",
             "authority_json",
+            "controller",
+            "lifetime_kind",
+            "genesis_context_json",
+            "profile_state",
             "role_charter_json",
             "plan_json",
             "commitments_json",
@@ -1725,6 +1989,13 @@ class ChronicleDB:
             "status": values.get("status", "ACTIVE"),
             "token_hash": values["token_hash"],
             "revoked_at": "",
+            "lifetime_id": values.get("lifetime_id", ""),
+            "binding_scope": values.get("binding_scope", "CRISIS"),
+            "volume_id": values.get("volume_id", ""),
+            "content_version": int(values.get("content_version", 0)),
+            "content_hash": values.get("content_hash", ""),
+            "genesis_hash": values.get("genesis_hash", ""),
+            "runtime_epoch": values.get("runtime_epoch", ""),
             "created_at": values.get("created_at", now_iso()),
             "updated_at": values.get("updated_at", now_iso()),
         }
@@ -1732,9 +2003,11 @@ class ChronicleDB:
             connection.execute(
                 "INSERT INTO worldline_agent_bindings(id, worldline_id, role, profile_identity, "
                 "distribution_version, ownership_marker, status, token_hash, revoked_at, "
+                "lifetime_id, binding_scope, volume_id, content_version, content_hash, genesis_hash, runtime_epoch, "
                 "created_at, updated_at) VALUES (:id, :worldline_id, :role, :profile_identity, "
                 ":distribution_version, :ownership_marker, :status, :token_hash, :revoked_at, "
-                ":created_at, :updated_at)",
+                ":lifetime_id, :binding_scope, :volume_id, :content_version, :content_hash, :genesis_hash, "
+                ":runtime_epoch, :created_at, :updated_at)",
                 record,
             )
         return record

@@ -132,9 +132,11 @@ Human/Agent 执行顺序、网络 wall time 和模型响应快慢都不能改写
 
 `runtime_mode = live` 会调用 `materialize_lifetime_profiles()`，按 `worldline_id + lifetime_id` 安装或校验 6 个 Lifetime Profile，写入 marker、Profile env、Volume-specific MCP configuration 和 durable binding metadata。真实 live preflight 已在隔离临时 Home 中验证 Profile routing、`memory`-only toolset、key isolation、fresh Session 和一次 chat。
 
-### Live（当前未接通的部分）
+### Live（当前已接通的最小链路）
 
-当前 V5 product router 在继续/决定时仍走 deterministic `wait` seam；它没有把真实 `HermesActorDriver`、fresh Session、World MCP operation、Memory lineage 和 V5 Pending Logical Moment 连接成一条完整 live V5 业务链。V4 的旧 `CrisisRunEngine`/`LiveRuntimeManager` 仍保留其兼容路径，但不能代替 V5 live acceptance。具体 blocker 见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+V5 product router 的 live Agent Wake 现在由 `HermesVolumeActorDriver` 执行：从同一 Lifetime Profile 创建 fresh Session，读取 bounded frozen Perspective，经 Profile 专属 World MCP 的 `logical_intent` staging 提交一个 `wait`、`message` 或 `update_plan`，并继续由 V5 Host 完成 Pending Logical Moment 的 atomic commit。普通 Wake 的 Hermes Memory 发生变化会 rollback 并阻断；没有结构化意图也不会静默改成 `wait`。隔离 live harness 已通过一条真实 Wake 和 product `continue` 验证这条最小链路。
+
+这仍不是完整 V5 live acceptance：Human↔Hermes continuity、Multi-Subject evidence/action、Temporal、Learning、Game 和 P5 尚未证明。V4 的旧 `CrisisRunEngine`/`LiveRuntimeManager` 仍保留其兼容路径，不能代替 V5 proof gates。具体状态见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
 
 这一区分很重要：Profile materialization、Gateway health、一次 chat 和 Doctor 都不能单独证明 P0 Subject continuity、P1 Multi-Subject、P2 Temporal、P3 Learning、P4 Game 或 P5 30-minute product proof。
 

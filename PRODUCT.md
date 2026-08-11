@@ -76,9 +76,9 @@ Host 负责唯一世界时钟、历史来源、位置、路线、消息抵达、
 
 ## 当前实现与未完成边界
 
-V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell。fixture 可以验证 Host、时间、消息、Pending Logical Moment、隐私和封存语义；隔离 Hermes preflight 可以验证真实 Profile/Gateway/chat 的基础链路。
+V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell；隔离 live harness 已验证一条真实 Hermes Wake 通过 `logical_intent` staging 并进入原子 commit。fixture 和单 Wake live 证据仍不能替代完整的 P0–P5 产品证明。
 
-当前 V5 产品路由中的 Agent wake 仍以确定性 `wait` seam 完成，因此还没有证明真实 Hermes 在 Human↔Hermes handoff、跨 Subject 因果、Memory 学习和 off-screen continuation 中产生正确行为。完整状态不以页面可点击或一次 chat 文本推断，见 [V5 验收记录](docs/V5_ACCEPTANCE.md)。
+当前还没有证明真实 Hermes 在 Human↔Hermes handoff、跨 Subject 因果、Memory 学习和 off-screen continuation 中产生正确行为。完整状态不以页面可点击或一次 Wake 文本推断，见 [V5 验收记录](docs/V5_ACCEPTANCE.md)。
 
 ## 相关文档
 

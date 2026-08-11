@@ -30,7 +30,7 @@ Volume
 
 ## 2. Phase 证据
 
-Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 是本文件与入口文档的当前工作阶段：
+Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f52ddf9` 提交，随后以 `b287ee6` 接通最小 live Hermes Wake bridge；完整 proof gates 仍未完成：
 
 | 阶段 | commit | 结果边界 |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 是本文件与入口文
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | working tree | Acceptance + docs；待本阶段检查后提交 |
+| 12 | `f52ddf9` + `b287ee6` | V5 source-of-truth docs、隔离 live evidence、Hermes `logical_intent` Wake bridge；P0–P5/浏览器 proof 仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -118,7 +118,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 截图、静态 HTML 和 JS syntax 都不能替代这些证据。
 
-## 5. Hermes live preflight
+## 5. Hermes live evidence
 
 ### 已验证的基础链路
 
@@ -135,20 +135,23 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 | cross-profile key | `401` |
 | fresh Session | PASS |
 | real Hermes chat | PASS；只保留响应 hash，不保留正文 |
+| V5 real Wake | PASS；真实 Profile 通过 `logical_intent` staging，一个 `INTENT_COMMITTED` 与一个 `MOMENT_COMMITTED` 写入同一 Pending Logical Moment |
+| product `continue` | PASS；同类隔离 API harness 返回 `200`、推进到 tick 1、attention=`DECISION`、无遗留 pending moment |
+| Gateway teardown | PASS；owner/PID 起始标识复核后 clean stop，未留下监听端口 |
 
-这证明 Hermes 基础运行资源和一次真实 Profile 调用在隔离目录可工作。它没有经过 V5 product router 的真实 Agent wake，也没有提交 V5 World operation、belief、plan、message 或 memory mutation。
+这证明 Hermes 基础运行资源和一条真实 V5 Agent Wake 在隔离目录可工作，并实际经过 V5 MCP staging 与原子 Logical Moment commit。它仍没有证明 Human↔Hermes continuity、跨 Subject 行为差异、Learning、完整 message/settlement braid 或 Volume Ending。
 
-### teardown 观察
+### 隔离边界
 
-同一 harness 的 `GatewayController.stop` 返回 `runtime_gateway_stop_failed`。随后 follow-up 检查确认 `18642` 不再监听，临时目录在 harness 退出后消失；但停止路径没有获得 clean PASS，需修复/复测后才能把 live cleanup 记为通过。没有触碰项目现有 Hermes Home 或数据库。
+以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（真实 Wake 使用 `18647`，product API 使用 `18648`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
 
 ## 6. P0–P5 Proof Gates
 
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
-| P0 Subject Proof | **NOT PROVEN** | 尚无同一 Lifetime 的真实 `Hermes → Human → Hermes → Human`；当前 V5 Agent wake 仍 deterministic `wait`，没有证明 same Profile、fresh Session、obligations/plans/revisits 和 new evidence 对后续行动的影响。 |
+| P0 Subject Proof | **NOT PROVEN** | 尚无同一 Lifetime 的完整真实 `Hermes → Human → Hermes → Human`；单 Wake 已证明 same Profile 可创建 fresh Session 并提交意图，但尚未证明 handoff 后 obligations/plans/revisits 与新 evidence 的连续行为。 |
 | P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
-| P2 Temporal Proof | **PARTIAL / NOT LIVE** | deterministic message transit/delivery 和 later-known replay 有自动化覆盖；尚无真实 `A sends → B decides before arrival → arrival → B reconsiders`，也尚无 Human/Agent 同 slice 的 live order-independence proof。 |
+| P2 Temporal Proof | **PARTIAL / NOT COMPLETE** | 单 Wake live 与 deterministic message transit/delivery 已有证据；尚无真实 `A sends → B decides before arrival → arrival → B reconsiders`，也尚无 Human/Agent 同 slice 的 live order-independence proof。 |
 | P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |
 | P4 Game Proof | **NOT RUN** | 尚无一个 Knot 的 10–20 条 live Hermes trajectory，也没有 Investigation/Wait/Agreement/tension 观察记录。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
@@ -157,9 +160,10 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 计划要求同一真实 V5 中记录以下项目；当前均未形成完整可关联链：
 
-- 4+ persistent Profiles（preflight 的 6 Profiles 只证明 materialization/routing，不证明同一 V5 business Run）；
+- 4+ persistent Profiles（单次 live V5 harness 已 materialize 6 个，并使用其中一个完成真实 Wake；跨多次缺席的连续性仍未完整记录）；
 - 初次 Human Life 的 dormant Profile；
-- 0 mandatory ORIENT；
+- 0 mandatory ORIENT（已通过单次 live V5 创建与 Wake 证据）；
+- 至少一条真实 `logical_intent` staging → `INTENT_COMMITTED` → `MOMENT_COMMITTED`（已通过单次 live V5 证据）；
 - Human→Hermes handoff、same Profile、fresh Session；
 - delayed message、crossing action、off-screen Agent↔Agent causal chain；
 - evidence-backed past affecting future；
@@ -173,10 +177,8 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 ## 8. 当前 blockers 与下一步
 
-1. 为 V5 product router 接入真实 Hermes Actor driver：fresh Session、bounded Lifetime context、World MCP operation、response parsing、Memory guard、rollback 和 atomic Logical Moment commit；保留 fixture seam，不把两者混称。
-2. 在同一临时 live Run 上完成 P0–P4 的 instrumented proof，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录。
-3. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
-4. 修复并复测 isolated Gateway teardown；明确 owner/child 已停止后再删除临时 Home。
-5. 对 Phase 11 Archive/Ending 补做 1440/1280/768/390 浏览器检查，记录 console、overflow、privacy、busy mutation 和 keyboard 状态。
+1. 在同一临时 live Run 上完成 P0–P4 的 instrumented proof，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录。
+2. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
+3. 对 Phase 11 Archive/Ending 补做 1440/1280/768/390 浏览器检查，记录 console、overflow、privacy、busy mutation 和 keyboard 状态。
 
 在以上 blocker 关闭前，不能把本文件状态改成 `COMPLETE`，也不能把 README、产品发布说明或 commit message 写成“V5 已完成”。

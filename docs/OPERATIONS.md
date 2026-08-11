@@ -58,14 +58,14 @@ fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message 
 
 ## 4. 当前 V5 live 边界
 
-当前 `POST /api/worldlines` 的 `live: true` 路径会执行 Lifetime Profile materialization，并写入 marker、Profile env、Volume MCP 配置和 binding metadata。当前 V5 product router 的 Agent wake 仍由 deterministic `wait` seam 完成；它不会自动把真实 Hermes chat、World MCP operation、fresh Session 和 Memory lineage 接入 V5 Logical Moment。
+当前 `POST /api/worldlines` 的 `live: true` 路径会执行 Lifetime Profile materialization、绑定每个 Profile 的 World token、启动/复用私有 Gateway，并在真实 Agent Wake 中使用 fresh Session 和 Profile 专属 `logical_intent` MCP staging；随后由 V5 Host 完成 Pending Logical Moment 的 atomic commit。普通 Wake 的 Memory mutation 会 rollback，非结构化模型输出不会自动降级为 `wait`。这条最小链路已有单 Wake live 证据，但完整 P0–P5 仍未通过。
 
 因此下面三件事必须分开：
 
 | 检查 | 能证明什么 | 不能证明什么 |
 | --- | --- | --- |
 | `chronicle doctor` | 配置、素材、数据库、Hermes CLI 和前置路由状态 | 一次 V5 业务因果链 |
-| Hermes Probe / direct chat | Gateway、Profile、key isolation、fresh Session 和真实模型调用 | Human↔Hermes continuity、World operation、P0–P5 |
+| Hermes Probe / direct chat | Gateway、Profile、key isolation、fresh Session 和真实模型调用 | Human↔Hermes continuity、完整 Worldline 因果、P0–P5 |
 | fixture/API tests | Host/DB/隐私/时钟/封存合同 | 真实模型是否产生正确主体行为 |
 
 `chronicle start` 的旧 `LiveRuntimeManager` 不应被当作 V5 live bridge；V4 compatibility path 和 V5 product path 目前仍需分别验收。
@@ -82,9 +82,9 @@ fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message 
 - valid Profile key：`200`；cross-profile key：`401`；
 - fresh Session：成功；真实 chat：成功（只记录摘要 hash，不保存正文）；
 - 项目工作树、项目数据库和默认 Hermes Home：未作为目标；
-- teardown：测试 harness 的 `GatewayController.stop` 返回 `runtime_gateway_stop_failed`，随后端口不再监听且临时目录在 harness 退出后消失；停止路径仍需独立修复/复测，不能标为清理通过。
+- V5 Wake：真实 Profile 通过 `logical_intent` MCP staging 一个意图，随后产生 `MOMENT_COMMITTED`；Gateway teardown 在定向校验 owner/PID 起始标识后 clean PASS。
 
-这是一条真实 Hermes 基础能力证据，不是 V5 live acceptance。它没有证明真实 V5 `continue` 会调用 Hermes、不会证明多个 Subject 形成不同 action，也不会证明 settlement 后仍可继续到下一 Crisis。
+这是一条真实 V5 最小业务链证据，不是完整 V5 live acceptance。它没有证明多个 Subject 形成不同 action，也不会证明 settlement 后仍可继续到下一 Crisis。
 
 ## 6. Volume 运行生命周期
 

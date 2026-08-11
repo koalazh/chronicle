@@ -138,6 +138,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 | V5 real Wake | PASS；真实 Profile 通过 `logical_intent` staging，一个 `INTENT_COMMITTED` 与一个 `MOMENT_COMMITTED` 写入同一 Pending Logical Moment |
 | product `continue` | PASS；同类隔离 API harness 返回 `200`、推进到 tick 1、attention=`DECISION`、无遗留 pending moment |
 | Gateway teardown | PASS；owner/PID 起始标识复核后 clean stop，未留下监听端口 |
+| final live Volume seal / cleanup | PASS；独立 live Volume 在 tick 10、`n013` 已应用、3 个 Crisis 已 settlement 且无 pending/in-transit Wake 后写入 `VOLUME_SEALED`；bindings 全部 `REVOKED`、6 个 owned Profile 目录清空、Gateway owner 清除 |
 
 这证明 Hermes 基础运行资源和一条真实 V5 Agent Wake 在隔离目录可工作，并实际经过 V5 MCP staging 与原子 Logical Moment commit。它仍没有证明 Human↔Hermes continuity、跨 Subject 行为差异、Learning、完整 message/settlement braid 或 Volume Ending。
 
@@ -145,7 +146,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 ### 隔离边界
 
-以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（真实 Wake 使用 `18647`，product API 使用 `18648`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
+以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
 
 ## 6. P0–P5 Proof Gates
 
@@ -173,7 +174,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 - second Crisis / later Knot continuation；
 - later cross-crisis knowledge arrival；
 - final Volume seal；
-- seal 之后才 revoke/clean owned Profiles。
+- seal 之后才 revoke/clean owned Profiles（独立 live boundary harness 已通过；仍不等于完整 live cognition chain）。
 
 当前不能用 preflight、fixture 或旧 V4 live runtime 填充这些空项。
 

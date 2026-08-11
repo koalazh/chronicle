@@ -28,6 +28,7 @@ from .decision import (
     FixtureDecisionInterpreter,
     ModelDecisionInterpreter,
 )
+from .replay_projection import material_causal_roots, replay_layers
 from .resolution import get_resolution_contract
 from .resolution.base import ResolutionGateStatus, ResolutionKind
 from .world import WorldAffordanceSession, WorldService, token_hash
@@ -97,6 +98,46 @@ WATCH_ATTENTION_EVENT_TYPES = frozenset(
         "CRISIS_SETTLED",
     }
 )
+
+_REPLAY_LABELS = {
+    "RUN_CREATED": "危局开始",
+    "CRISIS_CHECKPOINT_ENTERED": "各方进入同一段未决时间",
+    "MESSAGE_DISPATCHED": "一封信已经上路",
+    "MESSAGE_DELIVERED": "一封信抵达收信人",
+    "PLAN_UPDATED": "有人修正了自己的打算",
+    "BELIEF_UPDATED": "有人重新判断一项不确定之事",
+    "REVISIT_SCHEDULED": "有人决定稍后重新判断",
+    "REVISIT_DUE": "一次重新判断已经到期",
+    "REVISIT_FULFILLED": "一次重新判断已经发生",
+    "COMMITMENT_SCHEDULED": "有人决定稍后再作判断",
+    "COMMITMENT_FULFILLED": "一次约定的复查已经发生",
+    "INVESTIGATION_STARTED": "一项调查已经开始",
+    "INVESTIGATION_COMPLETED": "一项调查已经完成",
+    "OBSERVATION_OBTAINED": "一条调查观察已经抵达",
+    "OFFER_PROPOSED": "一项条件已经提出",
+    "OFFER_COUNTERED": "一项条件被重新提出",
+    "OFFER_ACCEPTED": "一项条件已经接受",
+    "OFFER_REJECTED": "一项条件被拒绝",
+    "OFFER_WITHDRAWN": "一项条件被撤回",
+    "OFFER_EXPIRED": "一项条件已经失效",
+    "AGREEMENT_CREATED": "一项约定已经生效",
+    "AGREEMENT_FULFILLED": "一项约定已经履行",
+    "AGREEMENT_BREACHED": "一项约定已经被违背",
+    "PRESSURE_APPLIED": "外部压力进入危局",
+    "OPERATION_STARTED": "一项行动已经开始",
+    "OPERATION_COMPLETED": "一项行动已经完成",
+    "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
+    "RESOLUTION_GATE_REACHED": "局势进入不可逆节点",
+    "RESOLUTION_APPLIED": "危局形成局部结果",
+    "RESOLUTION_REPORT_DELIVERED": "危局结果传到一位主体",
+    "CRISIS_SETTLED": "危局已经结算",
+    "MOVEMENT_STARTED": "一支队伍开始移动",
+    "MOVEMENT_ARRIVED": "一支队伍抵达新的位置",
+    "ACTOR_ACTION_RECORDED": "有人作出有限行动",
+    "HUMAN_SILENCE": "你选择暂不追加命令",
+    "HUMAN_DECISION_APPLIED": "你的决定进入这段历史",
+    "RUN_SEALED": "这一局已封存",
+}
 
 
 @dataclass(frozen=True)
@@ -1701,7 +1742,9 @@ class CrisisRunEngine:
             for event in self.db.worldline_events(run_id)
         )
 
-    def _settlement_outcome(self, projection: dict[str, Any]) -> dict[str, Any]:
+    def _settlement_outcome(
+        self, projection: dict[str, Any], *, run_id: str | None = None
+    ) -> dict[str, Any]:
         resolution = projection.get("resolution", {})
         result = dict(resolution.get("result", {}))
         kind = str(result.get("kind") or ResolutionKind.DEFERRED.value)
@@ -1751,7 +1794,15 @@ class CrisisRunEngine:
             "historical_compatibility": evaluate_historical_compatibility(
                 self.pack, projection
             ),
-            "material_causal_roots": [str(resolution.get("event_id") or "")],
+            "material_causal_roots": (
+                material_causal_roots(
+                    self.db.worldline_events(run_id),
+                    target_event_id=str(resolution.get("event_id") or ""),
+                    project_event=self._replay_projection,
+                )
+                if run_id and resolution.get("event_id")
+                else []
+            ),
         }
 
     def _settle_if_stable(self, run_id: str, run: dict[str, Any]) -> bool:
@@ -1790,7 +1841,7 @@ class CrisisRunEngine:
         if self._human_resolution_attention_pending(run_id):
             return False
 
-        outcome = self._settlement_outcome(projection)
+        outcome = self._settlement_outcome(projection, run_id=run_id)
         reason = (
             "deferred_resolution"
             if outcome["settlement_type"] == "DEFERRED"
@@ -4330,45 +4381,7 @@ class CrisisRunEngine:
         run = self.run_summary(run_id)
         if run["status"] != "SEALED":
             raise CrisisRunError("Replay becomes available after the Run is sealed")
-        labels = {
-            "RUN_CREATED": "危局开始",
-            "CRISIS_CHECKPOINT_ENTERED": "三方进入同一段未决时间",
-            "MESSAGE_DISPATCHED": "一封信已经上路",
-            "MESSAGE_DELIVERED": "一封信抵达收信人",
-            "PLAN_UPDATED": "有人修正了自己的打算",
-            "BELIEF_UPDATED": "有人重新判断一项不确定之事",
-            "REVISIT_SCHEDULED": "有人决定稍后重新判断",
-            "REVISIT_DUE": "一次重新判断已经到期",
-            "REVISIT_FULFILLED": "一次重新判断已经发生",
-            "COMMITMENT_SCHEDULED": "有人决定稍后再作判断",
-            "COMMITMENT_FULFILLED": "一次约定的复查已经发生",
-            "INVESTIGATION_STARTED": "一项调查已经开始",
-            "INVESTIGATION_COMPLETED": "一项调查已经完成",
-            "OBSERVATION_OBTAINED": "一条调查观察已经抵达",
-            "OFFER_PROPOSED": "一项条件已经提出",
-            "OFFER_COUNTERED": "一项条件被重新提出",
-            "OFFER_ACCEPTED": "一项条件已经接受",
-            "OFFER_REJECTED": "一项条件被拒绝",
-            "OFFER_WITHDRAWN": "一项条件被撤回",
-            "OFFER_EXPIRED": "一项条件已经失效",
-            "AGREEMENT_CREATED": "一项约定已经生效",
-            "AGREEMENT_FULFILLED": "一项约定已经履行",
-            "AGREEMENT_BREACHED": "一项约定已经被违背",
-            "PRESSURE_APPLIED": "外部压力进入危局",
-            "OPERATION_STARTED": "一项行动已经开始",
-            "OPERATION_COMPLETED": "一项行动已经完成",
-            "ENTITY_STATE_CHANGED": "一项关键资产状态已经改变",
-            "RESOLUTION_GATE_REACHED": "局势进入不可逆节点",
-            "RESOLUTION_APPLIED": "危局形成局部结果",
-            "RESOLUTION_REPORT_DELIVERED": "危局结果传到一位主体",
-            "CRISIS_SETTLED": "危局已经结算",
-            "MOVEMENT_STARTED": "一支队伍开始移动",
-            "MOVEMENT_ARRIVED": "一支队伍抵达新的位置",
-            "ACTOR_ACTION_RECORDED": "有人作出有限行动",
-            "HUMAN_SILENCE": "你选择暂不追加命令",
-            "HUMAN_DECISION_APPLIED": "你的决定进入这段历史",
-            "RUN_SEALED": "这一局已封存",
-        }
+        labels = _REPLAY_LABELS
         items = []
         all_actor_ids = set(self.pack.actor_by_id)
         events = self.db.worldline_events(run_id)
@@ -4405,6 +4418,14 @@ class CrisisRunEngine:
         return {
             "run": run,
             "items": items,
+            "layers": replay_layers(
+                events,
+                outcome=run["outcome_json"],
+                human_actor_id=run["human_actor"],
+                project_event=self._replay_projection,
+                visible_to=self._replay_visible_to,
+                all_actor_ids=all_actor_ids,
+            ),
             "world": self.world_view(run_id),
             "actors": [
                 {"id": actor.id, "display_name": actor.display_name}
@@ -4426,6 +4447,40 @@ class CrisisRunEngine:
         if event["seat_id"] in self.pack.actor_by_id:
             return [str(event["seat_id"])]
         return sorted(self.pack.actor_by_id)
+
+    def _replay_projection(self, event: dict[str, Any]) -> dict[str, Any]:
+        actor_id = str(event.get("seat_id") or "")
+        actor = self.pack.actor_by_id.get(actor_id)
+        return {
+            "tick": int(event["tick"]),
+            "actor_id": actor_id,
+            "actor": actor.display_name if actor else "世界",
+            "category": self._replay_category(event["event_type"]),
+            "text": self._replay_detail(event)
+            or _REPLAY_LABELS.get(event["event_type"], "一项世界事实发生了变化。"),
+        }
+
+    @staticmethod
+    def _replay_category(event_type: str) -> str:
+        if event_type.startswith("HUMAN_"):
+            return "决定"
+        if event_type.startswith("MESSAGE_"):
+            return "通信"
+        if event_type.startswith("INVESTIGATION_") or event_type == "OBSERVATION_OBTAINED":
+            return "调查"
+        if event_type.startswith("OFFER_"):
+            return "条件"
+        if event_type.startswith("AGREEMENT_"):
+            return "约定"
+        if event_type.startswith("OPERATION_"):
+            return "行动"
+        if event_type.startswith("MOVEMENT_"):
+            return "移动"
+        if event_type == "PRESSURE_APPLIED":
+            return "外部压力"
+        if event_type == "ENTITY_STATE_CHANGED":
+            return "世界变化"
+        return "危局"
 
     def _replay_detail(self, event: dict[str, Any]) -> str:
         payload = event["payload"]
@@ -4460,7 +4515,7 @@ class CrisisRunEngine:
             issuer = self.pack.actor_by_id[str(offer["issuer"])].display_name
             recipient = self.pack.actor_by_id[str(offer["recipient"])].display_name
             terms = "；".join(
-                f"{term['type']} {term['subject']}={term['value']}"
+                str(term.get("description") or f"{term['type']} {term['subject']}={term['value']}")
                 for term in offer.get("terms", [])
             )
             message = str(offer.get("message", ""))
@@ -4477,7 +4532,7 @@ class CrisisRunEngine:
                 for actor_id in agreement["parties"]
             )
             terms = "；".join(
-                f"{term['type']} {term['subject']}={term['value']}"
+                str(term.get("description") or f"{term['type']} {term['subject']}={term['value']}")
                 for term in agreement.get("terms", [])
             )
             return f"{parties}：{terms}"
@@ -4502,7 +4557,12 @@ class CrisisRunEngine:
         if event["event_type"] == "RESOLUTION_REPORT_DELIVERED":
             return str(payload["report"].get("content", ""))
         if event["event_type"] == "CRISIS_SETTLED":
-            return str(payload["outcome"].get("resolution_variant", ""))
+            settlement_type = str(payload["outcome"].get("settlement_type", ""))
+            if settlement_type == "DEFERRED":
+                return "危局以延期状态形成局部结算。"
+            if settlement_type == "SAFETY_HORIZON":
+                return "危局在内部安全上限处以延期状态封存。"
+            return "危局形成能够可靠描述的局部结果。"
         if event["event_type"] == "MOVEMENT_ARRIVED":
             return f"抵达{self.pack.location_by_id[payload['to']].display_name}"
         if event["event_type"] == "HUMAN_DECISION_APPLIED":

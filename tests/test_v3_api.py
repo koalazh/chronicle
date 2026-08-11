@@ -74,6 +74,15 @@ def test_watch_product_api_create_switch_continue_seal_replay_and_archive(app_co
     assert outcome.json()["outcome"] == {}
     assert replay.status_code == 200
     assert replay.json()["items"]
+    layers = replay.json()["layers"]
+    assert layers["outcome"] == {}
+    assert layers["causal_attribution"] == {
+        "mode": "WATCH",
+        "title": "几条 Life 如何互相改变",
+        "chains": [],
+    }
+    assert layers["perspective_reveal"]["title"] == "在你看不见的地方"
+    assert layers["historical_compatibility"] == []
     assert any(item["id"] == run_id for item in archive.json()["runs"])
 
 

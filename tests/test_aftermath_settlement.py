@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
@@ -138,6 +139,40 @@ def test_resolution_flows_through_aftermath_before_a_negotiated_settlement(app_c
     assert all(binding["status"] == "REVOKED" for binding in engine.db.agent_bindings(run_id))
     assert CrisisRunEngine(app_config).world_view(run_id)["resolution"]["status"] == "APPLIED"
 
+    events_before_replay = engine.db.worldline_events(run_id)
+    replay = engine.replay(run_id)
+    layers = replay["layers"]
+    assert layers["outcome"] == run["outcome_json"]
+    assert layers["causal_attribution"]["mode"] == "WATCH"
+    assert layers["causal_attribution"]["title"] == "几条 Life 如何互相改变"
+    assert layers["causal_attribution"]["chains"]
+    assert len(layers["causal_attribution"]["chains"]) <= 6
+    assert all(
+        len(chain["steps"]) <= 6
+        for chain in layers["causal_attribution"]["chains"]
+    )
+    assert any(
+        "允许清军" in chain["summary"]
+        for chain in layers["causal_attribution"]["chains"]
+    )
+    assert layers["perspective_reveal"]["items"]
+    assert layers["historical_compatibility"] == run["outcome_json"][
+        "historical_compatibility"
+    ]
+    assert run["outcome_json"]["material_causal_roots"]
+    assert all(
+        "id" not in root
+        for root in run["outcome_json"]["material_causal_roots"]
+    )
+    assert all(
+        "id" not in step and "kind" not in step
+        for chain in layers["causal_attribution"]["chains"]
+        for step in chain["steps"]
+    )
+    assert "event-" not in json.dumps(layers, ensure_ascii=False)
+    assert engine.db.worldline_events(run_id) == events_before_replay
+    assert layers == CrisisRunEngine(app_config).replay(run_id)["layers"]
+
 
 class _OperationInterpreter:
     source = "fixture"
@@ -221,6 +256,28 @@ def test_takeover_gets_a_final_gate_and_an_aftermath_attention_before_settlement
     assert run["status"] == "SEALED"
     assert run["crisis_phase"] == "SETTLED"
     assert run["outcome_json"]["settlement_type"] == "DEFERRED"
+
+    replay = engine.replay(run_id)
+    layers = replay["layers"]
+    assert layers["causal_attribution"]["mode"] == "TAKEOVER"
+    assert layers["causal_attribution"]["title"] == "你真正改变了什么"
+    chain = next(
+        item
+        for item in layers["causal_attribution"]["chains"]
+        if item["summary"] == "封闭山海关通道。"
+    )
+    assert {step["category"] for step in chain["steps"]} >= {
+        "决定",
+        "行动",
+        "世界变化",
+        "危局",
+    }
+    assert any(
+        item["actor_id"] == "dorgon"
+        for item in layers["perspective_reveal"]["items"]
+    )
+    assert run["outcome_json"]["material_causal_roots"][0]["text"] == "封闭山海关通道。"
+    assert "event-" not in json.dumps(layers, ensure_ascii=False)
 
 
 def test_safety_horizon_seals_a_deferred_outcome_instead_of_failing(app_config):

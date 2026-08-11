@@ -123,6 +123,12 @@ Pressure 不是主体工具，而是 Crisis Pack 的确定性 World Scheduler �
 
 `REFERENCE_ONLY` 历史锚点可以声明少量显式的 Compatibility Preconditions：当前只支持 Entity state、Actor position，或明确标为 `UNMODELED` 的必要前提。Compatibility 逐条将 Snapshot World Truth 判为满足、仍待定、已矛盾或模型未知，再汇总为 `COMPATIBLE`、`CONTINGENT`、`INVALIDATED` 或 `UNKNOWN` 并写入 `outcome_json`。它只回答“这局世界是否仍保留已知后续的必要前提”，绝不替主体决定未来行动，也不模拟或断言之后的整段历史。
 
+## Replay Projection
+
+V4 的 `/replay` 在原有逐条 Ledger 回放之外提供四层确定性投影：World Outcome、Takeover 的“你真正改变了什么”（或 Watch 的“几条 Life 如何互相改变”）、按当时 visibility 重新揭示的隐藏世界，以及 Historical Compatibility。结算时，`outcome_json.material_causal_roots` 从 Resolution 的真实因果父链中压缩少量可读起点；它不保存或展示 Event ID。
+
+Replay 的每条因果链仅保留能通向 Settlement 的关键通信、调查、条件、协议、行动、世界状态与 Resolution。Takeover 只从 Human Decision 追链；Watch 从各主体的有效世界起点追链。全部读取既有 append-only Ledger、Snapshot 与 Outcome，既不调用 LLM，也不会在回看时改变过去的世界。
+
 ## Hermes 边界
 
 | Hermes 负责 | Chronicle 负责 |

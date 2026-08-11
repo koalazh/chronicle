@@ -159,7 +159,7 @@ class AgreementTerm(StrictModel):
     type: AgreementTermType
     subject: str
     value: str
-    description: str
+    description: str = ""
 
 
 class CrisisOfferTermDefinition(AgreementTerm):
@@ -435,17 +435,31 @@ class CrisisPack:
         if issuer_id == recipient_id or not terms:
             return None, "invalid_offer_terms"
         term_keys = [self._agreement_term_key(term) for term in terms]
-        if len(term_keys) != len(set(term_keys)) or any(not term.description.strip() for term in terms):
+        if len(term_keys) != len(set(term_keys)):
             return None, "invalid_offer_terms"
         parties = {issuer_id, recipient_id}
+        canonical_terms: list[AgreementTerm] = []
         for term in terms:
-            if not any(
-                self._agreement_term_key(definition) == self._agreement_term_key(term)
-                and set(definition.party_ids) == parties
-                for definition in self.crisis.offer_terms
-            ):
+            definition = next(
+                (
+                    definition
+                    for definition in self.crisis.offer_terms
+                    if self._agreement_term_key(definition) == self._agreement_term_key(term)
+                    and set(definition.party_ids) == parties
+                ),
+                None,
+            )
+            if definition is None:
                 return None, "offer_term_unavailable"
-        return terms, ""
+            canonical_terms.append(
+                AgreementTerm(
+                    type=definition.type,
+                    subject=definition.subject,
+                    value=definition.value,
+                    description=definition.description,
+                )
+            )
+        return canonical_terms, ""
 
     def offer_term_affordances(self, actor_id: str) -> list[dict[str, Any]]:
         entities = self.entity_by_id

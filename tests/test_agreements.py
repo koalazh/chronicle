@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from chronicle.crisis import AgreementTerm
 from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 
 
@@ -53,6 +54,32 @@ def test_manage_offer_requires_a_declared_term_and_stages_the_request(app_config
     assert accepted["status"] == "accepted"
     assert accepted["expires_tick"] == 1
     assert engine.db.worldline_snapshot(run_id)["projection"]["offers"] == []
+
+
+def test_offer_terms_take_their_display_description_from_the_crisis_pack(app_config):
+    engine = CrisisRunEngine(app_config)
+    perspective = engine.actor_perspective(
+        engine.create(RunMode.WATCH)["run"]["id"], "wu-sangui"
+    )
+    term = _passage_terms(perspective)[0]
+
+    canonical, code = engine.pack.offer_terms_request(
+        "wu-sangui",
+        "dorgon",
+        [
+            AgreementTerm.model_validate(
+                {
+                    "type": term["type"],
+                    "subject": term["subject"],
+                    "value": term["value"],
+                }
+            )
+        ],
+    )
+
+    assert code == ""
+    assert canonical is not None
+    assert canonical[0].description == term["description"]
 
 
 def test_accepted_agreement_unlocks_another_actor_operation_and_survives_restart(app_config):

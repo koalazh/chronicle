@@ -144,7 +144,7 @@ Human/Agent 执行顺序、网络 wall time 和模型响应快慢都不能改写
 
 V5 product router 的 live Agent Wake 现在由 `HermesVolumeActorDriver` 执行：从同一 Lifetime Profile 创建 fresh Session，读取 bounded frozen Perspective，经 Profile 专属 World MCP 的 `logical_intent` staging 提交一个 `wait`、`message` 或 `update_plan`，并继续由 V5 Host 完成 Pending Logical Moment 的 atomic commit。普通 Wake 的 Hermes Memory 发生变化会 rollback 并阻断；没有结构化意图也不会静默改成 `wait`。隔离 live harness 已通过一条真实 Wake 和 product `continue` 验证这条最小链路。
 
-这仍不是完整 V5 live acceptance：Human↔Hermes continuity、Multi-Subject evidence/action、Temporal、Learning、Game 和 P5 尚未证明。V4 的旧 `CrisisRunEngine`/`LiveRuntimeManager` 仍保留其兼容路径，不能代替 V5 proof gates。具体状态见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+这段 V5 最小链路本身仍不等于旧 V5 P0–P5 全部验收；V4 的旧 `CrisisRunEngine`/`LiveRuntimeManager` 仍保留其兼容路径，不能代替 V5 proof gates。V6 Phase 12 已在另一条隔离 Volume 链上补充 Human↔Hermes handoff、Multi-Subject Attention/Deliberation、Shanhai/Nanjing trajectory、Archive 与 cleanup 证据；V5 P5 真人产品验收仍保持原边界。具体状态见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md) 与 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。
 
 这一区分很重要：Profile materialization、Gateway health、一次 chat 和 Doctor 都不能单独证明 P0 Subject continuity、P1 Multi-Subject、P2 Temporal、P3 Learning、P4 Game 或 P5 30-minute product proof。
 

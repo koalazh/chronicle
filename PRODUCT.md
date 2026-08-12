@@ -74,11 +74,11 @@ Host 负责唯一世界时钟、历史来源、位置、路线、消息抵达、
 - 不允许用户从公共 World 反推其他 Lifetime 的私有计划、Belief、未送达消息或工具调用；
 - 不把后来的历史锚点自动播放成唯一命运，不用中央模型替所有 Lifetime 决定。
 
-## V6 演进与未完成边界
+## V6 演进与验收边界
 
-V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell；V6 在此基础上增加 Course、Attention、deliberation、连续 Human judgment、真实路线上的 Offer/Agreement transport，以及 Archive judgment history。Phase 11 的 fixture/API 与浏览器证据已通过；隔离 live harness 的单 Wake 证据仍不能替代 Phase 12 完整 Hermes 业务链。
+V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell；V6 在此基础上增加 Course、Attention、deliberation、连续 Human judgment、真实路线上的 Offer/Agreement transport，以及 Archive judgment history。Phase 0–11 的 fixture/API 与浏览器证据，以及 Phase 12 的隔离 real Hermes Volume 业务链，均已有实际记录。
 
-当前还没有证明真实 Hermes 在 Human↔Hermes handoff、跨 Subject 因果、Memory 学习和 off-screen continuation 中产生正确行为，也没有真人试玩回答或正式 Completion Challenge。完整状态不以页面可点击或一次 Wake 文本推断，见 [V6 验收记录](docs/V6_ACCEPTANCE.md)。
+隔离运行已证明一次真实 Human↔Hermes handoff、跨 Subject 因果、off-screen continuation、Attention reopen、Archive 与 cleanup；这不是 Provider 稳定性 benchmark，也不包含 Memory 学习的泛化结论。真人试玩回答和正式 Completion Challenge 仍未收集，不能由 coding agent 代答，见 [V6 验收记录](docs/V6_ACCEPTANCE.md)。
 
 ## 相关文档
 
@@ -86,5 +86,5 @@ V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product she
 - [前端合同](docs/FRONTEND.md)：页面状态、文案、隐私、API 接缝和响应式要求。
 - [运维与验收](docs/OPERATIONS.md)：安全启动、隔离数据库、Hermes preflight、迁移和清理。
 - [V5 验收记录](docs/V5_ACCEPTANCE.md)：逐条 acceptance evidence、P0–P5 和 blocker。
-- [V6 实施与验收](docs/V6_IMPLEMENTATION.md)、[V6 验收记录](docs/V6_ACCEPTANCE.md)：Phase 0–11 证据、Phase 12 blocker 和最终挑战边界。
+- [V6 实施与验收](docs/V6_IMPLEMENTATION.md)、[V6 验收记录](docs/V6_ACCEPTANCE.md)：Phase 0–12 证据、真人验收边界和最终挑战记录。
 - [历史与视野](docs/HISTORY.md)：史料、争议、建模假设和信息盲区。

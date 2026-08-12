@@ -142,6 +142,14 @@ Archive 的 selected Lifetime replay 现在从 append-only `DECISION_HORIZON_EST
 
 证据：`tests/test_v6_archive_history.py` 覆盖 Ledger 重建和内部字段隔离；完整 `uv run pytest -q` 为 357 tests passed，Ruff、compileall、JS syntax、diff check 均通过；隔离 fixture server `127.0.0.1:18880` 的 sealed Worldline `worldline-2d4eaec1219045d0` 通过 Archive → 吴三桂判断回看浏览器检查。该证据仍是 deterministic fixture/API 与浏览器产品证据，不替代 Phase 12 real Hermes 业务链。
 
+## Phase 12 Real Hermes live acceptance
+
+2026-08-13 在全新临时 SQLite、Hermes Home 与 `127.0.0.1:18882` Gateway 上执行 Volume acceptance，使用真实 Provider，但没有把凭据写入仓库或证据。`worldline-558ea78dc4154343` 的六个 Lifetime Profile 均 materialize；产品路径完成 Human 吴三桂建立 Course、Leave、无关消息进入 Knowledge 但形成 `BACKGROUND`、多尔衮真实独立 Deliberation、相关消息使吴 `REOPEN`、吴重新进入并 HOLD、山海关与南京 Crisis 结算、结构边界、Archive 与 Seal。
+
+脱敏摘要：`ATTENTION_EVALUATED=12`、`DELIBERATION_COMMITTED=7`、`MESSAGE_DELIVERED=7`、`MESSAGE_DISPATCHED=7`、`TIME_ADVANCED=10`、`MOMENT_COMMITTED=5`；吴三桂 Attention 序列为 `REOPEN → BACKGROUND → REOPEN → BACKGROUND`，`wu_background_without_wake=true`、`wu_reopen=true`、`wu_v6_deliberation=true`、`dorgon_independent=true`。selected Wu Archive judgment history 为 3 条；最终 `SEALED`、bindings `REVOKED`，Profiles 与 Gateway owner 已清理，端口与临时目录无残留。
+
+该运行证明的是一条隔离 real Hermes 业务链和 cleanup 闸门，不是 Provider 稳定性 benchmark，也不替代真人产品问卷。真人验收仍保持“未收集、不可伪造”的边界。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -166,9 +174,9 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 7 Agency Conservation | COMPLETE | Source/Pack ownership audit 与越权/因果链测试通过；未发现需要生产语义修复的问题，因此不新增 architecture layer |
 | 8 Content / World Correctness | COMPLETE | Remote Offer/Agreement obey route-delivery causality; Shanhai fixed operation/pressure and Nanjing source bounds have regression evidence |
 | 9 Harness Ablation | COMPLETE | One-action and authored-maneuver ablations are source/Host bounded; prompt and autonomous fixed-pressure Provider experiments remain explicitly unrun |
-| 10 V6 Game Tests | COMPLETE | Perfect Wait, canonicality perturbation, role-state swap and Shanhai/Nanjing causal probes pass; live strong-agent evidence remains |
+| 10 V6 Game Tests | COMPLETE | Perfect Wait, canonicality perturbation, role-state swap and Shanhai/Nanjing causal probes pass; Phase 12 adds one isolated real Volume trajectory with 7 Deliberations |
 | 11 Archive / UX | COMPLETE | Append-only judgment history projection, Chinese product copy, and 1440/1280/768/390 no-overflow/browser checks pass; evidence remains fixture/API/browser |
-| 12 Real Hermes live acceptance | NOT_STARTED | |
+| 12 Real Hermes live acceptance | COMPLETE | Isolated six-Lifetime Volume run completed through Course/Leave, background Knowledge, independent real Deliberation, Attention reopen, Human re-entry, Shanhai/Nanjing settlement, Archive, Seal and exact cleanup; no secrets recorded |
 
 ## Open questions
 

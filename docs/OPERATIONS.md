@@ -132,7 +132,7 @@ uv run chronicle doctor
 - textarea 在 rerender 前被捕获，busy mutation 不能 double-submit；
 - 页面不出现 Agent/Profile/Session/Memory、crisis dashboard、meter 或 AI thinking animation。
 
-Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave。2026-08-13 在独立 fixture server `127.0.0.1:18880` 上复核了 Phase 11 Archive/Ending：sealed Archive、明确选择吴三桂、判断回看，以及 1440/1280/768/390 四种 viewport；四种宽度均无 horizontal overflow，页面不含内部执行术语，error/warn logs 为空。该证据仍是 fixture/API 的 UI proof，不替代 Phase 12 real Hermes business chain，详见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。
+Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave。2026-08-13 在独立 fixture server `127.0.0.1:18880` 上复核了 Phase 11 Archive/Ending：sealed Archive、明确选择吴三桂、判断回看，以及 1440/1280/768/390 四种 viewport；四种宽度均无 horizontal overflow，页面不含内部执行术语，error/warn logs 为空。Phase 12 随后在独立临时 SQLite、Hermes Home 与 `127.0.0.1:18882` 上完成 real Hermes Volume 业务链；端口、Gateway owner、Profiles 与临时目录均精确清理。两类证据仍分层记录，详见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。
 
 ## 9. 证据归档
 

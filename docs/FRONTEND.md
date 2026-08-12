@@ -119,4 +119,4 @@ Chronicle 是可交互的历史文书，不是策略游戏 HUD、地图编辑器
 - Archive/Ending 在手机仍可读，公共回看/人生回看/判断回看层次不混淆；
 - 不出现 Agent/Profile/Session/Memory 技术术语、crisis dashboard、meter 或 AI thinking animation。
 
-本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；2026-08-13 在隔离 fixture `127.0.0.1:18880` 上补充了 Archive → sealed → 选定吴三桂 → 判断回看的交互及 1440/1280/768/390 四种 viewport、no-overflow、内部术语扫描和空 error/warn logs 检查。它仍不替代真实 live API 状态验证，详细边界见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。
+本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；2026-08-13 在隔离 fixture `127.0.0.1:18880` 上补充了 Archive → sealed → 选定吴三桂 → 判断回看的交互及 1440/1280/768/390 四种 viewport、no-overflow、内部术语扫描和空 error/warn logs 检查。Phase 12 的 real Hermes 业务链单独使用临时 Volume/SQLite/Hermes Home 验证，未把 live 运行偷换成浏览器 fixture。详细边界见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。

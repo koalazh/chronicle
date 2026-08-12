@@ -138,3 +138,9 @@ selected Lifetime replay 仍必须由用户显式选择；公共回看不会加�
 - typed dependency 的实际最小类型集合；
 - 山海关 authored maneuver / one-action / prompt 复杂度是否可删除或必须保留；
 - 南京 aggregate backing、候选进入与 fragmented resolver 的最小真实建模。
+
+## Phase 12 live migration boundary (2026-08-13)
+
+V6 迁移语义在一条隔离 real Hermes Volume 上完成复核：六个 Lifetime 的既有 Profile/binding 仍由 Volume Runtime 持有；Course、Knowledge、Attention、Deliberation、Human controller handoff、Archive 与 Seal 没有新增平行表或 Runtime。`worldline-558ea78dc4154343` 的消息抵达、背景事实、相关现实重开与 7 次真实 Deliberation 均落在同一 global clock 与 append-only Ledger 中。
+
+本次只使用临时 SQLite、Hermes Home 和 loopback Gateway；封存后 bindings 为 `REVOKED`，所属 Profiles、MCP entries、Gateway owner 与 `18882` 监听均清理。该记录证明当前迁移在真实 Volume 链上可运行；Provider 的跨运行稳定性和真人产品回答仍不是迁移结论。

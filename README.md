@@ -15,7 +15,7 @@ Chronicle 是一个本地运行、以 V5 `Volume Worldline` 为根的历史体�
 - V5 Volume、Global World Tick、Persistent Lifetime、Inhabit/Leave、Pending Logical Moment、跨 Crisis 传播、Archive/Ending 和 vanilla 前端已经落地；
 - V6 已增加持久 Current Course、Knowledge/Attention 分离、HOLD/REVISE deliberation、连续 Human judgment、remote Offer/Agreement transport、agency/content/game probes，以及 Archive 的可读判断回看；
 - Source/Scenario/Volume validators、自动化回归、前端静态检查和隔离 live Hermes 证据已归档；
-- Phase 11 的 fixture/API 与浏览器证据已通过；Phase 12 的隔离 real Hermes 业务链、真人试玩回答和正式 Completion Challenge 仍未完成，因此当前不能称为最终验收完成。完整边界见 [`docs/V6_ACCEPTANCE.md`](docs/V6_ACCEPTANCE.md)。
+- Phase 0–12 的 fixture/API、浏览器与隔离 real Hermes Volume 业务链已实际执行；真人试玩回答和正式 Completion Challenge 仍保持未收集、不可伪造的边界。完整证据见 [`docs/V6_ACCEPTANCE.md`](docs/V6_ACCEPTANCE.md)。
 
 因此，README 里的“已支持”指代码和相应证据层已经存在，不等于所有真实 Hermes 行为或最终体验已经通过验收。
 

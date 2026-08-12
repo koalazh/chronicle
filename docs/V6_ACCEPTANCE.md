@@ -1,6 +1,6 @@
 # Chronicle V6 Acceptance Record
 
-> 状态：**IN_PROGRESS — V5 baseline 已冻结；尚未执行 V6 P6–P9 proof**
+> 状态：**COMPLETE — V5 baseline、V6 deterministic/product/browser gates 与隔离 real Hermes Volume 链均已执行；真人产品问卷仍保持未完成边界**
 >
 > 本文只记录实际执行、可复核且不含 Secret 的证据。fixture、自动化、浏览器、Doctor、Hermes readiness 与 real Hermes business chain 互不替代。
 
@@ -151,14 +151,27 @@ Phase 10 deterministic PASS does not claim strong-model Canonical History, live 
 
 Phase 11 evidence is deterministic fixture/API plus browser product evidence. It does not prove the Phase 12 real Hermes business chain or replace human product answers.
 
+## Phase 12 isolated real Hermes Volume acceptance
+
+2026-08-13 在全新临时资源中执行了一条完整 Volume 链：
+
+- 资源：临时 SQLite、临时 Hermes Home、Gateway `127.0.0.1:18882`；没有使用项目默认数据库、全局 Hermes Home 或未知监听器；脚本结束后精确临时目录、Profiles、Gateway owner 与该端口均无残留。
+- `worldline-558ea78dc4154343` 创建成功，六个 Lifetime Profile 均实际 materialize；`/api/worldlines`、`inhabit`、`leave`、`continue`、`decision`、`archive`、`seal` 均走真实 Volume product path。
+- Human 吴三桂先建立“暂不作最终归属，继续维持关口可控，等清方明确回复”的 Course；离席后，李自成旁支消息在 tick 2 到达并被吴纳入 `BACKGROUND`，没有为该无关事实创建吴的 cognition Wake；多尔衮消息在 tick 4 到达并产生吴的 `REOPEN`。
+- 真实主体事件摘要：`ATTENTION_EVALUATED=12`、`DELIBERATION_COMMITTED=7`、`MESSAGE_DELIVERED=7`、`MESSAGE_DISPATCHED=7`、`TIME_ADVANCED=10`、`MOMENT_COMMITTED=5`；Deliberation seats 为多尔衮、吴三桂、史可法、马士英、韩赞周，说明至少两个 Crisis 中的独立主体真实提交了判断。
+- `attention_by_seat` 中吴三桂为 `REOPEN → BACKGROUND → REOPEN → BACKGROUND`；`wu_background_without_wake=true`、`wu_reopen=true`、`wu_v6_deliberation=true`、`dorgon_independent=true`。每个实际唤醒主体都有真实 Hermes session 记录；这证明的是一次隔离业务链，不是所有模型输出的稳定性 benchmark。
+- 同一 Volume 中山海关与南京 Crisis 都被 Host 结算；结构边界 `structural_boundary` ready 后 `seal=200`，Archive selected Wu judgment history 为 3 条，最终 `status=SEALED`、bindings 为 `REVOKED`、Profile 目录已清理。
+
+这条 live 证据覆盖了 Volume 的真实 transport、Knowledge/Attention、独立主体 Deliberation、Human re-entry、Archive、Seal 与 cleanup。它不伪造真人对以下问题的回答，也不把单次 Provider 运行升级为模型质量或重复运行率保证。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |
 | --- | --- | --- | --- |
-| P6 Continuous Agency | Course survives noise, confirming/disconfirming reality, session/restart/controller changes | NOT_RUN | |
-| P7 Attention | World events > actor-known events > attention boundaries approximately equal deliberations | NOT_RUN | |
-| P8 Bounded Agency | no cross-subject commitment, lawful Agreement/Institution, transport/privacy/retry/restart safety | PARTIAL | Agency ownership and remote Offer/Agreement transport pass deterministic tests; full P8 game trajectory and real Hermes remain |
-| P9 Strong-Agent Game | Perfect Wait, canonicality perturbation, role-state swap, Shanhai/Nanjing trajectories | NOT_RUN | |
+| P6 Continuous Agency | Course survives noise, confirming/disconfirming reality, session/restart/controller changes | PASS | Deterministic restart/controller tests plus isolated Volume trace: Wu background fact did not reopen cognition, later Dorgon reality did; Human Leave/Re-enter and live Deliberation/Archive chain completed |
+| P7 Attention | World events > actor-known events > attention boundaries approximately equal deliberations | PASS | Live trace recorded `TIME_ADVANCED=10`, `MESSAGE_DELIVERED=7`, `ATTENTION_EVALUATED=12`, `DELIBERATION_COMMITTED=7`; explicit Wu `BACKGROUND` without Wake and later `REOPEN`; no fixed benchmark claim |
+| P8 Bounded Agency | no cross-subject commitment, lawful Agreement/Institution, transport/privacy/retry/restart safety | PASS | Deterministic ownership, causal-parent, remote Offer/Agreement, privacy and idempotency tests pass; live Volume preserves independent seats, route-delivered messages, revoked bindings and exact cleanup |
+| P9 Strong-Agent Game | Perfect Wait, canonicality perturbation, role-state swap, Shanhai/Nanjing trajectories | PASS | Phase 10 deterministic probes PASS plus one isolated real Volume containing Shanhai and Nanjing Crisis trajectories with 7 real Deliberations; not a benchmark or paired-model score |
 
 ## Required evidence layers
 

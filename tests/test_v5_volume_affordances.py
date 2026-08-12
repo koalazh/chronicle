@@ -137,3 +137,20 @@ def test_volume_operation_offer_and_revisit_survive_commit(app_config):
     stored = revisit_runtime.db.worldline_lifetime(revisit_worldline_id, "wu-sangui")
     assert stored is not None
     assert stored["revisits"][0]["due_tick"] == 3
+
+
+def test_volume_communication_uses_shared_northern_transport_graph(app_config):
+    runtime, worldline_id, wu = _runtime(app_config, "world-communication")
+
+    message = runtime.stage_actor_tool(
+        worldline_id,
+        wu["id"],
+        "communicate",
+        {"recipient": "dorgon", "content": "关口可见态势仍需核验。"},
+        idempotency_key="communication-once",
+    )
+    assert message["status"] == "accepted"
+    assert message["arrival_tick"] == 3
+
+    committed = runtime.commit_pending_moment(worldline_id)
+    assert "MESSAGE_DISPATCHED" in [event["event_type"] for event in committed["events"]]

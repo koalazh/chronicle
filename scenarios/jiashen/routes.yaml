@@ -23,10 +23,30 @@ routes:
     from_location: shanhaiguan
     to_location: capital
     travel_days: 5
+  - id: capital-to-eastern
+    from_location: capital
+    to_location: shanhaiguan
+    travel_days: 5
+  - id: yongping-to-eastern
+    from_location: yongping
+    to_location: shanhaiguan
+    travel_days: 2
+  - id: eastern-to-yongping
+    from_location: shanhaiguan
+    to_location: yongping
+    travel_days: 2
   - id: ningyuan-to-shanhaiguan
     from_location: ningyuan
     to_location: shanhaiguan
     travel_days: 4
+  - id: eastern-to-liaoxi
+    from_location: shanhaiguan
+    to_location: liaoxi
+    travel_days: 2
+  - id: liaoxi-to-eastern
+    from_location: liaoxi
+    to_location: shanhaiguan
+    travel_days: 2
   - id: nanjing-to-fengyang
     from_location: nanjing
     to_location: fengyang-command

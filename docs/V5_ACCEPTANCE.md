@@ -130,6 +130,18 @@ homepage → World（初始 2 个 eligible knots；结算后第 3 个才进入�
 
 这仍是 fixture/API 的 UI proof；sealed live API 状态由后面的 `18734/18735` slice 单独证明。
 
+### 可见文案泄漏修复复核：当前产品投影
+
+2026-08-12 针对书案出现 `c002` 一类断言键的问题，在独立临时 fixture server `127.0.0.1:18860` 上重新加载当前工作树并扫描了 World、Follow、Life Desk、未封存 Archive、sealed Public Replay、显式 Lifetime Replay 和 Ending：
+
+- Desk 的 arrivals、known、uncertainty、plan、obligations，以及 World 公共事实和 Follow 公开声明都经过产品可读文案投影；原始 assertion/message/observation/event 键不再作为可见文本的 fallback；
+- sealed Public Replay 中由测试 settlement 摘要带入的 `before-shanhaiguan`、`nanjing-succession`、`southern-consolidation` 均显示为对应危局名称；Archive 状态显示为“卷册 / 已封存”，Ending 显示为“卷册边界”；
+- 页面正文对 `c002`、`c003`、`c010`、`c011`、`c015`、上述 Crisis 键、`message_id`、`observation_id`、`event_id`、`volume_id`、`worldline-e` 等内部标识的扫描全部为空，浏览器 dev logs 为 `[]`；
+- Archive 和 Life Desk 在 1440、1280、768、390 四种宽度下均满足 `scrollWidth == clientWidth == body.scrollWidth`；
+- 该轮隔离 server、SQLite、runtime 和 Hermes Home 已在检查后按精确 owner 停止；用户正在使用的 `127.0.0.1:18850` 进程未被停止或覆盖。
+
+该记录只证明普通用户页面与对应产品投影的可见文案边界；它不把内部数据库字段、真实 live Hermes cognition 或 P0–P5 主观验收提升为已通过。
+
 ### 真实 live Product Shell / API：port `18734`，Gateway `18735`
 
 2026-08-12 在另一组隔离 SQLite、Hermes Home、runtime owner 和 loopback ports 上，以产品默认 `live=true` 走了真实浏览器链：

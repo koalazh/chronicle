@@ -87,6 +87,22 @@ def test_frontend_does_not_expose_internal_backend_errors():
         assert required in source
 
 
+def test_frontend_does_not_render_internal_ids_as_product_copy():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    for forbidden in (
+        "item.message_id",
+        "item.observation_id",
+        "item.event_id",
+        "row.volume_id || row.id",
+        "entity.state ||",
+        "VOLUME ENDING",
+    ):
+        assert forbidden not in source
+    for required in ("item.observation", "archiveKindText", "archiveStatusText", "卷册边界"):
+        assert required in source
+
+
 def test_frontend_routes_only_formal_v5_pages():
     router = (ROOT / "web" / "router.js").read_text(encoding="utf-8")
 

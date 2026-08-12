@@ -50,6 +50,11 @@ def test_v5_product_shell_creates_one_braided_volume_and_public_world(app_config
         "profile_name",
         "runtime_epoch",
     }
+    world_fact_text = " ".join(
+        item["content"] for item in world.json()["public_facts"]
+    )
+    assert "c002" not in world_fact_text
+    assert "c003" not in world_fact_text
 
 
 def test_v5_product_shell_derives_private_desk_and_keeps_follow_public(app_config):
@@ -61,6 +66,9 @@ def test_v5_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     follow = client.get(f"/api/worldlines/{worldline_id}/follow/wu-sangui")
     assert follow.status_code == 200
     assert not _keys(follow.json()) & {"knowledge", "beliefs", "plan", "controller"}
+    follow_text = str(follow.json()["trace"])
+    assert "c002" not in follow_text
+    assert "c003" not in follow_text
 
     inhabited = client.post(
         f"/api/worldlines/{worldline_id}/inhabit",
@@ -74,6 +82,15 @@ def test_v5_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     assert desk.status_code == 200
     assert {"arrivals", "known", "uncertainty", "current_plan", "active_obligations"} <= set(
         desk.json()["desk"]
+    )
+    desk_payload = desk.json()
+    desk_text = str(desk_payload)
+    assert "c002" not in desk_text
+    assert "c003" not in desk_text
+    assert "c010" not in desk_text
+    assert any(
+        item["text"].startswith("三种叙述均将吴三桂")
+        for item in desk_payload["desk"]["arrivals"]
     )
 
     continued = client.post(f"/api/worldlines/{worldline_id}/continue")

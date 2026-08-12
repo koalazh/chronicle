@@ -198,6 +198,15 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     assert shi["later_known"]
     assert any(item["happened_tick"] < item["known_tick"] for item in shi["later_known"])
     assert not {"knowledge", "beliefs", "plan", "controller", "profile_name"} & _keys(payload["replay"]["public"])
+    visible_replay_text = " ".join(
+        item["text"] for item in payload["replay"]["public"]["items"]
+    )
+    for internal_id in (
+        "before-shanhaiguan",
+        "nanjing-succession",
+        "southern-consolidation",
+    ):
+        assert internal_id not in visible_replay_text
 
 
 def _keys(value: Any) -> set[str]:

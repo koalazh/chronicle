@@ -14,14 +14,15 @@ function itemText(item) {
   if (!item || typeof item !== "object") return String(item ?? "");
   return (
     item.content
+    || item.observation
     || item.description
     || item.title
     || item.text
+    || item.summary
+    || item.declaration
+    || item.reason
     || item.value?.objective
     || item.value?.content
-    || item.message_id
-    || item.observation_id
-    || item.kind
     || "这一项暂未留下文字说明"
   );
 }
@@ -85,11 +86,19 @@ function surfaceMarkup(knot) {
     return `<div class="surface-lines">${(surface.actors || []).map((person) => `<span>${text(person.display_name)} · ${text(person.location || "位置未明")}</span>`).join("")}</div>`;
   }
   const entities = [...(surface.subjects || []), ...(surface.context || [])];
-  return `<div class="surface-lines">${entities.map((entity) => `<span><strong>${text(entity.display_name)}</strong> · ${text(entity.state_label || entity.state || "状态未明")}</span>`).join("")}</div>`;
+  return `<div class="surface-lines">${entities.map((entity) => `<span><strong>${text(entity.display_name || "相关对象")}</strong> · ${text(entity.state_label || "状态未明")}</span>`).join("")}</div>`;
 }
 
 function phaseText(value) {
-  return { OPEN: "正在收紧", AFTERMATH: "余波仍在", RESOLUTION_PENDING: "结果将至", SETTLED: "已经留下结果" }[value] || value || "正在收紧";
+  return { OPEN: "正在收紧", AFTERMATH: "余波仍在", RESOLUTION_PENDING: "结果将至", SETTLED: "已经留下结果" }[value] || "正在收紧";
+}
+
+function archiveKindText(value) {
+  return value === "VOLUME" ? "卷册" : "历史记录";
+}
+
+function archiveStatusText(value) {
+  return { SEALED: "已封存", ACTIVE: "展开中", ARCHIVED: "已归档" }[value] || "已封存";
 }
 
 function knotMarkup(knot, index) {
@@ -212,7 +221,7 @@ function archivePage() {
     const boundary = detail.boundary || {};
     return chrome(`
       <section class="actor-title">
-        <p class="kicker">Volume Ending · ${text(detail.volume?.native_period || "甲申")}</p>
+        <p class="kicker">卷册边界 · ${text(detail.volume?.native_period || "甲申")}</p>
         <h1>这一卷已经成为过去。</h1>
         <p>${text(boundary.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
         <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回封存卷册</button></div>
@@ -234,17 +243,17 @@ function archivePage() {
       <p>封存只发生在整卷历史到达边界之后。当前卷册仍在展开时，世界与人生都保持可回到的状态。</p>
     </section>
     <section class="archive-list">
-      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(row.kind || "WORLDLINE")}</span><h2>${text(row.volume_id || row.id)}</h2><p>${text(row.status || "已封存")}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p><button class="secondary" data-action="open-archive" data-worldline-id="${text(row.id)}">打开回看</button></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经封存的卷册。</p>${state.active ? `<button class="secondary" data-page="world">返回世界</button>` : ""}</div>`}
+      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(archiveKindText(row.kind))}</span><h2>${text(row.volume_title || state.volume?.title || "封存卷册")}</h2><p>${text(archiveStatusText(row.status))}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p><button class="secondary" data-action="open-archive" data-worldline-id="${text(row.id)}">打开回看</button></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经封存的卷册。</p>${state.active ? `<button class="secondary" data-page="world">返回世界</button>` : ""}</div>`}
     </section>
   `, { compact: true });
 }
 
 function endingPage() {
   if (state.archiveDetail) {
-    return chrome(`<section class="empty-page inline"><p class="kicker">Volume Ending</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.boundary?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
+    return chrome(`<section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.boundary?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
   }
   return chrome(`
-    <section class="empty-page inline"><p class="kicker">Volume Ending</p><h1>这一卷仍未走到边界。</h1><p class="empty-copy">局部结果会先留在世界中；整卷封存与后知事实将在卷册真正结束时出现。</p><button class="secondary" data-page="world">返回世界</button></section>
+    <section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷仍未走到边界。</h1><p class="empty-copy">局部结果会先留在世界中；整卷封存与后知事实将在卷册真正结束时出现。</p><button class="secondary" data-page="world">返回世界</button></section>
   `, { compact: true });
 }
 

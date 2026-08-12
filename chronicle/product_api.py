@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -89,7 +90,104 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         for location in active.volume_runtime.pack.world.locations:
             if location.id == location_id:
                 return location.display_name
-        return location_id
+        return "位置未明"
+
+    def product_item_text(active: ChronicleHost, item: Any) -> str:
+        """Return readable product copy without falling back to internal IDs."""
+
+        def readable(value: Any) -> str:
+            if not isinstance(value, str):
+                return ""
+            candidate = value.strip()
+            if not candidate:
+                return ""
+            resolved = public_copy(active, candidate)
+            if resolved != candidate:
+                return resolved
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{1,127}", candidate) and (
+                any(character.isdigit() for character in candidate)
+                or "_" in candidate
+                or "-" in candidate
+                or candidate.isupper()
+            ):
+                return ""
+            return candidate
+
+        if isinstance(item, str):
+            return readable(item) or "一项已知事实。"
+        if isinstance(item, dict):
+            for key in (
+                "content",
+                "observation",
+                "text",
+                "summary",
+                "description",
+                "declaration",
+                "reason",
+                "title",
+            ):
+                value = readable(item.get(key))
+                if value:
+                    return value
+            nested = item.get("value")
+            if isinstance(nested, dict):
+                for key in ("objective", "content", "description", "reason", "summary"):
+                    value = readable(nested.get(key))
+                    if value:
+                        return value
+            labels = {
+                "MESSAGE": "一封消息",
+                "OBSERVATION": "一项观察",
+                "INVESTIGATION": "一项调查回报",
+                "OPERATION": "一项行动",
+                "PLAN": "一项计划",
+                "COMMITMENT": "一项约定",
+                "REVISIT": "一次重新判断",
+            }
+            return labels.get(str(item.get("kind", "")).upper(), "这一项暂未留下文字说明")
+        return readable(item) or "这一项暂未留下文字说明"
+
+    def product_items(active: ChronicleHost, items: Any) -> list[dict[str, str]]:
+        if not isinstance(items, list):
+            return []
+        return [{"text": product_item_text(active, item)} for item in items]
+
+    def public_copy(active: ChronicleHost, value: Any) -> str:
+        """Replace known internal identifiers in user-authored/public replay copy."""
+        result = str(value or "")
+        replacements: dict[str, str] = {}
+        pack = active.volume_runtime.pack
+        for crisis_pack in pack.packs.values():
+            replacements[crisis_pack.crisis.id] = crisis_pack.crisis.title
+            replacements.update(
+                {
+                    actor.id: actor.display_name
+                    for actor in crisis_pack.crisis.actors
+                }
+            )
+            replacements.update(
+                {
+                    assertion.id: str(assertion.normalized_evidence or assertion.claim)
+                    for assertion in crisis_pack.assertions
+                }
+            )
+        replacements.update(
+            {lifetime.id: lifetime.display_name for lifetime in pack.lifetimes.values()}
+        )
+        replacements.update(
+            {location.id: location.display_name for location in pack.world.locations}
+        )
+        replacements.update(
+            {entity.id: entity.display_name for entity in pack.world.entities}
+        )
+        for field in pack.world.historical_field:
+            field_id = str(field.get("id", ""))
+            title = str(field.get("title") or "历史现场")
+            if field_id:
+                replacements[field_id] = title
+        for identifier in sorted(replacements, key=len, reverse=True):
+            result = result.replace(identifier, replacements[identifier])
+        return result
 
     def public_lifetime(
         active: ChronicleHost,
@@ -117,7 +215,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             reasons.append("有未决")
         return {
             "id": lifetime_id,
-            "display_name": (definition.display_name if definition else lifetime_id),
+            "display_name": (definition.display_name if definition else "一段人生"),
             "location": {
                 "id": current_location,
                 "display_name": location_name(active, current_location),
@@ -192,7 +290,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                                 for person in people
                                 if person["id"] == participant_id
                             ),
-                            {"id": participant_id, "display_name": participant_id},
+                            {"id": participant_id, "display_name": "一位相关人物"},
                         )
                         for participant_id in instance.get("participants", [])
                     ],
@@ -208,12 +306,13 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 {
                     "id": field_event.get("id", ""),
                     "tick": int(field_event.get("applied_tick", field_event.get("tick", 0))),
-                    "title": str(field_event.get("title") or field_event.get("id") or "历史现场"),
-                    "content": str(
+                    "title": str(field_event.get("title") or "历史现场"),
+                    "content": public_copy(
+                        active,
                         field_event.get("description")
                         or field_event.get("content")
                         or field_event.get("summary")
-                        or ""
+                        or "",
                     ),
                 }
             )
@@ -286,7 +385,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 "kind": labels[event_type],
             }
             if event_type == "MESSAGE_DISPATCHED" and payload.get("sender") == lifetime_id:
-                item["declaration"] = str(payload.get("content", ""))
+                item["declaration"] = public_copy(active, payload.get("content", ""))
             trace.append(item)
         return {"worldline": public_worldline(state["worldline"]), "lifetime": public, "trace": trace}
 
@@ -331,16 +430,16 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
             source = str(payload.get("source", ""))
             if source == "historical_field":
-                return str(payload.get("content", "一项公开军情抵达"))
+                return public_copy(active, payload.get("content", "一项公开军情抵达"))
             return "一项消息抵达" if event_type == "MESSAGE_DELIVERED" else "一项声明发出"
         if event_type == "CRISIS_SETTLED":
             outcome = payload.get("outcome", {})
-            return str(outcome.get("summary") or "事情已经成为这样。")
+            return public_copy(active, outcome.get("summary") or "事情已经成为这样。")
         if event_type in {"PLAN_UPDATED", "HUMAN_INTENT_STAGED", "AGENT_INTENT_STAGED"}:
             plan = payload.get("plan") or payload.get("intent") or {}
-            return str(plan.get("objective") or replay_labels[event_type])
+            return public_copy(active, plan.get("objective") or replay_labels[event_type])
         if event_type == "BELIEF_UPDATED":
-            return str(payload.get("assessment") or replay_labels[event_type])
+            return public_copy(active, payload.get("assessment") or replay_labels[event_type])
         return replay_labels.get(event_type, "一项世界事实发生了变化")
 
     def public_replay_event(active: ChronicleHost, event: dict[str, Any]) -> dict[str, Any] | None:
@@ -535,11 +634,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             "lifetime": public_lifetime(active, row, state["projection"], lifetime),
             "desk": {
                 "position": context.get("position", {}),
-                "arrivals": context.get("recent_knowledge", []),
-                "known": context.get("relevant_evidence", []),
-                "uncertainty": context.get("known_uncertainty", []),
-                "current_plan": context.get("current_plan", []),
-                "active_obligations": context.get("active_obligations", []),
+                "arrivals": product_items(active, context.get("recent_knowledge", [])),
+                "known": product_items(active, context.get("relevant_evidence", [])),
+                "uncertainty": product_items(active, context.get("known_uncertainty", [])),
+                "current_plan": product_items(active, context.get("current_plan", [])),
+                "active_obligations": product_items(active, context.get("active_obligations", [])),
                 "role": context.get("role", {}),
             },
         }

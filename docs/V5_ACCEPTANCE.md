@@ -168,6 +168,16 @@ homepage → World（初始 2 个 eligible knots；结算后第 3 个才进入�
 
 这条修复后 candidate 关闭了上一轮 evaluator 指出的 later Knot 空结算、盲评合成 trace 和 cleanup state 不一致；它仍标记为 candidate，因为 P5 的最终主观体验回答和正式 Completion Challenge 尚未分别记录。
 
+### 独立 candidate review：两次 `NEEDS_WORK`
+
+2026-08-12 的两次上下文隔离只读 evaluator 均返回 `NEEDS_WORK`，不是 Completion Challenge verdict：
+
+- 第一次 review 指出首条 candidate 的 later Knot 是 host-forced 空 outcome、blind evaluator 只消费合成 trace、前端错误修复没有 live UI 复核，以及旧 `gateway_state.json` 与 lifecycle 状态不一致；这些问题已由后续修复和第二条 live candidate 覆盖；
+- 第二次 review 复核了 `worldline-505f3f12c80b4644` 的真实 SQLite public trace（19 条，当前 evaluator=`PASS`）、later-Knot investigate→observation→settlement、修复后中文 no-due error 和 `exited / chronicle_cleanup` cleanup，确认客观 candidate 链成立；
+- 第二次 review 仍拒绝总体 P5 PASS：计划要求的三项真实试玩主观问题——“离开后那些人物发生了什么”“重新进去还是不是同一个人”“最想重新玩什么”——当前没有真实试玩者的脱敏逐题回答。数据库、浏览器日志和 agent 自己的推断不能替代该回答。
+
+因此当前状态保持 `CANDIDATE / IN_PROGRESS`，不执行正式 Completion Challenge，也不把 P5 写成 `PASS`。
+
 ## 5. Hermes live evidence
 
 ### 已验证的基础链路

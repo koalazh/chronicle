@@ -792,6 +792,9 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                     ].get("pending_moment"),
                     "attention": volume_attention([]),
                 }
+            state = active.volume_runtime.worldline(worldline_id)
+            if state["projection"].get("pending_moment"):
+                events.extend(await asyncio.to_thread(resolve_agent_wakes, active, worldline_id))
             result = await asyncio.to_thread(active.volume_runtime.advance_one, worldline_id)
             events.extend(result.get("events", []))
             wakes = due_wakes(active, worldline_id)

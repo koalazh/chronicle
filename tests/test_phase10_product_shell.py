@@ -87,6 +87,29 @@ def test_v5_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     assert left.json()["worldline"]["inhabited_lifetime_id"] == ""
 
 
+def test_v5_product_shell_resolves_handoff_moment_before_continuing(app_config):
+    config = replace(app_config, dev=True)
+    client = TestClient(create_app(config))
+    worldline_id = client.post("/api/worldlines", json={"live": False}).json()["worldline"]["id"]
+
+    assert client.post(
+        f"/api/worldlines/{worldline_id}/inhabit",
+        json={"lifetime_id": "wu-sangui"},
+    ).status_code == 200
+    waiting = client.post(f"/api/worldlines/{worldline_id}/continue")
+    assert waiting.status_code == 200
+    assert waiting.json()["pending_moment"]
+
+    left = client.post(f"/api/worldlines/{worldline_id}/leave")
+    assert left.status_code == 200
+
+    resumed = client.post(f"/api/worldlines/{worldline_id}/continue")
+
+    assert resumed.status_code == 200
+    assert resumed.json().get("pending_moment") is None
+    assert resumed.json()["worldline"]["current_tick"] == 3
+
+
 def test_v5_product_shell_keeps_fixture_creation_dev_only(app_config):
     client = TestClient(create_app(app_config))
 

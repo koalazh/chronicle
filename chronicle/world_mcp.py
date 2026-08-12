@@ -51,6 +51,31 @@ def _volume_context():
     return config, db, binding, wake
 
 
+def _volume_tool(tool_name: str, arguments: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+    """Stage an existing World affordance through the V5 Volume runtime."""
+
+    from .host import ChronicleHost
+
+    config, _db, binding, _wake = _volume_context()
+    return ChronicleHost(config).volume_runtime.stage_actor_tool(
+        str(binding["worldline_id"]),
+        str(binding["role"]),
+        tool_name,
+        arguments,
+        source="agent",
+        idempotency_key=idempotency_key,
+    )
+
+
+def _is_volume_binding() -> bool:
+    token = os.environ.get("CHRONICLE_WORLD_TOKEN", "")
+    if not token:
+        return False
+    config = load_config(environ=os.environ)
+    binding = ChronicleDB(config.database_path).agent_binding_for_token_hash(token_hash(token))
+    return binding is not None and binding["binding_scope"] == "VOLUME"
+
+
 @mcp.tool()
 def communicate(
     recipient: str | dict[str, Any],
@@ -59,6 +84,10 @@ def communicate(
 ) -> dict[str, Any]:
     """Send an in-world courier message; delivery follows simulated corridor time."""
 
+    if _is_volume_binding():
+        return _volume_tool(
+            "communicate", {"recipient": recipient, "content": content}, idempotency_key
+        )
     return _world().communicate(recipient, content, idempotency_key=idempotency_key)
 
 
@@ -71,12 +100,13 @@ def investigate(
 ) -> dict[str, Any]:
     """Start a delayed, source-bounded investigation of one available target."""
 
-    return _world().investigate(
-        question,
-        target,
-        method=method,
-        idempotency_key=idempotency_key,
-    )
+    if _is_volume_binding():
+        return _volume_tool(
+            "investigate",
+            {"question": question, "target": target, "method": method},
+            idempotency_key,
+        )
+    return _world().investigate(question, target, method=method, idempotency_key=idempotency_key)
 
 
 @mcp.tool()
@@ -91,6 +121,19 @@ def manage_offer(
 ) -> dict[str, Any]:
     """Propose, counter, accept, reject, or withdraw one structured in-world offer."""
 
+    if _is_volume_binding():
+        return _volume_tool(
+            "manage_offer",
+            {
+                "action": action,
+                "offer_id": offer_id,
+                "recipient": recipient,
+                "terms": terms or [],
+                "message": message,
+                "expires_after_days": expires_after_days,
+            },
+            idempotency_key,
+        )
     return _world().manage_offer(
         action,
         offer_id=offer_id,
@@ -111,11 +154,18 @@ def operate(
 ) -> dict[str, Any]:
     """Start one currently available Crisis-defined Operation."""
 
+    if _is_volume_binding():
+        return _volume_tool(
+            "operate",
+            {
+                "operation_definition_id": operation_definition_id,
+                "targets": targets,
+                "description": description,
+            },
+            idempotency_key,
+        )
     return _world().operate(
-        operation_definition_id,
-        targets,
-        description,
-        idempotency_key=idempotency_key,
+        operation_definition_id, targets, description, idempotency_key=idempotency_key
     )
 
 
@@ -132,6 +182,20 @@ def update_plan(
 ) -> dict[str, Any]:
     """Replace the private current plan and optionally revise a few private beliefs."""
 
+    if _is_volume_binding():
+        return _volume_tool(
+            "update_plan",
+            {
+                "objective": objective,
+                "steps": steps,
+                "rationale": rationale,
+                "rationale_source": rationale_source,
+                "belief_updates": belief_updates or [],
+                "belief_source": belief_source,
+                "reconsider_when": reconsider_when or [],
+            },
+            idempotency_key,
+        )
     return _world().update_plan(
         objective,
         steps,
@@ -152,11 +216,11 @@ def schedule_revisit(
 ) -> dict[str, Any]:
     """Create a private simulated-time Revisit that will cause a future Wake."""
 
-    return _world().schedule_revisit(
-        after_days,
-        reason,
-        idempotency_key=idempotency_key,
-    )
+    if _is_volume_binding():
+        return _volume_tool(
+            "schedule_revisit", {"after_days": after_days, "reason": reason}, idempotency_key
+        )
+    return _world().schedule_revisit(after_days, reason, idempotency_key=idempotency_key)
 
 
 @mcp.tool()

@@ -157,9 +157,10 @@ class HermesVolumeActorDriver:
                     "你是 Chronicle V5 中一个持续存在的历史主体，不是旁白、史官或主持人。"
                     "只使用本次冻结视角中的事实、已知证据、当前计划与有限主体记忆；禁止使用后世知识，"
                     "也不要推断其他主体的私有信息。普通 Wake 不得调用 memory。"
-                    "你必须调用 chronicle-world 的 logical_intent 工具恰好一次，提交一个且只有一个意图。"
-                    "没有足够依据改变行动时，提交 {type: wait}；需要形成可追踪打算时提交 update_plan；"
-                    "确有必要让消息进入世界时提交 message。不要调用 communicate、operate、investigate 或旧危局工具。"
+                    "你必须调用 chronicle-world 的一个世界写工具恰好一次，提交一个且只有一个行动。"
+                    "可用工具是 communicate、investigate、manage_offer、operate、update_plan、schedule_revisit；"
+                    "没有足够依据改变行动时，使用 logical_intent 提交 {type: wait}。"
+                    "logical_intent 也可提交 message 或 update_plan，但不得再调用第二个工具。"
                     "update_plan 的 belief_updates 只能引用冻结视角中可见的 evidence event_id；没有证据就留空。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
                     "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
@@ -220,7 +221,15 @@ class HermesVolumeActorDriver:
         operations = [
             operation
             for operation in self.db.crisis_wake_operations(wake_id)
-            if operation["tool_name"] == "logical_intent"
+            if operation["tool_name"] in {
+                "logical_intent",
+                "communicate",
+                "investigate",
+                "manage_offer",
+                "operate",
+                "update_plan",
+                "schedule_revisit",
+            }
             and operation["status"] == "PROPOSED"
             and operation["payload"].get("moment_id") == moment_id
         ]

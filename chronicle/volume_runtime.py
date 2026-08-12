@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from . import hermes
-from .crisis import CrisisPack, VolumePack
+from .crisis import AgreementStatus, AgreementTerm, CrisisPack, OfferAction, OfferStatus, VolumePack
 from .db import content_hash, stable_hash
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_continuity import LifetimeContextBuilder
@@ -24,6 +24,18 @@ class VolumeRuntimeError(ValueError):
 
 class VolumeRuntimeConflict(VolumeRuntimeError):
     """A V5 Volume operation conflicts with the current global state."""
+
+
+VOLUME_WORLD_TOOLS = frozenset(
+    {
+        "communicate",
+        "investigate",
+        "manage_offer",
+        "operate",
+        "schedule_revisit",
+        "update_plan",
+    }
+)
 
 
 class VolumeRuntime:
@@ -680,6 +692,14 @@ class VolumeRuntime:
                     value = item.get(key)
                     if value is not None and int(value) > current:
                         candidates.append(int(value))
+            for offer in crisis.get("offers", []):
+                expires_tick = offer.get("expires_tick")
+                if (
+                    offer.get("status") == OfferStatus.PROPOSED.value
+                    and expires_tick is not None
+                    and int(expires_tick) > current
+                ):
+                    candidates.append(int(expires_tick))
         candidates.extend(
             int(wake["tick"])
             for wake in self.db.subject_wakes(worldline_id)
@@ -731,6 +751,22 @@ class VolumeRuntime:
         applied_pressures: list[dict[str, Any]] = []
         lifetime_updates: dict[str, dict[str, Any]] = {}
         wake_creates: list[dict[str, Any]] = []
+
+        def append_knowledge(actor_id: str, item: dict[str, Any]) -> dict[str, Any] | None:
+            lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
+            if lifetime is None:
+                return None
+            pending_update = lifetime_updates.get(actor_id)
+            if pending_update is not None and "knowledge_json" in pending_update:
+                knowledge = json.loads(str(pending_update["knowledge_json"]))
+            else:
+                knowledge = list(lifetime.get("knowledge", []))
+            knowledge.append(item)
+            lifetime_updates[actor_id] = {
+                "seat": actor_id,
+                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
+            }
+            return lifetime
 
         for field_event in projection.get("field_events", []):
             if field_event.get("status") != "PENDING" or int(field_event["tick"]) != target:
@@ -830,7 +866,6 @@ class VolumeRuntime:
                 raise VolumeRuntimeError(
                     f"message recipient Lifetime is missing: {message['recipient']}"
                 )
-            knowledge = list(lifetime.get("knowledge", []))
             knowledge_item = {
                 "type": "MESSAGE",
                 "message_id": message["id"],
@@ -841,15 +876,7 @@ class VolumeRuntime:
                 "source": message.get("source", ""),
                 "assertion_ids": list(message.get("assertion_ids", [])),
             }
-            if not any(
-                isinstance(item, dict) and item.get("message_id") == message["id"]
-                for item in knowledge
-            ):
-                knowledge.append(knowledge_item)
-            lifetime_updates[message["recipient"]] = {
-                "seat": message["recipient"],
-                "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
-            }
+            append_knowledge(message["recipient"], knowledge_item)
             wake_creates.append(
                 {
                     "id": f"{worldline_id}:wake:{message['id']}",
@@ -862,6 +889,191 @@ class VolumeRuntime:
                     "result": {"message_id": message["id"]},
                 }
             )
+
+        for crisis_id in sorted(projection.get("crisis_instances", {})):
+            crisis = projection["crisis_instances"][crisis_id]
+            if crisis.get("status") not in {
+                CrisisInstanceStatus.ACTIVE.value,
+                CrisisInstanceStatus.RESOLUTION_PENDING.value,
+                CrisisInstanceStatus.AFTERMATH.value,
+            }:
+                continue
+            pack = self.pack.pack(crisis_id)
+            for item in crisis.get("operations", []):
+                if item.get("status") != "IN_PROGRESS" or int(item.get("expected_complete_tick", -1)) != target:
+                    continue
+                definition = pack.operation_by_id.get(str(item.get("definition_id", "")))
+                if definition is None:
+                    raise VolumeRuntimeError(f"operation definition is missing: {item.get('definition_id')}")
+                item["status"] = "COMPLETED"
+                visible = (
+                    sorted(pack.participant_ids)
+                    if definition.visibility.value == "PUBLIC"
+                    else [str(item["actor_id"])]
+                )
+                completed = self._event(
+                    worldline_id,
+                    target,
+                    "OPERATION_COMPLETED",
+                    {"operation": item, "visibility": visible},
+                    seat_id=item["actor_id"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[item["start_event_id"]],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                item["completion_event_id"] = completed["id"]
+                events.append(completed)
+                for effect in definition.completion_effects:
+                    entity_id = item["target_map"].get(effect.subject, effect.subject)
+                    entity = crisis["entities"].get(entity_id)
+                    if entity is None or entity["state"] == effect.state:
+                        continue
+                    before = entity["state"]
+                    entity["state"] = effect.state
+                    item["result_state"][entity_id] = effect.state
+                    events.append(
+                        self._event(
+                            worldline_id,
+                            target,
+                            "ENTITY_STATE_CHANGED",
+                            {
+                                "operation_id": item["id"],
+                                "crisis_id": crisis_id,
+                                "entity_id": entity_id,
+                                "before": before,
+                                "after": effect.state,
+                                "phase": "completion",
+                                "visibility": visible,
+                            },
+                            seat_id=item["actor_id"],
+                            provenance=Provenance.BRANCH_DERIVED.value,
+                            causal_parent_ids=[completed["id"]],
+                            runtime_epoch=row["runtime_epoch"],
+                        )
+                    )
+                movement_target = item["target_map"].get(definition.movement_destination_target, "")
+                if movement_target:
+                    projection["positions"][item["actor_id"]] = movement_target
+                for actor_id in visible:
+                    lifetime = append_knowledge(
+                        actor_id,
+                        {
+                            "kind": "observation",
+                            "event_id": completed["id"],
+                            "observation": f"{definition.display_name}已经完成。",
+                            "received_tick": target,
+                            "provenance": "branch_derived",
+                            "crisis_id": crisis_id,
+                        },
+                    )
+                    if lifetime is None:
+                        continue
+                    wake_creates.append(
+                        {
+                            "id": f"{worldline_id}:wake:{completed['id']}:{actor_id}",
+                            "actor_id": actor_id,
+                            "wake_type": "OPERATION_RESULT",
+                            "tick": target,
+                            "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                            "source": "volume-operation",
+                            "trigger_event_id": completed["id"],
+                            "result": {"operation_id": item["id"]},
+                        }
+                    )
+            for item in crisis.get("investigations", []):
+                if item.get("status") != "IN_PROGRESS" or int(item.get("expected_result_tick", -1)) != target:
+                    continue
+                definition = pack.investigation_by_id.get(str(item.get("definition_id", "")))
+                if definition is None:
+                    raise VolumeRuntimeError(f"investigation definition is missing: {item.get('definition_id')}")
+                item["status"] = "COMPLETED"
+                visible = (
+                    sorted(pack.participant_ids)
+                    if definition.visibility.value == "PUBLIC"
+                    else [str(item["actor_id"])]
+                )
+                completed = self._event(
+                    worldline_id,
+                    target,
+                    "INVESTIGATION_COMPLETED",
+                    {"investigation": item, "visibility": visible},
+                    seat_id=item["actor_id"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[item["start_event_id"]],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                item["completion_event_id"] = completed["id"]
+                observation = {
+                    "id": f"{item['id']}:observation",
+                    "investigation_id": item["id"],
+                    "content": definition.observation.content,
+                    "source": definition.observation.source,
+                    "source_ids": list(definition.observation.source_ids),
+                    "reliability": definition.observation.reliability.value,
+                    "obtained_tick": target,
+                    "related_assertions": list(definition.observation.related_assertion_ids),
+                }
+                item["observation"] = observation
+                observed = self._event(
+                    worldline_id,
+                    target,
+                    "OBSERVATION_OBTAINED",
+                    {"observation": observation, "visibility": visible},
+                    seat_id=item["actor_id"],
+                    provenance=Provenance.HISTORICAL.value,
+                    causal_parent_ids=[completed["id"]],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                observation["event_id"] = observed["id"]
+                events.extend([completed, observed])
+                for actor_id in visible:
+                    lifetime = append_knowledge(
+                        actor_id,
+                        {
+                            "kind": "observation",
+                            "event_id": observed["id"],
+                            "observation": observation["content"],
+                            "source": observation["source"],
+                            "source_ids": observation["source_ids"],
+                            "reliability": observation["reliability"],
+                            "obtained_tick": target,
+                            "related_assertions": observation["related_assertions"],
+                            "investigation_id": item["id"],
+                            "crisis_id": crisis_id,
+                        },
+                    )
+                    if lifetime is None:
+                        continue
+                    wake_creates.append(
+                        {
+                            "id": f"{worldline_id}:wake:{observed['id']}:{actor_id}",
+                            "actor_id": actor_id,
+                            "wake_type": "INVESTIGATION_RESULT",
+                            "tick": target,
+                            "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                            "source": "volume-investigation",
+                            "trigger_event_id": observed["id"],
+                            "result": {"investigation_id": item["id"]},
+                        }
+                    )
+            for offer in crisis.get("offers", []):
+                if offer.get("status") != OfferStatus.PROPOSED.value or offer.get("expires_tick") is None:
+                    continue
+                if int(offer["expires_tick"]) != target:
+                    continue
+                offer["status"] = OfferStatus.EXPIRED.value
+                expired = self._event(
+                    worldline_id,
+                    target,
+                    "OFFER_EXPIRED",
+                    {"offer": offer, "visibility": [offer["issuer"], offer["recipient"]]},
+                    seat_id=offer["issuer"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[offer.get("proposal_event_id", "")],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                offer["expiry_event_id"] = expired["id"]
+                events.append(expired)
 
         for crisis_id in sorted(projection.get("crisis_instances", {})):
             crisis = projection["crisis_instances"][crisis_id]
@@ -1207,6 +1419,464 @@ class VolumeRuntime:
             "idempotent": existing is not None,
         }
 
+    def stage_actor_tool(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        source: str = "agent",
+        idempotency_key: str = "",
+    ) -> dict[str, Any]:
+        """Stage one of the existing World tools in the V5 logical moment.
+
+        The Volume keeps the old crisis affordances, but their writes are still
+        staged against the same frozen moment as Human and Agent plans.
+        """
+
+        tool_name = str(tool_name).strip()
+        if tool_name not in VOLUME_WORLD_TOOLS:
+            raise VolumeRuntimeError(f"unsupported V5 World tool: {tool_name}")
+        row = self._active_worldline(worldline_id)
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        pending = projection.get("pending_moment")
+        if not pending:
+            raise VolumeRuntimeConflict("freeze the current logical moment before staging tool")
+        lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
+        if lifetime is None:
+            raise VolumeRuntimeError(f"Lifetime not found: {lifetime_id}")
+        wake = self._pending_wake_for_lifetime(worldline_id, pending, lifetime["seat"])
+        if wake is None:
+            raise VolumeRuntimeConflict(f"{lifetime['seat']} has no Wake in Pending Logical Moment")
+        expected_source = "human" if lifetime["controller"] == "HUMAN" else "agent"
+        if source != expected_source:
+            raise VolumeRuntimeConflict(
+                f"{lifetime['seat']} is controlled by {lifetime['controller']}, not {source}"
+            )
+        arguments = dict(arguments or {})
+        if tool_name not in set(lifetime.get("authority", [])):
+            return self._stage_volume_operation(
+                wake,
+                lifetime,
+                tool_name,
+                arguments,
+                {"status": "rejected", "code": "authority_denied"},
+                idempotency_key=idempotency_key,
+                source=source,
+            )
+        active_packs = self._active_packs_for_actor(worldline_id, lifetime["seat"], projection)
+        action_projection = self._action_projection(projection)
+
+        if tool_name == "update_plan":
+            intent = self._normalize_plan_intent(
+                worldline_id,
+                lifetime,
+                wake,
+                {"type": "update_plan", **arguments},
+                source=source,
+            )
+            self._validate_belief_keys(lifetime, intent)
+            payload = intent
+            result = {"status": "accepted", "moment_id": pending["id"]}
+        elif tool_name == "communicate":
+            payload, result = self._prepare_volume_communication(
+                worldline_id, lifetime, arguments, action_projection, tick
+            )
+        elif tool_name == "schedule_revisit":
+            payload, result = self._prepare_volume_revisit(lifetime, arguments, tick)
+        elif tool_name == "investigate":
+            payload, result = self._prepare_volume_investigation(
+                lifetime, arguments, active_packs, action_projection, tick
+            )
+        elif tool_name == "operate":
+            payload, result = self._prepare_volume_operation(
+                lifetime, arguments, active_packs, action_projection, tick
+            )
+        else:
+            payload, result = self._prepare_volume_offer(
+                lifetime, arguments, active_packs, action_projection, tick
+            )
+        return self._stage_volume_operation(
+            wake,
+            lifetime,
+            tool_name,
+            payload,
+            result,
+            idempotency_key=idempotency_key,
+            source=source,
+        )
+
+    def _pending_wake_for_lifetime(
+        self, worldline_id: str, pending: dict[str, Any], seat: str
+    ) -> dict[str, Any] | None:
+        for wake_id in pending.get("wake_ids", []):
+            wake = self.db.crisis_wake(str(wake_id))
+            if wake is None:
+                continue
+            lifetime = self._lifetime_for_actor(worldline_id, str(wake["actor_id"]))
+            if lifetime is not None and lifetime["seat"] == seat:
+                return wake
+        return None
+
+    def _active_packs_for_actor(
+        self, worldline_id: str, seat: str, projection: dict[str, Any]
+    ) -> list[tuple[str, CrisisPack]]:
+        result: list[tuple[str, CrisisPack]] = []
+        for crisis_id in projection.get("active_crisis_ids", []):
+            pack = self.pack.pack(str(crisis_id))
+            if seat in pack.participant_ids:
+                result.append((str(crisis_id), pack))
+        return result
+
+    def _action_projection(self, projection: dict[str, Any]) -> dict[str, Any]:
+        action = copy.deepcopy(projection)
+        action["entities"] = {}
+        for key in ("operations", "investigations", "offers", "agreements"):
+            action[key] = []
+        for crisis_id in projection.get("active_crisis_ids", []):
+            state = projection.get("crisis_instances", {}).get(str(crisis_id), {})
+            for entity_id, entity in state.get("entities", {}).items():
+                action["entities"][entity_id] = copy.deepcopy(entity)
+            for key in ("operations", "investigations", "offers", "agreements"):
+                action[key].extend(
+                    {**copy.deepcopy(item), "crisis_id": str(crisis_id)}
+                    for item in state.get(key, [])
+                )
+        return action
+
+    @staticmethod
+    def _validate_belief_keys(lifetime: dict[str, Any], intent: dict[str, Any]) -> None:
+        belief_keys = [
+            str(item).strip() for item in intent.get("belief_keys", []) if str(item).strip()
+        ]
+        unknown = set(belief_keys) - set(lifetime["beliefs"])
+        if unknown:
+            raise VolumeRuntimeError("unknown expectation keys: " + ", ".join(sorted(unknown)))
+        intent["belief_keys"] = list(dict.fromkeys(belief_keys))
+
+    def _stage_volume_operation(
+        self,
+        wake: dict[str, Any],
+        lifetime: dict[str, Any],
+        tool_name: str,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+        *,
+        idempotency_key: str,
+        source: str,
+    ) -> dict[str, Any]:
+        moment_id = str(wake["frozen_perspective"].get("moment_id", ""))
+        key = idempotency_key or stable_hash(
+            {"moment_id": moment_id, "seat": lifetime["seat"], "tool": tool_name, "payload": payload}
+        )
+        existing = next(
+            (
+                operation
+                for operation in self.db.crisis_wake_operations(wake["id"])
+                if operation["idempotency_key"] == key
+            ),
+            None,
+        )
+        if existing is not None:
+            return {
+                **existing["result"],
+                "moment_id": moment_id,
+                "operation": existing,
+                "idempotent": True,
+            }
+        stored_payload = {
+            "moment_id": moment_id,
+            "lifetime_id": lifetime["id"],
+            "seat": lifetime["seat"],
+            "source": source,
+            **payload,
+        }
+        operation = self.db.add_crisis_wake_operation(
+            {
+                "wake_id": wake["id"],
+                "tool_name": tool_name,
+                "payload": stored_payload,
+                "result": result,
+                "status": "PROPOSED",
+                "idempotency_key": key,
+            }
+        )
+        if wake["status"] != "STAGED":
+            self.db.update_crisis_wake(wake["id"], status="STAGED")
+        return {
+            **result,
+            "moment_id": moment_id,
+            "operation": operation,
+            "idempotent": False,
+        }
+
+    def _prepare_volume_communication(
+        self,
+        worldline_id: str,
+        lifetime: dict[str, Any],
+        arguments: dict[str, Any],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        recipient = self._reference_id(arguments.get("recipient", ""))
+        content = str(arguments.get("content", "")).strip()
+        if not recipient or recipient == lifetime["seat"] or self._lifetime_for_actor(worldline_id, recipient) is None:
+            return {"recipient": recipient, "content": content}, {"status": "rejected", "code": "invalid_recipient"}
+        if not content or len(content) > 1200:
+            return {"recipient": recipient, "content": content}, {"status": "rejected", "code": "invalid_content"}
+        start = str(projection.get("positions", {}).get(lifetime["seat"], ""))
+        end = str(projection.get("positions", {}).get(recipient, ""))
+        travel = self._volume_route_days(start, end)
+        if travel is None:
+            return {"recipient": recipient, "content": content}, {"status": "rejected", "code": "no_route"}
+        return (
+            {"recipient": recipient, "content": content},
+            {"status": "accepted", "message_id": f"message-{uuid.uuid4().hex[:16]}", "arrival_tick": tick + max(1, travel)},
+        )
+
+    def _prepare_volume_revisit(
+        self, lifetime: dict[str, Any], arguments: dict[str, Any], tick: int
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        after_days = int(arguments.get("after_days", 0) or 0)
+        reason = str(arguments.get("reason", "")).strip()
+        if after_days <= 0 or not reason:
+            return {"after_days": after_days, "reason": reason}, {"status": "rejected", "code": "invalid_revisit"}
+        due_tick = tick + after_days
+        if due_tick >= self._volume_horizon():
+            return {"after_days": after_days, "reason": reason}, {"status": "rejected", "code": "crosses_volume_boundary"}
+        return (
+            {"after_days": after_days, "reason": reason},
+            {"status": "accepted", "revisit_id": f"revisit-{uuid.uuid4().hex[:16]}", "due_tick": due_tick},
+        )
+
+    def _prepare_volume_investigation(
+        self,
+        lifetime: dict[str, Any],
+        arguments: dict[str, Any],
+        active_packs: list[tuple[str, CrisisPack]],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        question = str(arguments.get("question", "")).strip()
+        target = self._reference_id(arguments.get("target", ""))
+        method = str(arguments.get("method", "")).strip()
+        payload = {"question": question, "target": target, "method": method}
+        if not question or len(question) > 1200:
+            return payload, {"status": "rejected", "code": "invalid_question"}
+        for crisis_id, pack in active_packs:
+            request, code = pack.investigation_request(
+                lifetime["seat"], target, method, projection, tick
+            )
+            if request is not None:
+                return (
+                    {**payload, "crisis_id": crisis_id, "definition_id": request.definition.id},
+                    {
+                        "status": "accepted",
+                        "investigation_id": f"investigation-{uuid.uuid4().hex[:16]}",
+                        "definition_id": request.definition.id,
+                        "expected_result_tick": request.expected_result_tick,
+                    },
+                )
+            if code == "investigation_method_required" and not method:
+                return payload, {"status": "rejected", "code": code}
+        return payload, {"status": "rejected", "code": "investigation_unavailable"}
+
+    def _prepare_volume_operation(
+        self,
+        lifetime: dict[str, Any],
+        arguments: dict[str, Any],
+        active_packs: list[tuple[str, CrisisPack]],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        definition_id = self._reference_id(arguments.get("operation_definition_id", ""))
+        targets = [self._reference_id(item) for item in arguments.get("targets", [])]
+        description = str(arguments.get("description", "")).strip()
+        payload = {
+            "operation_definition_id": definition_id,
+            "targets": targets,
+            "description": description,
+        }
+        if not description:
+            return payload, {"status": "rejected", "code": "missing_description"}
+        for crisis_id, pack in active_packs:
+            request, code = pack.operation_request(
+                lifetime["seat"], definition_id, targets, projection, tick
+            )
+            if request is not None:
+                return (
+                    {**payload, "crisis_id": crisis_id},
+                    {
+                        "status": "accepted",
+                        "operation_id": f"operation-{uuid.uuid4().hex[:16]}",
+                        "definition_id": request.definition.id,
+                        "expected_complete_tick": request.expected_complete_tick,
+                        "target_map": request.target_map,
+                        "input_state": request.input_state,
+                    },
+                )
+            if code != "unknown_operation":
+                return payload, {"status": "rejected", "code": code}
+        return payload, {"status": "rejected", "code": "unknown_operation"}
+
+    def _prepare_volume_offer(
+        self,
+        lifetime: dict[str, Any],
+        arguments: dict[str, Any],
+        active_packs: list[tuple[str, CrisisPack]],
+        projection: dict[str, Any],
+        tick: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        action = str(arguments.get("action", "")).strip().upper()
+        offer_id = self._reference_id(arguments.get("offer_id", ""))
+        recipient = self._reference_id(arguments.get("recipient", ""))
+        terms = [dict(item) for item in arguments.get("terms", []) if isinstance(item, dict)]
+        try:
+            expires_after_days = int(arguments.get("expires_after_days", 0) or 0)
+        except (TypeError, ValueError):
+            expires_after_days = -1
+        payload = {
+            "action": action,
+            "offer_id": offer_id,
+            "recipient": recipient,
+            "terms": terms,
+            "message": str(arguments.get("message", "")).strip(),
+            "expires_after_days": expires_after_days,
+        }
+        try:
+            offer_action = OfferAction(action)
+        except ValueError:
+            return payload, {"status": "rejected", "code": "invalid_offer_action"}
+        if payload["expires_after_days"] < 0:
+            return payload, {"status": "rejected", "code": "invalid_offer_expiry"}
+
+        requested: list[AgreementTerm] = []
+        if offer_action in {OfferAction.PROPOSE, OfferAction.COUNTER}:
+            if not payload["message"] or len(payload["message"]) > 1200:
+                return payload, {"status": "rejected", "code": "invalid_offer_message"}
+            if len(terms) > 4:
+                return payload, {"status": "rejected", "code": "invalid_offer_terms"}
+            try:
+                requested = [AgreementTerm.model_validate(term) for term in terms]
+            except (TypeError, ValueError):
+                return payload, {"status": "rejected", "code": "invalid_offer_terms"}
+
+        expires_tick = (
+            tick + payload["expires_after_days"] if payload["expires_after_days"] else None
+        )
+        if expires_tick is not None and expires_tick >= self._volume_horizon():
+            return payload, {"status": "rejected", "code": "crosses_volume_boundary"}
+
+        if offer_action == OfferAction.PROPOSE:
+            if not recipient:
+                return payload, {"status": "rejected", "code": "invalid_offer_recipient"}
+            for crisis_id, pack in active_packs:
+                validated, code = pack.offer_terms_request(
+                    lifetime["seat"], recipient, requested
+                )
+                if validated is not None:
+                    return (
+                        {
+                            **payload,
+                            "crisis_id": crisis_id,
+                            "terms": [term.model_dump(mode="json") for term in validated],
+                        },
+                        {
+                            "status": "accepted",
+                            "offer_id": f"offer-{uuid.uuid4().hex[:16]}",
+                            "created_tick": tick,
+                            "expires_tick": expires_tick,
+                        },
+                    )
+                if code != "invalid_offer_recipient":
+                    return payload, {"status": "rejected", "code": code}
+            return payload, {"status": "rejected", "code": "offer_term_unavailable"}
+
+        offer_context: tuple[str, dict[str, Any], CrisisPack] | None = None
+        for crisis_id, pack in active_packs:
+            state = projection.get("crisis_instances", {}).get(crisis_id, {})
+            offer = next(
+                (item for item in state.get("offers", []) if str(item.get("id")) == offer_id),
+                None,
+            )
+            if offer is not None:
+                offer_context = (crisis_id, offer, pack)
+                break
+        if offer_context is None:
+            return payload, {"status": "rejected", "code": "unknown_offer"}
+        crisis_id, offer, pack = offer_context
+        if offer.get("status") != OfferStatus.PROPOSED.value:
+            return payload, {"status": "rejected", "code": "offer_not_open"}
+        actor_id = lifetime["seat"]
+        if offer_action in {OfferAction.ACCEPT, OfferAction.REJECT, OfferAction.COUNTER} and offer.get(
+            "recipient"
+        ) != actor_id:
+            return payload, {"status": "rejected", "code": "offer_response_denied"}
+        if offer_action == OfferAction.WITHDRAW and offer.get("issuer") != actor_id:
+            return payload, {"status": "rejected", "code": "offer_withdrawal_denied"}
+        if offer_action == OfferAction.COUNTER:
+            validated, code = pack.offer_terms_request(
+                actor_id, str(offer["issuer"]), requested
+            )
+            if validated is None:
+                return payload, {"status": "rejected", "code": code}
+            counter_payload = {
+                **payload,
+                "crisis_id": crisis_id,
+                "recipient": str(offer["issuer"]),
+                "terms": [term.model_dump(mode="json") for term in validated],
+                "parent_offer_id": str(offer["id"]),
+            }
+            if pack.same_agreement_terms(validated, list(offer.get("terms", []))):
+                return counter_payload, {
+                    "status": "accepted",
+                    "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}",
+                    "counter_normalized_to_accept": True,
+                }
+            return counter_payload, {
+                "status": "accepted",
+                "offer_id": f"offer-{uuid.uuid4().hex[:16]}",
+                "parent_offer_id": str(offer["id"]),
+                "created_tick": tick,
+                "expires_tick": expires_tick,
+            }
+        return {**payload, "crisis_id": crisis_id}, {
+            "status": "accepted",
+            "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}"
+            if offer_action == OfferAction.ACCEPT
+            else "",
+        }
+
+    @staticmethod
+    def _reference_id(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            reference = value.get("id", "")
+            return reference.strip() if isinstance(reference, str) else ""
+        return ""
+
+    def _volume_route_days(self, start: str, end: str) -> int | None:
+        if start == end:
+            return 0
+        edges: dict[str, list[tuple[str, int]]] = {}
+        for route in self.pack.world.routes:
+            edges.setdefault(route.from_location, []).append((route.to_location, int(route.travel_days)))
+        queue: list[tuple[int, str]] = [(0, start)]
+        best = {start: 0}
+        while queue:
+            distance, location = queue.pop(0)
+            if location == end:
+                return distance
+            for target, days in edges.get(location, []):
+                candidate = distance + days
+                if candidate < best.get(target, 10**9):
+                    best[target] = candidate
+                    queue.append((candidate, target))
+        return None
+
     def commit_pending_moment(self, worldline_id: str) -> dict[str, Any]:
         """Commit all staged Human and Agent intents in deterministic seat order."""
 
@@ -1255,9 +1925,24 @@ class VolumeRuntime:
         wake_updates: list[dict[str, Any]] = []
         operation_updates: list[dict[str, Any]] = []
         lifetime_updates: list[dict[str, Any]] = []
+        wake_creates: list[dict[str, Any]] = []
         committed_intent_ids: list[str] = []
         for lifetime, wake, operation in staged:
-            intent = dict(operation["payload"]["intent"])
+            operation_payload = operation["payload"]
+            tool_name = str(operation["tool_name"])
+            intent = dict(operation_payload.get("intent", operation_payload))
+            if tool_name == "logical_intent":
+                tool_name = str(intent.get("type", "wait"))
+            elif tool_name == "communicate":
+                intent = {
+                    "type": "message",
+                    "recipient": operation_payload.get("recipient", ""),
+                    "content": operation_payload.get("content", ""),
+                    "delivery_tick": operation["result"].get("arrival_tick", tick + 1),
+                }
+                tool_name = "message"
+            else:
+                intent["type"] = tool_name
             belief_parent_ids = self._belief_parent_ids(
                 worldline_id,
                 lifetime["seat"],
@@ -1280,7 +1965,8 @@ class VolumeRuntime:
                     "moment_id": pending["id"],
                     "wake_id": wake["id"],
                     "seat": lifetime["seat"],
-                    "source": operation["payload"]["source"],
+                    "source": operation_payload["source"],
+                    "tool": operation["tool_name"],
                     "intent": intent,
                     "belief_keys": list(intent.get("belief_keys", [])),
                 },
@@ -1293,7 +1979,26 @@ class VolumeRuntime:
             events.append(intent_event)
             committed_intent_ids.append(intent_event["id"])
             outcome: dict[str, Any] = {"status": "committed", "event_id": intent_event["id"]}
-            if intent["type"] == "update_plan":
+            if operation["result"].get("status") == "rejected":
+                rejected = self._event(
+                    worldline_id,
+                    tick,
+                    "INTENT_REJECTED",
+                    {
+                        "moment_id": pending["id"],
+                        "wake_id": wake["id"],
+                        "seat": lifetime["seat"],
+                        "tool": operation["tool_name"],
+                        "code": operation["result"].get("code", "rejected"),
+                    },
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[intent_event["id"]],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(rejected)
+                outcome = {"status": "rejected", "code": operation["result"].get("code", "rejected")}
+            elif intent["type"] == "update_plan":
                 plan = {
                     "version": f"{pending['id']}:plan:{lifetime['seat']}:{stable_hash(intent)[:12]}",
                     "objective": intent["objective"],
@@ -1365,6 +2070,8 @@ class VolumeRuntime:
                 message = self._logical_message(
                     worldline_id, pending["id"], lifetime["seat"], intent, tick
                 )
+                if operation["tool_name"] == "communicate" and operation["result"].get("message_id"):
+                    message["id"] = str(operation["result"]["message_id"])
                 projection.setdefault("messages", []).append(message)
                 dispatch = self._event(
                     worldline_id,
@@ -1383,6 +2090,142 @@ class VolumeRuntime:
                 outcome.update(
                     {"message_id": message["id"], "delivery_tick": message["delivery_tick"]}
                 )
+            elif intent["type"] == "schedule_revisit":
+                revisit = {
+                    "id": operation["result"]["revisit_id"],
+                    "actor_id": lifetime["seat"],
+                    "reason": intent["reason"],
+                    "created_tick": tick,
+                    "due_tick": int(operation["result"]["due_tick"]),
+                    "status": "PENDING",
+                    "event_id": f"{intent_event['id']}:revisit",
+                }
+                revisits = list(lifetime["revisits"])
+                revisits.append(revisit)
+                revisit_event = self._event(
+                    worldline_id,
+                    tick,
+                    "REVISIT_SCHEDULED",
+                    {"moment_id": pending["id"], "wake_id": wake["id"], "revisit": revisit},
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[intent_event["id"]],
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(revisit_event)
+                lifetime_updates.append(
+                    {
+                        "id": lifetime["id"],
+                        "revisits_json": json.dumps(revisits, ensure_ascii=False, sort_keys=True),
+                    }
+                )
+                wake_creates.append(
+                    {
+                        "id": f"{worldline_id}:wake:{revisit['id']}",
+                        "actor_id": lifetime["seat"],
+                        "wake_type": "REVISIT_DUE",
+                        "tick": revisit["due_tick"],
+                        "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                        "source": "volume-revisit",
+                        "trigger_event_id": revisit_event["id"],
+                        "result": {"revisit_id": revisit["id"]},
+                    }
+                )
+                outcome.update({"revisit_id": revisit["id"], "due_tick": revisit["due_tick"]})
+            elif intent["type"] == "investigate":
+                try:
+                    self._commit_volume_investigation_start(
+                        worldline_id,
+                        tick,
+                        projection,
+                        wake,
+                        operation,
+                        events,
+                        intent_event["id"],
+                    )
+                except VolumeRuntimeConflict:
+                    outcome = self._late_rejection(
+                        worldline_id,
+                        tick,
+                        pending,
+                        wake,
+                        lifetime,
+                        operation,
+                        intent_event,
+                        events,
+                        "commit_conflict",
+                        row["runtime_epoch"],
+                    )
+                else:
+                    outcome.update(
+                        {
+                            "investigation_id": operation["result"].get("investigation_id", ""),
+                            "expected_result_tick": operation["result"].get("expected_result_tick"),
+                        }
+                    )
+            elif intent["type"] == "operate":
+                try:
+                    self._commit_volume_operation_start(
+                        worldline_id,
+                        tick,
+                        projection,
+                        wake,
+                        operation,
+                        events,
+                        intent_event["id"],
+                    )
+                except VolumeRuntimeConflict:
+                    outcome = self._late_rejection(
+                        worldline_id,
+                        tick,
+                        pending,
+                        wake,
+                        lifetime,
+                        operation,
+                        intent_event,
+                        events,
+                        "commit_conflict",
+                        row["runtime_epoch"],
+                    )
+                else:
+                    outcome.update(
+                        {
+                            "operation_id": operation["result"].get("operation_id", ""),
+                            "expected_complete_tick": operation["result"].get("expected_complete_tick"),
+                        }
+                    )
+            elif intent["type"] == "manage_offer":
+                try:
+                    self._commit_volume_offer(
+                        worldline_id,
+                        tick,
+                        projection,
+                        wake,
+                        operation,
+                        events,
+                        wake_creates,
+                        intent_event["id"],
+                    )
+                except VolumeRuntimeConflict:
+                    outcome = self._late_rejection(
+                        worldline_id,
+                        tick,
+                        pending,
+                        wake,
+                        lifetime,
+                        operation,
+                        intent_event,
+                        events,
+                        "commit_conflict",
+                        row["runtime_epoch"],
+                    )
+                else:
+                    outcome.update(
+                        {
+                            "offer_id": operation["result"].get("offer_id", ""),
+                            "agreement_id": operation["result"].get("agreement_id", ""),
+                        }
+                    )
             operation_updates.append(
                 {"id": operation["id"], "status": "COMMITTED", "result": outcome}
             )
@@ -1417,6 +2260,7 @@ class VolumeRuntime:
             current_tick=tick,
             lifetime_updates=lifetime_updates,
             wake_updates=wake_updates,
+            wake_creates=wake_creates,
             operation_updates=operation_updates,
             snapshot=projection,
             expected_current_tick=tick,
@@ -1427,6 +2271,372 @@ class VolumeRuntime:
             "events": events,
             "idempotent": False,
         }
+
+    def _late_rejection(
+        self,
+        worldline_id: str,
+        tick: int,
+        pending: dict[str, Any],
+        wake: dict[str, Any],
+        lifetime: dict[str, Any],
+        operation: dict[str, Any],
+        intent_event: dict[str, Any],
+        events: list[dict[str, Any]],
+        code: str,
+        runtime_epoch: str,
+    ) -> dict[str, Any]:
+        rejected = self._event(
+            worldline_id,
+            tick,
+            "INTENT_REJECTED",
+            {
+                "moment_id": pending["id"],
+                "wake_id": wake["id"],
+                "seat": lifetime["seat"],
+                "tool": operation["tool_name"],
+                "code": code,
+            },
+            seat_id=lifetime["seat"],
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=[intent_event["id"]],
+            runtime_epoch=runtime_epoch,
+        )
+        events.append(rejected)
+        return {"status": "rejected", "code": code}
+
+    def _commit_volume_investigation_start(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        causal_parent_id: str,
+    ) -> None:
+        payload = operation["payload"]
+        result = operation["result"]
+        crisis_id = str(payload.get("crisis_id", ""))
+        pack = self.pack.pack(crisis_id)
+        request, code = pack.investigation_request(
+            str(wake["actor_id"]),
+            str(payload.get("target", "")),
+            str(payload.get("method", "")),
+            self._action_projection(projection),
+            tick,
+        )
+        if request is None or request.definition.id != result.get("definition_id"):
+            raise VolumeRuntimeConflict(f"investigation became unavailable before commit: {code}")
+        state = projection["crisis_instances"][crisis_id]
+        visible = (
+            sorted(pack.participant_ids)
+            if request.definition.visibility.value == "PUBLIC"
+            else [str(wake["actor_id"])]
+        )
+        investigation = {
+            "id": result["investigation_id"],
+            "definition_id": request.definition.id,
+            "actor_id": str(wake["actor_id"]),
+            "question": payload["question"],
+            "target_id": request.target_id,
+            "method": request.definition.method,
+            "started_tick": tick,
+            "expected_result_tick": request.expected_result_tick,
+            "status": "IN_PROGRESS",
+            "visibility": request.definition.visibility.value,
+            "crisis_id": crisis_id,
+        }
+        state.setdefault("investigations", []).append(investigation)
+        started = self._event(
+            worldline_id,
+            tick,
+            "INVESTIGATION_STARTED",
+            {"wake_id": wake["id"], "investigation": investigation, "visibility": visible},
+            seat_id=wake["actor_id"],
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+        )
+        investigation["start_event_id"] = started["id"]
+        events.append(started)
+
+    def _commit_volume_operation_start(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        causal_parent_id: str,
+    ) -> None:
+        payload = operation["payload"]
+        result = operation["result"]
+        crisis_id = str(payload.get("crisis_id", ""))
+        pack = self.pack.pack(crisis_id)
+        request, code = pack.operation_request(
+            str(wake["actor_id"]),
+            str(payload.get("operation_definition_id", "")),
+            list(payload.get("targets", [])),
+            self._action_projection(projection),
+            tick,
+        )
+        if request is None or request.definition.id != result.get("definition_id"):
+            raise VolumeRuntimeConflict(f"operation became unavailable before commit: {code}")
+        state = projection["crisis_instances"][crisis_id]
+        visible = (
+            sorted(pack.participant_ids)
+            if request.definition.visibility.value == "PUBLIC"
+            else [str(wake["actor_id"])]
+        )
+        started = {
+            "id": result["operation_id"],
+            "definition_id": request.definition.id,
+            "actor_id": str(wake["actor_id"]),
+            "target_ids": list(request.target_ids),
+            "target_map": dict(request.target_map),
+            "started_tick": tick,
+            "expected_complete_tick": request.expected_complete_tick,
+            "status": "IN_PROGRESS",
+            "visibility": request.definition.visibility.value,
+            "interruptibility": request.definition.interruptibility,
+            "input_state": dict(request.input_state),
+            "result_state": {},
+            "description": payload["description"],
+            "crisis_id": crisis_id,
+        }
+        state.setdefault("operations", []).append(started)
+        started_event = self._event(
+            worldline_id,
+            tick,
+            "OPERATION_STARTED",
+            {"wake_id": wake["id"], "operation": started, "visibility": visible},
+            seat_id=wake["actor_id"],
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+        )
+        started["start_event_id"] = started_event["id"]
+        events.append(started_event)
+        for effect in request.definition.start_effects:
+            entity_id = request.target_map.get(effect.subject, effect.subject)
+            entity = state["entities"].get(entity_id)
+            if entity is None or entity["state"] == effect.state:
+                continue
+            before = entity["state"]
+            entity["state"] = effect.state
+            events.append(
+                self._event(
+                    worldline_id,
+                    tick,
+                    "ENTITY_STATE_CHANGED",
+                    {
+                        "operation_id": started["id"],
+                        "crisis_id": crisis_id,
+                        "entity_id": entity_id,
+                        "before": before,
+                        "after": effect.state,
+                        "phase": "start",
+                        "visibility": visible,
+                    },
+                    seat_id=wake["actor_id"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[started_event["id"]],
+                    runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+                )
+            )
+
+    def _commit_volume_offer(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        operation: dict[str, Any],
+        events: list[dict[str, Any]],
+        wake_creates: list[dict[str, Any]],
+        causal_parent_id: str,
+    ) -> None:
+        payload = operation["payload"]
+        result = operation["result"]
+        crisis_id = str(payload.get("crisis_id", ""))
+        state = projection["crisis_instances"][crisis_id]
+        offers = state.setdefault("offers", [])
+        action = str(payload.get("action", "")).upper()
+
+        def queue_wake(actor_id: str, wake_type: str, trigger_event_id: str, result_data: dict[str, Any]) -> None:
+            lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
+            if lifetime is None:
+                return
+            wake_creates.append(
+                {
+                    "id": f"{worldline_id}:wake:{trigger_event_id}:{actor_id}:{wake_type}",
+                    "actor_id": actor_id,
+                    "wake_type": wake_type,
+                    "tick": tick,
+                    "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                    "source": "volume-offer",
+                    "trigger_event_id": trigger_event_id,
+                    "result": result_data,
+                }
+            )
+
+        if action == OfferAction.PROPOSE.value:
+            offer = {
+                "id": result["offer_id"],
+                "issuer": str(wake["actor_id"]),
+                "recipient": str(payload["recipient"]),
+                "terms": list(payload.get("terms", [])),
+                "message": payload.get("message", ""),
+                "created_tick": tick,
+                "expires_tick": result.get("expires_tick"),
+                "status": OfferStatus.PROPOSED.value,
+                "visibility": "PRIVATE",
+                "crisis_id": crisis_id,
+            }
+            offers.append(offer)
+            proposed = self._event(
+                worldline_id,
+                tick,
+                "OFFER_PROPOSED",
+                {
+                    "wake_id": wake["id"],
+                    "offer": offer,
+                    "visibility": sorted({offer["issuer"], offer["recipient"]}),
+                },
+                seat_id=wake["actor_id"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+            )
+            offer["proposal_event_id"] = proposed["id"]
+            events.append(proposed)
+            queue_wake(
+                offer["recipient"],
+                "OFFER_CHANGE",
+                proposed["id"],
+                {"offer_id": offer["id"]},
+            )
+            return
+        offer = next((item for item in offers if str(item.get("id")) == str(payload.get("offer_id"))), None)
+        if offer is None or offer.get("status") != OfferStatus.PROPOSED.value:
+            raise VolumeRuntimeConflict("offer is no longer open at commit")
+        visible = sorted({str(offer["issuer"]), str(offer["recipient"])})
+        normalized_counter = action == OfferAction.COUNTER.value and bool(
+            result.get("counter_normalized_to_accept")
+        )
+        if normalized_counter:
+            action = OfferAction.ACCEPT.value
+        if action == OfferAction.COUNTER.value:
+            offer["status"] = OfferStatus.COUNTERED.value
+            counter_offer = {
+                "id": result["offer_id"],
+                "issuer": str(wake["actor_id"]),
+                "recipient": str(offer["issuer"]),
+                "terms": list(payload.get("terms", [])),
+                "message": payload.get("message", ""),
+                "created_tick": tick,
+                "expires_tick": result.get("expires_tick"),
+                "status": OfferStatus.PROPOSED.value,
+                "parent_offer_id": offer["id"],
+                "visibility": "PRIVATE",
+                "crisis_id": crisis_id,
+            }
+            offers.append(counter_offer)
+            countered = self._event(
+                worldline_id,
+                tick,
+                "OFFER_COUNTERED",
+                {
+                    "wake_id": wake["id"],
+                    "offer": offer,
+                    "counter_offer": counter_offer,
+                    "visibility": visible,
+                },
+                seat_id=wake["actor_id"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+            )
+            offer["counter_event_id"] = countered["id"]
+            counter_offer["proposal_event_id"] = countered["id"]
+            events.append(countered)
+            queue_wake(
+                counter_offer["recipient"],
+                "OFFER_CHANGE",
+                countered["id"],
+                {"offer_id": counter_offer["id"]},
+            )
+            return
+        if action == OfferAction.ACCEPT.value:
+            offer["status"] = OfferStatus.ACCEPTED.value
+            accepted = self._event(
+                worldline_id,
+                tick,
+                "OFFER_ACCEPTED",
+                {"wake_id": wake["id"], "offer": offer, "visibility": visible},
+                seat_id=wake["actor_id"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+            )
+            offer["accept_event_id"] = accepted["id"]
+            events.append(accepted)
+            agreement = {
+                "id": result["agreement_id"],
+                "parties": visible,
+                "terms": list(offer["terms"]),
+                "effective_tick": tick,
+                "status": AgreementStatus.ACTIVE.value,
+                "source_offer_ids": [offer["id"]],
+                "visibility": "PRIVATE",
+                "crisis_id": crisis_id,
+            }
+            state.setdefault("agreements", []).append(agreement)
+            created = self._event(
+                worldline_id,
+                tick,
+                "AGREEMENT_CREATED",
+                {"wake_id": wake["id"], "agreement": agreement, "visibility": visible},
+                seat_id=wake["actor_id"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[accepted["id"]],
+                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+            )
+            agreement["creation_event_id"] = created["id"]
+            events.append(created)
+            for party_id in visible:
+                queue_wake(
+                    party_id,
+                    "AGREEMENT_CHANGE",
+                    created["id"],
+                    {"agreement_id": agreement["id"]},
+                )
+            return
+        event_type = {
+            OfferAction.REJECT.value: "OFFER_REJECTED",
+            OfferAction.WITHDRAW.value: "OFFER_WITHDRAWN",
+        }.get(action)
+        if event_type is None:
+            raise VolumeRuntimeError(f"unsupported V5 offer action: {action}")
+        offer["status"] = {
+            "OFFER_REJECTED": OfferStatus.REJECTED.value,
+            "OFFER_WITHDRAWN": OfferStatus.WITHDRAWN.value,
+        }[event_type]
+        changed = self._event(
+            worldline_id,
+            tick,
+            event_type,
+            {"wake_id": wake["id"], "offer": offer, "visibility": visible},
+            seat_id=wake["actor_id"],
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+        )
+        offer["status_event_id"] = changed["id"]
+        events.append(changed)
+        counterpart = offer["issuer"] if action == OfferAction.REJECT.value else offer["recipient"]
+        queue_wake(counterpart, "OFFER_CHANGE", changed["id"], {"offer_id": offer["id"]})
 
     def _active_worldline(self, worldline_id: str) -> dict[str, Any]:
         row = self.db.worldline(worldline_id)

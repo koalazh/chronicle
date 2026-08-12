@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import replace
 
@@ -271,3 +272,91 @@ def test_later_action_trace_reuses_expectation_and_selective_memory(app_config):
     response = dev_client.get(f"/api/dev/worldlines/{worldline_id}/why/{message_event['id']}")
     assert response.status_code == 200
     assert response.json()["controller"] == "human"
+
+
+def test_memory_ablation_paired_fixture_changes_bounded_future_action(app_config):
+    with_memory, with_worldline, with_wu, with_dorgon = _runtime(
+        app_config, "memory-ablation-with"
+    )
+    without_memory, without_worldline, without_wu, without_dorgon = _runtime(
+        app_config, "memory-ablation-without"
+    )
+    relevant_line = "上一轮：多尔衮的承诺必须等实际行动验证。"
+    for runtime, worldline_id, wu in (
+        (with_memory, with_worldline, with_wu),
+        (without_memory, without_worldline, without_wu),
+    ):
+        memory_text = f"{relevant_line}\n不相关：远方天气。" if runtime is with_memory else "不相关：远方天气。"
+        runtime.db.update_worldline_lifetime(
+            worldline_id,
+            wu["seat"],
+            memory_text=memory_text,
+            memory_hash=content_hash(memory_text),
+        )
+
+    perspectives = []
+    for runtime, worldline_id, wu in (
+        (with_memory, with_worldline, with_wu),
+        (without_memory, without_worldline, without_wu),
+    ):
+        runtime.freeze_pending_moment(worldline_id)
+        wake = next(
+            runtime.db.crisis_wake(wake_id)
+            for wake_id in runtime.worldline(worldline_id)["projection"]["pending_moment"]["wake_ids"]
+            if runtime.db.crisis_wake(wake_id)["actor_id"] in {wu["id"], wu["seat"]}
+        )
+        perspectives.append(wake["frozen_perspective"])
+
+    assert relevant_line in perspectives[0]["context"]["subjective_memory"]["text"]
+    assert relevant_line not in perspectives[1]["context"]["subjective_memory"]["text"]
+
+    def ablated_policy(perspective: dict[str, object]) -> dict[str, object]:
+        memory = str(perspective["context"]["subjective_memory"]["text"])
+        if relevant_line in memory:
+            return {
+                "type": "message",
+                "recipient": "dorgon",
+                "content": "请以行动证明承诺。",
+                "delivery_tick": 3,
+            }
+        return {
+            "type": "update_plan",
+            "objective": "重新核验承诺",
+            "steps": ["等待新的可见行动"],
+            "rationale": "",
+            "rationale_source": "unstated",
+        }
+
+    with_memory.stage_intent(
+        with_worldline,
+        with_wu["id"],
+        ablated_policy(perspectives[0]),
+        source="human",
+    )
+    with_memory.stage_intent(
+        with_worldline, with_dorgon["id"], {"type": "wait"}, source="agent"
+    )
+    without_memory.stage_intent(
+        without_worldline,
+        without_wu["id"],
+        ablated_policy(perspectives[1]),
+        source="human",
+    )
+    without_memory.stage_intent(
+        without_worldline, without_dorgon["id"], {"type": "wait"}, source="agent"
+    )
+    with_memory.commit_pending_moment(with_worldline)
+    without_memory.commit_pending_moment(without_worldline)
+
+    def wu_intent(runtime, worldline_id):
+        return next(
+            event["payload"]["intent"]
+            for event in runtime.db.worldline_events(worldline_id)
+            if event["event_type"] == "INTENT_COMMITTED" and event["seat_id"] == "wu-sangui"
+        )
+
+    with_intent = wu_intent(with_memory, with_worldline)
+    without_intent = wu_intent(without_memory, without_worldline)
+    assert with_intent["type"] == "message"
+    assert without_intent["type"] == "update_plan"
+    assert copy.deepcopy(with_intent) != copy.deepcopy(without_intent)

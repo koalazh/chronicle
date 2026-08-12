@@ -45,7 +45,8 @@ def test_volume_runtime_uses_one_clock_for_multiple_crises(host):
         "convene_recognition_assembly"
         in projection["affordances"]["nanjing-succession"]["operations"]
     )
-    assert len(runtime.activate_crisis(worldline_id, "before-shanhaiguan")["crisis_instances"]) == 2
+    assert len(runtime.activate_crisis(worldline_id, "before-shanhaiguan")["crisis_instances"]) == 3
+    assert projection["active_crisis_ids"] == ["before-shanhaiguan", "nanjing-succession"]
     assert runtime.next_tick(worldline_id) == 1
 
     first_step = runtime.advance_one(worldline_id)

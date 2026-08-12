@@ -6,8 +6,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from chronicle import world_mcp
+from chronicle import hermes, world_mcp
+from chronicle.app import create_app
 from chronicle.host import ChronicleHost
 from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
 from chronicle.world import WorldAccessError, token_hash
@@ -70,6 +72,112 @@ def test_live_volume_binding_owns_each_materialized_world_token(app_config, monk
 
     assert {seat for seat, binding in bindings.items() if binding["token_hash"]} == set(tokens)
     assert all(binding["token_hash"] == token_hash(tokens[seat]) for seat, binding in bindings.items())
+
+
+def test_live_volume_startup_reconciles_profiles_bindings_and_gateway(
+    app_config, monkeypatch
+):
+    config = replace(app_config, dev=True)
+    records: dict[str, dict[str, dict[str, str]]] = {}
+    ensured: list[tuple[str, str]] = []
+
+    def fake_materialize(_config, worldline_id, lifetimes, **_kwargs):
+        result = {}
+        for lifetime in lifetimes:
+            seat = str(lifetime["id"])
+            profile = f"chronicle-{worldline_id}-{seat}"
+            result[seat] = {
+                "profile": profile,
+                "profile_key": f"key-{seat}",
+                "world_token": f"token-{seat}",
+                "ownership_marker": hermes.stable_lifetime_profile_marker(
+                    worldline_id, seat, profile
+                ),
+                "world_server_name": hermes.lifetime_world_server_name(worldline_id, seat),
+            }
+        records[worldline_id] = result
+        return result
+
+    def fake_load(_config, worldline_id, lifetimes, **_kwargs):
+        assert all(str(item["id"]).startswith(f"{worldline_id}:lifetime:") for item in lifetimes)
+        return {
+            seat: {
+                **record,
+                "lifetime_id": seat,
+            }
+            for seat, record in records[worldline_id].items()
+        }
+
+    def fake_ensure(_controller, worldline_id, runtime_epoch):
+        ensured.append((worldline_id, runtime_epoch))
+
+    monkeypatch.setattr("chronicle.hermes.materialize_lifetime_profiles", fake_materialize)
+    monkeypatch.setattr("chronicle.hermes.load_lifetime_profile_records", fake_load)
+    monkeypatch.setattr("chronicle.gateway.GatewayController.ensure", fake_ensure)
+
+    created = ChronicleHost(config).volume_runtime.create(runtime_mode="live")
+    worldline_id = created["worldline"]["id"]
+    assert created["worldline"]["runtime_phase"] == "BOOTSTRAPPING"
+
+    with TestClient(create_app(config)):
+        pass
+
+    reconciled = ChronicleHost(config).db.worldline(worldline_id)
+    assert reconciled is not None
+    assert reconciled["runtime_phase"] == "READY"
+    assert ensured == [(worldline_id, reconciled["runtime_epoch"])]
+
+
+def test_live_volume_reconcile_fails_closed_on_binding_identity_drift(
+    app_config, monkeypatch
+):
+    config = replace(app_config, dev=True)
+    records: dict[str, dict[str, dict[str, str]]] = {}
+
+    def fake_materialize(_config, worldline_id, lifetimes, **_kwargs):
+        result = {}
+        for lifetime in lifetimes:
+            seat = str(lifetime["id"])
+            profile = f"chronicle-{worldline_id}-{seat}"
+            result[seat] = {
+                "profile": profile,
+                "world_token": f"token-{seat}",
+                "ownership_marker": hermes.stable_lifetime_profile_marker(
+                    worldline_id, seat, profile
+                ),
+                "world_server_name": hermes.lifetime_world_server_name(worldline_id, seat),
+            }
+        records[worldline_id] = result
+        return result
+
+    def fake_load(_config, worldline_id, _lifetimes, **_kwargs):
+        return {
+            seat: {
+                **record,
+                "lifetime_id": seat,
+            }
+            for seat, record in records[worldline_id].items()
+        }
+
+    monkeypatch.setattr("chronicle.hermes.materialize_lifetime_profiles", fake_materialize)
+    monkeypatch.setattr("chronicle.hermes.load_lifetime_profile_records", fake_load)
+    monkeypatch.setattr("chronicle.gateway.GatewayController.ensure", lambda *_args: None)
+
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create(runtime_mode="live")
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute(
+            "UPDATE worldline_agent_bindings SET token_hash = ? WHERE worldline_id = ? AND role = ?",
+            ("drifted", worldline_id, "wu-sangui"),
+        )
+
+    with pytest.raises(ValueError, match="identity is inconsistent"):
+        host.volume_runtime.reconcile_live_runtime(worldline_id)
+    failed = host.db.worldline(worldline_id)
+    assert failed is not None
+    assert failed["runtime_phase"] == "FAILED"
+    assert failed["runtime_error_code"] == "volume_reconcile_failed"
 
 
 def test_volume_mcp_requires_exact_wake_when_one_lifetime_has_duplicate_wakes(

@@ -7,7 +7,16 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from . import hermes
-from .crisis import AgreementStatus, AgreementTerm, CrisisPack, OfferAction, OfferStatus, VolumePack
+from .crisis import (
+    AgreementStatus,
+    AgreementTerm,
+    CrisisActivationPreconditionKind,
+    CrisisPack,
+    CrisisReference,
+    OfferAction,
+    OfferStatus,
+    VolumePack,
+)
 from .db import content_hash, stable_hash
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_continuity import LifetimeContextBuilder
@@ -185,6 +194,33 @@ class VolumeRuntime:
                     runtime_epoch=runtime_epoch,
                 )
             )
+        envelope_instances = []
+        for reference in self.pack.volume.crises:
+            pack = self.pack.pack(reference.id)
+            events.append(
+                self._event(
+                    worldline_id,
+                    0,
+                    "CRISIS_ENVELOPE_REGISTERED",
+                    {
+                        "crisis_id": reference.id,
+                        "earliest_activation_tick": reference.earliest_activation_tick,
+                        "activation_preconditions": [
+                            item.model_dump(mode="json")
+                            for item in reference.activation_preconditions
+                        ],
+                        "participants": list(reference.participants or pack.participant_ids),
+                        "local_horizon": reference.local_horizon,
+                    },
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[initialized["id"]],
+                    event_id=f"{worldline_id}:envelope:{reference.id}:registered",
+                    runtime_epoch=runtime_epoch,
+                )
+            )
+            envelope_instances.append(
+                self._envelope_instance(worldline_id, reference, pack, runtime_epoch)
+            )
 
         values = {
             "id": worldline_id,
@@ -227,7 +263,11 @@ class VolumeRuntime:
                 raise hermes.HermesRuntimeError(str(exc)) from exc
         try:
             worldline = self.db.create_worldline_bundle(
-                values, events, lifetime_values, initial_projection
+                values,
+                events,
+                lifetime_values,
+                initial_projection,
+                instance_creates=envelope_instances,
             )
             bindings = []
             for lifetime in lifetime_values:
@@ -270,8 +310,8 @@ class VolumeRuntime:
             "profile_records": profile_records,
         }
 
-    def ensure_live_runtime(self, worldline_id: str) -> dict[str, Any]:
-        """Ensure the exact V5 Volume Gateway is ready before live cognition."""
+    def reconcile_live_runtime(self, worldline_id: str) -> dict[str, Any]:
+        """Reconcile a live Volume without repairing identity or pending work."""
 
         from .gateway import GatewayController, GatewayRuntimeError
 
@@ -280,16 +320,110 @@ class VolumeRuntime:
             raise VolumeRuntimeError("VOLUME Worldline not found")
         if row["runtime_mode"] != "live":
             return row
+        if row["status"] == WorldlineStatus.SEALED.value:
+            if row.get("runtime_phase") == "CLEANUP_PENDING":
+                self._cleanup_profiles_after_seal(row)
+            return self.db.worldline(worldline_id) or row
         if row["status"] != WorldlineStatus.ACTIVE.value:
-            raise VolumeRuntimeConflict("Volume Worldline is sealed")
+            raise VolumeRuntimeConflict("Volume Worldline is not active")
+
         try:
+            active_volumes = [
+                item
+                for item in self.db.worldlines(status=WorldlineStatus.ACTIVE.value)
+                if item.get("kind") == WorldlineKind.VOLUME.value
+            ]
+            if len(active_volumes) != 1 or active_volumes[0]["id"] != worldline_id:
+                raise VolumeRuntimeError("V5 Volume Worldline owner is not unique")
+            lifetimes = self.db.worldline_lifetimes(worldline_id)
+            expected_lifetimes = set(self.pack.lifetimes)
+            if {str(item["seat"]) for item in lifetimes} != expected_lifetimes:
+                raise VolumeRuntimeError("V5 Lifetime binding set is incomplete")
+            bindings = self.db.agent_bindings(worldline_id)
+            if {str(item["role"]) for item in bindings} != expected_lifetimes:
+                raise VolumeRuntimeError("V5 agent binding set is incomplete")
+            if any(str(item.get("status")) != "ACTIVE" for item in bindings):
+                raise VolumeRuntimeError("V5 agent binding is not active")
+            profile_records = hermes.load_lifetime_profile_records(
+                self.host.config,
+                worldline_id,
+                lifetimes,
+                volume_id=str(row.get("volume_id") or self.volume_id),
+                content_version=int(row.get("volume_content_version") or 0),
+                content_hash=str(row.get("volume_content_hash") or ""),
+                runtime_epoch=str(row.get("runtime_epoch") or ""),
+            )
+            records_by_seat = {
+                str(record["lifetime_id"]): record for record in profile_records.values()
+            }
+            for binding in bindings:
+                seat = str(binding["role"])
+                lifetime = self.db.worldline_lifetime(worldline_id, seat)
+                record = records_by_seat.get(seat)
+                if lifetime is None or record is None:
+                    raise VolumeRuntimeError(f"V5 binding is missing for {seat}")
+                if (
+                    str(binding["profile_identity"]) != str(record["profile"])
+                    or str(lifetime.get("profile_name")) != str(record["profile"])
+                    or str(binding["ownership_marker"]) != str(record["ownership_marker"])
+                    or str(binding["token_hash"]) != token_hash(str(record["world_token"]))
+                ):
+                    raise VolumeRuntimeError(f"V5 binding identity is inconsistent for {seat}")
+            self._validate_pending_reconcile(worldline_id)
             GatewayController(self.host.config).ensure(
                 worldline_id, str(row["runtime_epoch"])
             )
-        except GatewayRuntimeError as exc:
-            self.db.set_volume_runtime_state(worldline_id, "FAILED", error_code=exc.code)
-            raise VolumeRuntimeError(f"V5 Hermes Gateway is not ready: {exc.code}") from exc
+        except (GatewayRuntimeError, hermes.HermesRuntimeError, VolumeRuntimeError, RuntimeError) as exc:
+            self.db.set_volume_runtime_state(
+                worldline_id, "FAILED", error_code="volume_reconcile_failed"
+            )
+            if isinstance(exc, VolumeRuntimeError):
+                raise
+            raise VolumeRuntimeError(f"V5 Volume reconcile failed: {exc}") from exc
         return self.db.set_volume_runtime_state(worldline_id, "READY")
+
+    def _validate_pending_reconcile(self, worldline_id: str) -> None:
+        row = self.db.worldline(worldline_id)
+        if row is None:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        snapshot = self.db.worldline_snapshot(worldline_id, int(row["current_tick"]))
+        if snapshot is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        pending = snapshot["projection"].get("pending_moment")
+        if pending:
+            if pending.get("phase") != "FROZEN":
+                raise VolumeRuntimeError("Pending Logical Moment is not recoverable")
+            for wake_id in pending.get("wake_ids", []):
+                wake = self.db.crisis_wake(str(wake_id))
+                if wake is None or wake["status"] not in {
+                    "QUEUED",
+                    "WAITING_HUMAN",
+                    "STAGED",
+                }:
+                    raise VolumeRuntimeError("Pending Logical Moment contains an invalid Wake")
+                operations = self.db.crisis_wake_operations(str(wake_id))
+                if any(item["payload"].get("moment_id") != pending["id"] for item in operations):
+                    raise VolumeRuntimeError("Wake operation belongs to another Logical Moment")
+                if wake["status"] == "STAGED" and len(operations) != 1:
+                    raise VolumeRuntimeError("staged Wake operation is not recoverable")
+                if wake["status"] != "STAGED" and operations:
+                    raise VolumeRuntimeError("unstaged Wake has a persisted operation")
+        for wake in self.db.subject_wakes(worldline_id):
+            if wake["status"] == "RUNNING":
+                raise VolumeRuntimeError("a live Wake was interrupted while running")
+            if wake["status"] == "STAGED" and not pending:
+                raise VolumeRuntimeError("staged Wake is not attached to a Pending Logical Moment")
+
+    def ensure_live_runtime(self, worldline_id: str) -> dict[str, Any]:
+        """Ensure the exact V5 Volume Gateway is ready before live cognition."""
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        if row["runtime_mode"] != "live":
+            return row
+        if row["status"] != WorldlineStatus.ACTIVE.value:
+            raise VolumeRuntimeConflict("Volume Worldline is sealed")
+        return self.reconcile_live_runtime(worldline_id)
 
     def worldline(self, worldline_id: str) -> dict[str, Any]:
         row = self._active_worldline(worldline_id)
@@ -409,26 +543,30 @@ class VolumeRuntime:
             GatewayController(self.host.config).stop(
                 str(row["id"]), str(row["runtime_epoch"])
             )
-        except GatewayRuntimeError as exc:
-            self.db.set_volume_runtime_state(
-                str(row["id"]), "CLEANUP_PENDING", error_code=exc.code
+            lifetimes = self.db.worldline_lifetimes(str(row["id"]))
+            profiles = [
+                str(
+                    lifetime.get("profile_name")
+                    or hermes.lifetime_profile_name(row["id"], lifetime["seat"])
+                )
+                for lifetime in lifetimes
+            ]
+            server_names = [
+                hermes.lifetime_world_server_name(row["id"], str(lifetime["seat"]))
+                for lifetime in lifetimes
+            ]
+            hermes.cleanup_volume_runtime(
+                self.host.config,
+                str(row["id"]),
+                profiles,
+                server_names=server_names,
             )
-            raise VolumeRuntimeError(f"V5 Hermes Gateway cleanup failed: {exc.code}") from exc
-        lifetimes = self.db.worldline_lifetimes(str(row["id"]))
-        profiles = [
-            str(lifetime.get("profile_name") or hermes.lifetime_profile_name(row["id"], lifetime["seat"]))
-            for lifetime in lifetimes
-        ]
-        server_names = [
-            hermes.lifetime_world_server_name(row["id"], str(lifetime["seat"]))
-            for lifetime in lifetimes
-        ]
-        hermes.cleanup_volume_runtime(
-            self.host.config,
-            str(row["id"]),
-            profiles,
-            server_names=server_names,
-        )
+        except (GatewayRuntimeError, RuntimeError, OSError) as exc:
+            error_code = getattr(exc, "code", "volume_cleanup_failed")
+            self.db.set_volume_runtime_state(
+                str(row["id"]), "CLEANUP_PENDING", error_code=error_code
+            )
+            raise VolumeRuntimeError(f"V5 Volume cleanup failed: {error_code}") from exc
 
     def lifetime_context(
         self, worldline_id: str, lifetime_id: str, *, wake_id: str | None = None
@@ -449,6 +587,204 @@ class VolumeRuntime:
         self._active_worldline(worldline_id)
         return LifetimeContextBuilder(self.db, self.pack).causal_trace(worldline_id, event_id)
 
+    def _envelope_instance(
+        self,
+        worldline_id: str,
+        reference: CrisisReference,
+        pack: CrisisPack,
+        runtime_epoch: str,
+    ) -> dict[str, Any]:
+        return {
+            "id": self._instance_db_id(worldline_id, reference.id),
+            "worldline_id": worldline_id,
+            "crisis_id": reference.id,
+            "content_version": pack.crisis.version,
+            "content_hash": pack.content_hash,
+            "status": CrisisInstanceStatus.DORMANT.value,
+            "phase": "DORMANT",
+            "activation_tick": 0,
+            "local_origin_tick": 0,
+            "resolution_contract_id": pack.crisis.resolution_contract.id,
+            "resolution_contract_version": pack.crisis.resolution_contract.version,
+            "resolution_seed": stable_hash(
+                {"worldline_id": worldline_id, "crisis_id": reference.id, "envelope": True}
+            )[:32],
+            "outcome": {},
+            "runtime_epoch": runtime_epoch,
+        }
+
+    @staticmethod
+    def _envelope_projection_state(reference: CrisisReference, pack: CrisisPack) -> dict[str, Any]:
+        return {
+            "crisis_id": reference.id,
+            "status": CrisisInstanceStatus.DORMANT.value,
+            "phase": "DORMANT",
+            "activation_tick": 0,
+            "local_origin_tick": 0,
+            "participants": list(reference.participants or pack.participant_ids),
+            "envelope": {
+                "earliest_activation_tick": reference.earliest_activation_tick,
+                "activation_preconditions": [
+                    item.model_dump(mode="json") for item in reference.activation_preconditions
+                ],
+                "participants": list(reference.participants or pack.participant_ids),
+                "local_horizon": reference.local_horizon,
+            },
+            "entities": {},
+            "message_ids": [],
+            "operations": [],
+            "investigations": [],
+            "offers": [],
+            "agreements": [],
+            "available_affordances": {},
+            "pressures": [],
+            "resolution": {"status": "DORMANT"},
+            "resolution_reports": [],
+            "settlement": {"status": "DORMANT"},
+        }
+
+    def _envelope_reference(self, crisis_id: str) -> CrisisReference:
+        for reference in self.pack.volume.crises:
+            if reference.id == crisis_id:
+                return reference
+        raise VolumeRuntimeError(f"unknown Crisis envelope: {crisis_id}")
+
+    def _envelope_decision(
+        self,
+        worldline_id: str,
+        crisis_id: str,
+        projection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        reference = self._envelope_reference(crisis_id)
+        row = self.db.worldline(worldline_id)
+        if row is None:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        current_tick = int(row["current_tick"])
+        if current_tick < reference.earliest_activation_tick:
+            return {
+                "status": CrisisInstanceStatus.DORMANT.value,
+                "reason": "earliest_activation_tick",
+            }
+        projection = projection or self._snapshot_projection(worldline_id, current_tick)
+        for precondition in reference.activation_preconditions:
+            if precondition.kind == CrisisActivationPreconditionKind.CRISIS_STATUS:
+                source = next(
+                    (
+                        item
+                        for item in self.db.crisis_instances(worldline_id)
+                        if item["crisis_id"] == precondition.crisis_id
+                    ),
+                    None,
+                )
+                source_status = str(source["status"]) if source else "MISSING"
+                if source_status in set(precondition.suppressed_statuses):
+                    return {
+                        "status": CrisisInstanceStatus.SUPPRESSED.value,
+                        "reason": f"precondition {precondition.id}: {source_status}",
+                    }
+                if source_status not in set(precondition.required_statuses):
+                    return {
+                        "status": CrisisInstanceStatus.DORMANT.value,
+                        "reason": f"precondition {precondition.id}: {source_status}",
+                    }
+            elif precondition.kind == CrisisActivationPreconditionKind.SHARED_ENTITY_STATE:
+                entity = projection.get("entities", {}).get(precondition.entity_id, {})
+                state = str(entity.get("state", "MISSING")) if isinstance(entity, dict) else "MISSING"
+                if state not in set(precondition.required_states):
+                    return {
+                        "status": CrisisInstanceStatus.DORMANT.value,
+                        "reason": f"precondition {precondition.id}: {state}",
+                    }
+        return {"status": "ELIGIBLE", "reason": "all preconditions satisfied"}
+
+    def reconcile_crisis_envelopes(self, worldline_id: str) -> dict[str, Any]:
+        """Apply deterministic activation/suppression policy to dormant envelopes."""
+
+        row = self._active_worldline(worldline_id)
+        projection = self._snapshot_projection(worldline_id, int(row["current_tick"]))
+        if projection.get("pending_moment"):
+            raise VolumeRuntimeConflict("Crisis envelopes cannot reconcile during a Pending Logical Moment")
+        events: list[dict[str, Any]] = []
+        for reference in self.pack.volume.crises:
+            existing = next(
+                (
+                    item
+                    for item in self.db.crisis_instances(worldline_id)
+                    if item["crisis_id"] == reference.id
+                ),
+                None,
+            )
+            if existing is None or existing["status"] != CrisisInstanceStatus.DORMANT.value:
+                continue
+            decision = self._envelope_decision(worldline_id, reference.id, projection)
+            if decision["status"] == CrisisInstanceStatus.SUPPRESSED.value:
+                result = self._suppress_dormant_crisis(
+                    worldline_id, reference.id, str(decision["reason"])
+                )
+                events.extend(result["events"])
+            elif decision["status"] == "ELIGIBLE":
+                result = self.activate_crisis(worldline_id, reference.id)
+                events.extend(result.get("events", []))
+            if events:
+                projection = self._snapshot_projection(
+                    worldline_id, int(self.db.worldline(worldline_id)["current_tick"])
+                )
+        return {"worldline": self.db.worldline(worldline_id), "events": events}
+
+    def _suppress_dormant_crisis(
+        self, worldline_id: str, crisis_id: str, reason: str
+    ) -> dict[str, Any]:
+        row = self._active_worldline(worldline_id)
+        instance = self._instance_for_crisis(worldline_id, crisis_id)
+        if instance["status"] == CrisisInstanceStatus.SUPPRESSED.value:
+            return {"worldline": row, "events": [], "idempotent": True}
+        if instance["status"] != CrisisInstanceStatus.DORMANT.value:
+            raise VolumeRuntimeConflict(f"Crisis Instance {crisis_id} cannot be suppressed from {instance['status']}")
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        state = projection.get("crisis_instances", {}).get(crisis_id)
+        if state is None:
+            raise VolumeRuntimeError(f"Crisis envelope projection is missing: {crisis_id}")
+        state.update(
+            {
+                "status": CrisisInstanceStatus.SUPPRESSED.value,
+                "phase": "SUPPRESSED",
+                "suppression_reason": reason,
+                "resolution": {"status": "SUPPRESSED", "reason": reason},
+                "settlement": {"status": "SUPPRESSED", "reason": reason},
+            }
+        )
+        event = self._event(
+            worldline_id,
+            tick,
+            "CRISIS_SUPPRESSED",
+            {"crisis_id": crisis_id, "reason": reason},
+            provenance=Provenance.BRANCH_DERIVED.value,
+            runtime_epoch=row["runtime_epoch"],
+        )
+        projection["last_event_id"] = event["id"]
+        self.db.commit_volume_moment(
+            worldline_id,
+            [event],
+            current_tick=tick,
+            instance_updates=[
+                {
+                    "id": instance["id"],
+                    "status": CrisisInstanceStatus.SUPPRESSED.value,
+                    "phase": "SUPPRESSED",
+                    "outcome": {"reason": reason},
+                    "suppression_reason": reason,
+                }
+            ],
+            snapshot=projection,
+            expected_current_tick=tick,
+        )
+        return {
+            "worldline": self.db.worldline(worldline_id),
+            "events": [event],
+            "idempotent": False,
+        }
+
     def activate_crisis(self, worldline_id: str, crisis_id: str) -> dict[str, Any]:
         row = self._active_worldline(worldline_id)
         try:
@@ -466,9 +802,20 @@ class VolumeRuntime:
         if existing is not None:
             if existing["status"] == CrisisInstanceStatus.ACTIVE.value:
                 return self._activation_response(worldline_id, existing, idempotent=True)
-            raise VolumeRuntimeConflict(
-                f"Crisis Instance {crisis_id} cannot be activated from {existing['status']}"
-            )
+            if existing["status"] == CrisisInstanceStatus.DORMANT.value:
+                decision = self._envelope_decision(worldline_id, crisis_id)
+                if decision["status"] == CrisisInstanceStatus.SUPPRESSED.value:
+                    return self._suppress_dormant_crisis(
+                        worldline_id, crisis_id, str(decision["reason"])
+                    )
+                if decision["status"] != "ELIGIBLE":
+                    raise VolumeRuntimeConflict(
+                        f"Crisis Instance {crisis_id} is dormant: {decision['reason']}"
+                    )
+            else:
+                raise VolumeRuntimeConflict(
+                    f"Crisis Instance {crisis_id} cannot be activated from {existing['status']}"
+                )
 
         tick = int(row["current_tick"])
         projection = self._snapshot_projection(worldline_id, tick)
@@ -575,12 +922,23 @@ class VolumeRuntime:
             )[:32],
             "outcome": {},
         }
+        instance_update = {
+            "id": instance_id,
+            "status": CrisisInstanceStatus.ACTIVE.value,
+            "phase": "OPEN",
+            "activation_tick": tick,
+            "local_origin_tick": 0,
+            "resolution_contract_id": pack.crisis.resolution_contract.id,
+            "resolution_contract_version": pack.crisis.resolution_contract.version,
+            "resolution_seed": instance["resolution_seed"],
+        }
         try:
             self.db.commit_volume_moment(
                 worldline_id,
                 events,
                 current_tick=tick,
-                instance_creates=[instance],
+                instance_creates=[] if existing is not None else [instance],
+                instance_updates=[instance_update] if existing is not None else [],
                 snapshot=projection,
                 expected_current_tick=tick,
             )
@@ -589,7 +947,9 @@ class VolumeRuntime:
                 "Crisis activation raced with another Volume moment"
             ) from exc
         created = self.db.crisis_instance(instance_id) or instance
-        return self._activation_response(worldline_id, created, idempotent=False)
+        response = self._activation_response(worldline_id, created, idempotent=False)
+        response["events"] = events
+        return response
 
     def dispatch_message(
         self,
@@ -700,6 +1060,21 @@ class VolumeRuntime:
                     and int(expires_tick) > current
                 ):
                     candidates.append(int(expires_tick))
+        for reference in self.pack.volume.crises:
+            instance = next(
+                (
+                    item
+                    for item in self.db.crisis_instances(worldline_id)
+                    if item["crisis_id"] == reference.id
+                ),
+                None,
+            )
+            if (
+                instance is not None
+                and instance["status"] == CrisisInstanceStatus.DORMANT.value
+                and reference.earliest_activation_tick > current
+            ):
+                candidates.append(reference.earliest_activation_tick)
         candidates.extend(
             int(wake["tick"])
             for wake in self.db.subject_wakes(worldline_id)
@@ -1124,6 +1499,8 @@ class VolumeRuntime:
             snapshot=projection,
             expected_current_tick=current,
         )
+        envelope_result = self.reconcile_crisis_envelopes(worldline_id)
+        events.extend(envelope_result.get("events", []))
         return {
             "worldline": self.db.worldline(worldline_id),
             "advanced": True,
@@ -1217,10 +1594,12 @@ class VolumeRuntime:
             snapshot=projection,
             expected_current_tick=tick,
         )
+        envelope_result = self.reconcile_crisis_envelopes(worldline_id)
         return {
             "worldline": self.db.worldline(worldline_id),
             "instance": self.db.crisis_instance(instance["id"]),
             "event": event,
+            "events": [event, *envelope_result.get("events", [])],
             "idempotent": False,
         }
 
@@ -2739,6 +3118,10 @@ class VolumeRuntime:
             field_event.setdefault("status", "PENDING")
             field_event.setdefault("effects", [])
             field_events.append(field_event)
+        crisis_instances = {
+            reference.id: self._envelope_projection_state(reference, self.pack.pack(reference.id))
+            for reference in self.pack.volume.crises
+        }
         return {
             "volume_id": self.volume_id,
             "worldline_id": worldline_id,
@@ -2749,7 +3132,7 @@ class VolumeRuntime:
             "institutional_state": dict(self.pack.world.institutional_state),
             "messages": [],
             "field_events": field_events,
-            "crisis_instances": {},
+            "crisis_instances": crisis_instances,
             "active_crisis_ids": [],
             "affordances": {},
             "last_event_id": None,
@@ -2761,6 +3144,7 @@ class VolumeRuntime:
         pack: CrisisPack,
         activation_tick: int,
     ) -> dict[str, Any]:
+        reference = self._envelope_reference(crisis_id)
         entities = {
             entity.id: {
                 "id": entity.id,
@@ -2822,6 +3206,15 @@ class VolumeRuntime:
             "local_origin_tick": 0,
             "local_tick": 0,
             "participants": list(pack.participant_ids),
+            "envelope": {
+                "earliest_activation_tick": reference.earliest_activation_tick,
+                "activation_preconditions": [
+                    item.model_dump(mode="json")
+                    for item in reference.activation_preconditions
+                ],
+                "participants": list(reference.participants or pack.participant_ids),
+                "local_horizon": reference.local_horizon,
+            },
             "entities": entities,
             "message_ids": [],
             "operations": [],

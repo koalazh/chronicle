@@ -28,7 +28,7 @@ def test_phase9_adds_a_southern_knot_with_present_leverage(host):
 
     assert activated["instance"]["status"] == CrisisInstanceStatus.ACTIVE.value
     projection = runtime.worldline(worldline_id)["projection"]
-    assert projection["active_crisis_ids"] == ["southern-consolidation"]
+    assert projection["active_crisis_ids"] == ["before-shanhaiguan", "southern-consolidation"]
     assert (
         projection["crisis_instances"]["southern-consolidation"]["entities"]["shi-kefa-leverage"][
             "state"
@@ -43,6 +43,11 @@ def test_phase9_north_south_bridge_delivers_public_record_to_southern_lifetimes(
     worldline_id = created["worldline"]["id"]
     runtime.activate_crisis(worldline_id, "before-shanhaiguan")
     runtime.activate_crisis(worldline_id, "nanjing-succession")
+    runtime.settle_crisis(
+        worldline_id,
+        "nanjing-succession",
+        outcome={"summary": "南京定策已经留下后续江北安排问题"},
+    )
     runtime.activate_crisis(worldline_id, "southern-consolidation")
 
     applied = None

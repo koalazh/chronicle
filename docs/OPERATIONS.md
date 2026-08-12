@@ -42,7 +42,7 @@ uv run chronicle start --host 127.0.0.1 --port 8711
 uv run chronicle doctor
 ```
 
-`serve` 适合开发；`start` 保留启动时的旧兼容 runtime reconcile 行为。二者都只绑定 loopback。V5 页面通过 `/api/worldlines` 工作，正式环境要求 `live: true`；只有 `CHRONICLE_DEV=true` 才允许 `live: false` fixture 创建。
+`serve` 适合开发；`start` 除保留旧兼容 runtime reconcile 外，也会在启动时对 active/cleanup-pending 的 live V5 Volume 执行 Profile、binding、token、MCP 和 Pending Logical Moment reconcile；失败会 fail closed，不接管未知资源。二者都只绑定 loopback。V5 页面通过 `/api/worldlines` 工作，正式环境要求 `live: true`；只有 `CHRONICLE_DEV=true` 才允许 `live: false` fixture 创建。
 
 开发 fixture 必须使用临时状态：
 
@@ -69,6 +69,8 @@ fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message 
 | fixture/API tests | Host/DB/隐私/时钟/封存合同 | 真实模型是否产生正确主体行为 |
 
 `chronicle start` 的旧 `LiveRuntimeManager` 不应被当作 V5 live bridge；V4 compatibility path 和 V5 product path 目前仍需分别验收。
+
+V5 restart reconcile 的可复核入口是 `ChronicleHost.volume_runtime.reconcile_live_runtime(worldline_id)`；它只读并核对当前 Worldline 的持久身份和未完成 moment，不会通过重新 materialize、换 token 或猜测 Wake intent 来修复漂移。对应回归覆盖 `tests/test_v5_live_bridge.py` 的 startup reconcile 与 binding identity drift。
 
 ## 5. 实际 preflight 记录（2026-08-12）
 

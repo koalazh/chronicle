@@ -8,7 +8,23 @@ world_path: world.yaml
 crises:
   - id: before-shanhaiguan
     path: crises/before-shanhaiguan
+    earliest_activation_tick: 0
+    participants: [li-zicheng, wu-sangui, dorgon]
+    local_horizon: 30
   - id: nanjing-succession
     path: crises/nanjing-succession
+    earliest_activation_tick: 0
+    participants: [shi-kefa, ma-shiying, han-zanzhou]
+    local_horizon: 18
   - id: southern-consolidation
     path: crises/southern-consolidation
+    earliest_activation_tick: 0
+    activation_preconditions:
+      - id: nanjing-settlement
+        kind: CRISIS_STATUS
+        description: 南都定策必须先留下一个已经落地的结果，江北整饬才进入可执行窗口。
+        crisis_id: nanjing-succession
+        required_statuses: [SETTLED]
+        suppressed_statuses: [SUPPRESSED]
+    participants: [shi-kefa, ma-shiying, han-zanzhou]
+    local_horizon: 12

@@ -58,7 +58,15 @@ def _drain_to_boundary(runtime: Any, worldline_id: str) -> None:
 
 def _settle_all(runtime: Any, worldline_id: str) -> None:
     for crisis_id in sorted(runtime.pack.packs):
-        runtime.settle_crisis(worldline_id, crisis_id, outcome={"summary": f"{crisis_id} 已留下结果"})
+        runtime.reconcile_crisis_envelopes(worldline_id)
+        instance = runtime.db.crisis_instances(worldline_id)
+        current = next(item for item in instance if item["crisis_id"] == crisis_id)
+        if current["status"] in {"ACTIVE", "RESOLUTION_PENDING", "AFTERMATH"}:
+            runtime.settle_crisis(
+                worldline_id,
+                crisis_id,
+                outcome={"summary": f"{crisis_id} 已留下结果"},
+            )
 
 
 def test_settlement_is_meaning_and_keeps_volume_active(host):
@@ -90,8 +98,7 @@ def test_volume_boundary_rejects_unsettled_worldline_and_seals_after_full_drain(
     runtime = host.volume_runtime
     created = runtime.create()
     worldline_id = created["worldline"]["id"]
-    for crisis_id in sorted(runtime.pack.packs):
-        runtime.activate_crisis(worldline_id, crisis_id)
+    runtime.reconcile_crisis_envelopes(worldline_id)
 
     blocked = runtime.boundary(worldline_id)["boundary"]
     assert blocked["ready"] is False
@@ -146,8 +153,7 @@ def test_live_volume_profiles_are_cleaned_only_after_volume_seal(app_config, mon
     created = runtime.create(runtime_mode="live")
     worldline_id = created["worldline"]["id"]
     assert cleaned == {}
-    for crisis_id in sorted(runtime.pack.packs):
-        runtime.activate_crisis(worldline_id, crisis_id)
+    runtime.reconcile_crisis_envelopes(worldline_id)
     _settle_all(runtime, worldline_id)
     _drain_to_boundary(runtime, worldline_id)
 

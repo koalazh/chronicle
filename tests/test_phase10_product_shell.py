@@ -27,7 +27,10 @@ def test_v5_product_shell_creates_one_braided_volume_and_public_world(app_config
     payload = created.json()
     worldline = payload["worldline"]
     assert worldline["kind"] == "VOLUME"
-    assert len(payload["world"]["active_knots"]) == 3
+    assert len(payload["world"]["active_knots"]) == 2
+    assert {
+        knot["id"] for knot in payload["world"]["active_knots"]
+    } == {"before-shanhaiguan", "nanjing-succession"}
     assert {item["display_name"] for item in payload["lifetimes"]["lifetimes"]} == {
         "吴三桂",
         "史可法",

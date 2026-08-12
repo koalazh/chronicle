@@ -1039,7 +1039,9 @@ def load_lifetime_profile_records(
 
     records: dict[str, dict[str, Any]] = {}
     for lifetime in lifetimes:
-        lifetime_id = str(lifetime.get("id") or lifetime.get("lifetime_id") or "")
+        lifetime_id = str(
+            lifetime.get("lifetime_id") or lifetime.get("seat") or lifetime.get("id") or ""
+        )
         profile = lifetime_profile_name(worldline_id, lifetime_id)
         world_server_name = lifetime_world_server_name(worldline_id, lifetime_id)
         ownership_marker = stable_lifetime_profile_marker(worldline_id, lifetime_id, profile)

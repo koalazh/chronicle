@@ -4,7 +4,7 @@
 > 分支：`dev_v5`
 > 状态：**NOT COMPLETE — P5 与完整 live V5 业务链尚未通过**
 
-本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。
+本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。此前 live slice 的历史记录早于本轮 Envelope/restart-reconcile 复核；除非重新在当前代码上执行，否则不能把它们单独升级为最终同一 Volume 证据。
 
 ## 1. 目标链路
 
@@ -100,7 +100,7 @@ git diff --check
 在独立临时 SQLite 和本地 server 上验证过：
 
 ```text
-homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
+homepage → World（初始 2 个 eligible knots；结算后第 3 个才进入）→ Follow Wu → Inhabit Desk
 → Continue pending → Decision/wait → Leave
 ```
 
@@ -324,7 +324,16 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 以上 harness 使用独立临时 SQLite、Hermes Home、runtime owner 和 loopback 端口（历史真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`；新增连续 live sample 使用 `18718`，Human Wake slice 使用 `18719`，memory pair 使用 `18720/18721`，order pair 使用 `18722/18723`，P1 directed candidate 使用 `18727`，undirected attempts 使用 `18732/18733/18737`，P4 undirected continuous sample 使用 `18740/18741`，P3 negative control 使用 `18748/18749` 与 `18750/18751`，P3 controlled positive pair 使用 `18752/18753` 与 `18754/18755`，live browser shell 使用 `18734/18735`，guarded live product sample 使用 `18808/18809`，strict one-Knot P4 Gateway 使用 `18813`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 结束后按精确路径清理。
 
-## 6. P0–P5 Proof Gates
+## 6. Review-driven structural gates (ordinary verification)
+
+本节是复核驱动的实现与自动化证据，不是 Completion Challenge verdict，也不替代真实 live P5。
+
+- **Crisis Envelope**：`CrisisReference` 现在持有 `earliest_activation_tick`、`activation_preconditions`、`participants` 和 `local_horizon`；Volume genesis 原子登记每个 Envelope 和 `DORMANT` Instance。`reconcile_crisis_envelopes()` 只激活 eligible knot，能在前置结构性条件消失时写 `CRISIS_SUPPRESSED`/`SUPPRESSED`，并对重复 reconcile/activation 保持幂等；southern knot 的 Nanjing settlement gate 由 `tests/test_v5_envelopes.py` 覆盖。
+- **V5 restart reconcile**：`reconcile_live_runtime()` 和 app startup hook 核对唯一 Volume owner、6 条 Lifetime、Profile marker/identity、binding/token、V5 MCP allowlist 以及 Pending Logical Moment 的 Wake/operation 一致性；漂移写 `FAILED`，sealed cleanup 失败保留 `CLEANUP_PENDING`。startup success 与 binding identity drift 的 fail-closed 回归在 `tests/test_v5_live_bridge.py`。
+- **Adversarial semantics**：现有 memory-ablation/Controller Boundary fixture 之外，新增 central-agent/persona-switch impostor negative control、peer private-context divergence、No-Offscreen cognition boundary contrast，以及 stage-before-commit/commit-before-ack 两个 restart fault-injection tests；Controller Boundary 的 hidden-label independent evaluator 和 P5 真实用户判断仍未完成。
+- **Deterministic regression**：Envelope、restart、adversarial 及相关 Phase 6–11 tests 在当前工作树定向通过；完整回归与当前代码的 live chain 仍是后续 gate。
+
+## 7. P0–P5 Proof Gates
 
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
@@ -335,7 +344,7 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 | P4 Game Proof | **PASS（strict one-Knot live trajectory）** | Gateway port `18813` 的单一 `before-shanhaiguan` Knot 产生 21 Wake/21 fresh Session/15 atomic Moment，全部完成且每 Wake exactly one operation；覆盖真实 Investigation、Operation、Offer/Agreement、Wait/update_plan、model-error rejected path，Agreement finite，resolver 给出 `ambiguity_used=false` 的唯一 Deferred 结果。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
 
-## 7. Live V5 acceptance checklist
+## 8. Live V5 acceptance checklist
 
 计划要求同一真实 V5 中记录以下项目；当前均未形成完整可关联链：
 
@@ -356,7 +365,7 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 当前不能用 preflight、fixture 或旧 V4 live runtime 填充这些空项。
 
-## 8. 当前 blockers 与下一步
+## 9. 当前 blockers 与下一步
 
 1. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
 2. 将 P0–P4 的证据与同一最终 live Volume 的完整业务链（Human→Leave→off-screen→cross-Knot→settlement→second Knot→Archive→seal→cleanup）关联到一条可复核记录；port `18734/18735` 已分别证明产品链和最终 seal/cleanup，但仍不能替代这条完整关联链。

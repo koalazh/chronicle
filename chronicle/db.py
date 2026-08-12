@@ -1057,8 +1057,9 @@ class ChronicleDB:
         events: list[dict[str, Any]],
         lifetimes: list[dict[str, Any]],
         projection: dict[str, Any],
+        instance_creates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Create the initial Worldline, lifetimes, ledger, and snapshot atomically."""
+        """Create the initial Worldline, lifetimes, envelopes, ledger, and snapshot atomically."""
 
         worldline = {
             "id": values["id"],
@@ -1183,6 +1184,45 @@ class ChronicleDB:
                         "created_at": values_for_lifetime.get("created_at", now_iso()),
                         "updated_at": values_for_lifetime.get("updated_at", now_iso()),
                     },
+                )
+            for values_for_instance in instance_creates or []:
+                outcome = values_for_instance.get(
+                    "outcome", values_for_instance.get("outcome_json", {})
+                )
+                instance = {
+                    "id": values_for_instance["id"],
+                    "worldline_id": values["id"],
+                    "crisis_id": values_for_instance["crisis_id"],
+                    "content_version": int(values_for_instance.get("content_version", 0)),
+                    "content_hash": values_for_instance.get("content_hash", ""),
+                    "status": values_for_instance.get("status", "DORMANT"),
+                    "phase": values_for_instance.get("phase", "DORMANT"),
+                    "activation_tick": int(values_for_instance.get("activation_tick", 0)),
+                    "local_origin_tick": int(values_for_instance.get("local_origin_tick", 0)),
+                    "resolution_contract_id": values_for_instance.get(
+                        "resolution_contract_id", ""
+                    ),
+                    "resolution_contract_version": int(
+                        values_for_instance.get("resolution_contract_version", 0)
+                    ),
+                    "resolution_seed": values_for_instance.get("resolution_seed", ""),
+                    "settled_tick": values_for_instance.get("settled_tick"),
+                    "outcome_json": outcome
+                    if isinstance(outcome, str)
+                    else json.dumps(outcome, ensure_ascii=False, sort_keys=True),
+                    "suppression_reason": values_for_instance.get("suppression_reason", ""),
+                    "created_at": values_for_instance.get("created_at", now_iso()),
+                    "updated_at": values_for_instance.get("updated_at", now_iso()),
+                }
+                connection.execute(
+                    "INSERT INTO worldline_crisis_instances("
+                    "id, worldline_id, crisis_id, content_version, content_hash, status, phase, "
+                    "activation_tick, local_origin_tick, resolution_contract_id, resolution_contract_version, "
+                    "resolution_seed, settled_tick, outcome_json, suppression_reason, created_at, updated_at) "
+                    "VALUES (:id, :worldline_id, :crisis_id, :content_version, :content_hash, :status, :phase, "
+                    ":activation_tick, :local_origin_tick, :resolution_contract_id, :resolution_contract_version, "
+                    ":resolution_seed, :settled_tick, :outcome_json, :suppression_reason, :created_at, :updated_at)",
+                    instance,
                 )
             connection.execute(
                 "INSERT INTO worldline_snapshot_history(worldline_id, tick, ledger_cursor, projection_json, "
@@ -1765,6 +1805,11 @@ class ChronicleDB:
                 allowed = {
                     "status",
                     "phase",
+                    "activation_tick",
+                    "local_origin_tick",
+                    "resolution_contract_id",
+                    "resolution_contract_version",
+                    "resolution_seed",
                     "settled_tick",
                     "outcome_json",
                     "suppression_reason",

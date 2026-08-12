@@ -130,10 +130,17 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
     assert repeated["human-life"]["profile_key"] == records["human-life"]["profile_key"]
     assert "Custom continuity." in soul_path.read_text(encoding="utf-8")
 
+    db_lifetimes = [
+        {
+            **lifetime,
+            "id": f"volume-jiashen:lifetime:{lifetime['id']}",
+        }
+        for lifetime in lifetimes
+    ]
     loaded = load_lifetime_profile_records(
         app_config,
         "volume-jiashen",
-        lifetimes,
+        db_lifetimes,
         volume_id="jiashen",
         content_version=3,
         content_hash="content-hash-v5",
@@ -153,7 +160,7 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         load_lifetime_profile_records(
             app_config,
             "volume-jiashen",
-            lifetimes,
+            db_lifetimes,
             volume_id="jiashen",
             content_version=3,
             content_hash="content-hash-v5",

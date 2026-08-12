@@ -75,7 +75,11 @@ Memory
 3. Profile binding 的持久 metadata；
 4. 世界 tick 从 `0` 开始的 append-only Ledger/Snapshot。
 
-正式产品路由随后激活 VolumePack 中的 Crisis references。Crisis 激活只建立局部实例和触发条件，不创建新的 World、Profile 或时钟。
+创建先把 VolumePack 中的 Crisis references 注册为带 Envelope 元数据的 `DORMANT` Instance；Host 再按 `earliest_activation_tick`、结构性 activation preconditions、participants 和 local horizon 做确定性 reconcile。当前 `before-shanhaiguan` 与 `nanjing-succession` 在初始 tick eligible，`southern-consolidation` 必须等南都定策 `SETTLED` 后才激活；若前置结构性条件消失，则写入 `SUPPRESSED`，不伪造可玩的 Crisis。Crisis 激活只建立局部实例和触发条件，不创建新的 World、Profile 或时钟。
+
+### Restart reconcile
+
+live V5 进程启动时，Host 不猜测或修复身份，而是 fail closed 地核对唯一 active Volume owner、每条 Lifetime/Profile、genesis marker、agent binding、private token、Volume MCP allowlist，以及未完成 Pending Logical Moment 中的 Wake/operation 归属。任何缺失、漂移、重复或不可恢复状态都会把 active Volume 标成 `FAILED`；sealed Volume 的 `CLEANUP_PENDING` 只重试属于它的 Gateway/Profile cleanup。
 
 ### Crisis settlement
 

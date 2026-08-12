@@ -33,6 +33,11 @@ class HistoricalCompatibilityPreconditionKind(StrEnum):
     UNMODELED = "UNMODELED"
 
 
+class CrisisActivationPreconditionKind(StrEnum):
+    CRISIS_STATUS = "CRISIS_STATUS"
+    SHARED_ENTITY_STATE = "SHARED_ENTITY_STATE"
+
+
 class CrisisSurfaceKind(StrEnum):
     SPATIAL = "SPATIAL"
     POLITICAL = "POLITICAL"
@@ -330,6 +335,21 @@ class CrisisDefinition(StrictModel):
 class CrisisReference(StrictModel):
     id: str
     path: str
+    earliest_activation_tick: int = Field(ge=0, default=0)
+    activation_preconditions: list["CrisisActivationPrecondition"] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+    local_horizon: int = Field(gt=0, default=1)
+
+
+class CrisisActivationPrecondition(StrictModel):
+    id: str
+    kind: CrisisActivationPreconditionKind
+    description: str
+    crisis_id: str = ""
+    entity_id: str = ""
+    required_statuses: list[str] = Field(default_factory=list)
+    required_states: list[str] = Field(default_factory=list)
+    suppressed_statuses: list[str] = Field(default_factory=list)
 
 
 class VolumeDefinition(StrictModel):
@@ -1480,6 +1500,48 @@ class VolumePack:
                 errors.append(
                     f"crisis {crisis_id}: participant ids must match the legacy actor overlays"
                 )
+            reference = next(item for item in volume.crises if item.id == crisis_id)
+            if reference.participants and set(reference.participants) != set(participant_ids):
+                errors.append(
+                    f"crisis {crisis_id}: envelope participants must match crisis participants"
+                )
+            if reference.local_horizon < pack.crisis.simulation_boundary.maximum_tick:
+                errors.append(
+                    f"crisis {crisis_id}: envelope local_horizon cannot precede the crisis boundary"
+                )
+            for precondition in reference.activation_preconditions:
+                if precondition.kind == CrisisActivationPreconditionKind.CRISIS_STATUS:
+                    if not precondition.crisis_id:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            "needs a crisis_id"
+                        )
+                    elif precondition.crisis_id not in crisis_ids:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            f"references unknown crisis {precondition.crisis_id}"
+                        )
+                    if not precondition.required_statuses:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            "needs required_statuses"
+                        )
+                elif precondition.kind == CrisisActivationPreconditionKind.SHARED_ENTITY_STATE:
+                    if not precondition.entity_id:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            "needs an entity_id"
+                        )
+                    if not precondition.required_states:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            "needs required_states"
+                        )
+                if not precondition.description:
+                    errors.append(
+                        f"crisis {crisis_id}: activation precondition {precondition.id} "
+                        "needs a description"
+                    )
         if errors:
             raise CrisisValidationError(errors)
         return cls(root=root, volume=volume, lifetimes=lifetimes, world=world, packs=packs)

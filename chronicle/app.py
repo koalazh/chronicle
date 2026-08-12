@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import socket
 from dataclasses import replace
 from typing import Any, Literal
@@ -32,6 +33,8 @@ from .product_api import build_product_router
 from .runtime import WorldlineConflict, WorldlineError, WorldlineRuntime
 from .subject_continuity import SubjectContinuityError
 from .volume_runtime import VolumeRuntimeError
+
+logger = logging.getLogger(__name__)
 
 
 class AdvanceRequest(BaseModel):
@@ -242,6 +245,33 @@ def create_app(
         if managed_runtime is None or managed_runtime.config != active:
             managed_runtime = LiveRuntimeManager(active)
         return managed_runtime
+
+    async def reconcile_volume_runtime_on_startup() -> None:
+        """Fail closed on restart until the live V5 Volume is reconciled."""
+
+        try:
+            active = current_config()
+            volume_host = ChronicleHost(active)
+            candidates = []
+            current = volume_host.db.active_volume_worldline()
+            if current is not None and current.get("runtime_mode") == "live":
+                candidates.append(current)
+            candidates.extend(
+                row
+                for row in volume_host.db.worldlines(status="SEALED")
+                if row.get("kind") == "VOLUME"
+                and row.get("runtime_mode") == "live"
+                and row.get("runtime_phase") == "CLEANUP_PENDING"
+            )
+            for row in candidates:
+                await asyncio.to_thread(
+                    volume_host.volume_runtime.reconcile_live_runtime,
+                    str(row["id"]),
+                )
+        except Exception:
+            logger.exception("Chronicle V5 Volume startup reconcile failed closed")
+
+    app.router.add_event_handler("startup", reconcile_volume_runtime_on_startup)
 
     def runtime_message(run: dict[str, Any]) -> str:
         phase = str(run.get("runtime_phase") or "READY")

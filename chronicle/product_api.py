@@ -647,12 +647,10 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 active.volume_runtime.create,
                 runtime_mode="live" if request.live else "fixture",
             )
-            for reference in active.volume_runtime.pack.volume.crises:
-                await asyncio.to_thread(
-                    active.volume_runtime.activate_crisis,
-                    created["worldline"]["id"],
-                    reference.id,
-                )
+            await asyncio.to_thread(
+                active.volume_runtime.reconcile_crisis_envelopes,
+                created["worldline"]["id"],
+            )
             if request.live:
                 await asyncio.to_thread(
                     active.volume_runtime.ensure_live_runtime,

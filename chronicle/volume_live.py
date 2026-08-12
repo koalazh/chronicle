@@ -170,6 +170,8 @@ class HermesVolumeActorDriver:
                     "工具参数必须对应其中的 id、target 或 method，不要从通用 available_affordances 猜测不可用目标。"
                     "operate 的 targets 必须使用 subject_affordances.operations 中 targets 的 options 的实体 id，"
                     "不能使用 target 槽位名；investigate 的 target 必须使用 investigations 中 target.id。"
+                    "manage_offer 的 recipient 使用 offer_terms 中 recipient.id；terms 必须是"
+                    "[{type, subject: 实体 id, value}]，不要加入 party_ids，也不要把 subject 写成对象。"
                     "logical_intent 也可提交 message 或 update_plan，但不得再调用第二个工具。"
                     "update_plan 的 belief_updates 只能引用冻结视角中可见的 evidence event_id；没有证据就留空。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"

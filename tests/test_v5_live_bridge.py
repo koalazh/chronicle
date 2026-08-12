@@ -38,6 +38,7 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
     assert "顶层 intent 和 idempotency_key" in payload["tool_call_rule"]
     assert "subject_affordances" in system_message["content"]
     assert "targets 的 options 的实体 id" in system_message["content"]
+    assert "terms 必须是" in system_message["content"]
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):

@@ -93,6 +93,16 @@ Agency audit 的分类结果保持在现有 Pack / Host contract 内：`SUBJECT`
 
 Phase 7 没有发现需要补一层 generic agency system 的真实缺口。越权尝试必须在 staging 前拒绝，合法 operation 的 state effect 必须保留 actor seat 与 causal parent；这些边界由 `tests/test_v6_agency_conservation.py` 固定。
 
+## Phase 8 content / world correctness boundary
+
+Offer 与 Agreement 不再沿用 V5 的同 tick / `tick+1` wake scaffold。发送方提交后只产生一条带 `offer_id`、`offer_action` 和真实 `arrival_tick` 的 `volume_offer` Message；提案从当前位置到收件人当前位置沿 Pack route graph 计算 travel days，响应也必须沿反向路线返回。消息抵达前，收件人看不到 Offer、不能回应，原 Offer 也不能创建 Agreement；接受、拒绝、withdraw 或 counter 只在回应 Message 抵达时改变状态。只有结构化 `OFFER_CHANGED` 才进入 Attention，普通背景 Message 仍走原有 Knowledge → Attention policy。
+
+Agreement 的 `effective_tick` 是回应抵达的 global tick，而非提交 tick；Offer / counter lineage、`MESSAGE_DISPATCHED` → `MESSAGE_DELIVERED` → `OFFER_*` → `AGREEMENT_CREATED` 保留可复核 causal chain。过期或无 route 是 World refusal，不被包装成模型失败。
+
+来源审计结果：山海关 `prepare_force` 仍按 Pack 的 2 日固定完成，不添加未经来源支持的“平衡代价”；`eastern-transit-window-narrows` 仍是 tick 5 的外生 scenario pressure（`c015`）。南京候选、backing 与 fragmented resolver 不因本阶段的 transport 修复扩大为 Lifetime、全体同意或额外机构。
+
+定向证据位于 `tests/test_v6_content_world.py`，并与 `tests/test_v6_agency_conservation.py`、既有 Volume offer/Attention 测试一起复跑。它证明 deterministic source/fixture boundary，不证明 provider、browser 或 real Hermes。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。
@@ -103,6 +113,5 @@ Phase 7 没有发现需要补一层 generic agency system 的真实缺口。越�
 ## 尚未验证的迁移结论
 
 - typed dependency 的实际最小类型集合；
-- remote Offer/Agreement 的精确 transport 实现；
-- 山海关 fixed pressure / authored maneuver / one-action / prompt 复杂度是否可删除或必须保留；
+- 山海关 authored maneuver / one-action / prompt 复杂度是否可删除或必须保留；
 - 南京 aggregate backing、候选进入与 fragmented resolver 的最小真实建模。

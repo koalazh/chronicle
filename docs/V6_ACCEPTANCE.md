@@ -103,13 +103,26 @@ Phase 5 deterministic evidence does not prove Provider behavior, continuous `/co
 
 Phase 7 evidence is deterministic fixture / Pack evidence. It does not prove real Hermes trajectories or replace the Phase 8 content audit.
 
+## Phase 8 Content / World Correctness
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| remote Offer transport | PASS | `tests/test_v6_content_world.py` verifies Wu → Dorgon proposal uses the Shanhai–Liaoxi route, arrives at tick 3, and creates no pre-arrival Agreement |
+| response / Agreement causality | PASS | Dorgon acceptance is dispatched at tick 3, reaches Wu at tick 5, then emits `OFFER_ACCEPTED` / `OFFER_CHANGED` / `AGREEMENT_CREATED` with `effective_tick=5` |
+| structured commitment visibility | PASS | `visible_to` hides an in-transit Offer; delivery admits a structured Offer fact and Attention boundary; ordinary message transport remains unchanged |
+| Shanhai fixed operation / pressure | PASS | Pack test confirms `prepare_force` is a source-defined 2-day fixed operation; pressure remains tick 5 `EXOGENOUS`, `scenario_assumption`, assertion `c015` |
+| Nanjing source bounds | PASS | Phase 7 agency tests retain claimant/institution/backing separation; no unsupported Lifetime, consensus or resolver mechanism added |
+| Regression | PASS | Phase 8 focused tests, full `uv run pytest -q`, Ruff and compileall pass; evidence is deterministic fixture/source only |
+
+Phase 8 does not claim browser, Hermes Provider or real Hermes business-chain completion.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |
 | --- | --- | --- | --- |
 | P6 Continuous Agency | Course survives noise, confirming/disconfirming reality, session/restart/controller changes | NOT_RUN | |
 | P7 Attention | World events > actor-known events > attention boundaries approximately equal deliberations | NOT_RUN | |
-| P8 Bounded Agency | no cross-subject commitment, lawful Agreement/Institution, transport/privacy/retry/restart safety | NOT_RUN | |
+| P8 Bounded Agency | no cross-subject commitment, lawful Agreement/Institution, transport/privacy/retry/restart safety | PARTIAL | Agency ownership and remote Offer/Agreement transport pass deterministic tests; full P8 game trajectory and real Hermes remain |
 | P9 Strong-Agent Game | Perfect Wait, canonicality perturbation, role-state swap, Shanhai/Nanjing trajectories | NOT_RUN | |
 
 ## Required evidence layers

@@ -104,6 +104,14 @@ Life Desk 保留原页面和兼容字段，并新增用户语义投影：`curren
 
 新增 `tests/test_v6_agency_conservation.py` 固定三条可复核边界：南京 operation actor 与 claimant/institution 分离、马士英越权提交制度承认在 staging 时被 `operation_authority_denied` 拒绝且不改变制度状态、主体拥有的行动效果保留 actor `seat_id` 与 completion causal parent。由于当前源码已满足审计结果，本阶段没有引入 generic Political DSL、额外 Agent 或无来源机制。
 
+## Phase 8 Content / World Correctness
+
+Offer / Agreement transport 现在复用同一个 Volume global clock 与既有 route graph。提案、回应、counter 都先以 `source=volume_offer` 的结构化在途消息写入 `MESSAGE_DISPATCHED`；收件方只有在 `MESSAGE_DELIVERED` 后才获得 `OFFER_CHANGED` Attention 事实。接受回应抵达前，原 Offer 仍是 `PROPOSED`，Agreement 不存在；抵达 tick 才追加 `OFFER_ACCEPTED`、`AGREEMENT_CREATED`，其 `effective_tick` 等于真实抵达 tick。可见性通过 offer 的 `visible_to` 控制，避免同一投影中的未抵达 Offer 提前进入另一主体的 affordance。
+
+本阶段没有删除来源支持的山海关 `prepare_force` 或 `eastern-transit-window-narrows`：前者仍是三位主体各自自有兵力的 2 日固定操作，后者仍是 tick 5 的 `EXOGENOUS`、`scenario_assumption` 压力并带 `c015` 断言。南京的 backing、claimant entry 与 fragmented resolver 沿 Phase 7 的 source-bounded Pack 保持，不引入平衡成本或额外历史机制。
+
+证据：`tests/test_v6_content_world.py` 覆盖远程 Offer / response 的路由延迟、Agreement 生效 tick、结构化 `OFFER_CHANGED` 触发与山海关压力/整备来源边界；Phase 7 agency tests、Volume offer、Attention 与完整回归均通过。该阶段仍是 deterministic fixture / source evidence，不替代 browser 或 real Hermes business chain。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -126,7 +134,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 5 Deliberation Protocol | COMPLETE | `commit_deliberation` 支持 HOLD/REVISE、证据门槛、typed dependency update、0..1 action 与 restart-safe atomic commit |
 | 6 Product Continuous Agency | COMPLETE | bounded `/continue`、Human voluntary reconsideration 与 Life Desk V6 投影已实现；定向 fixture/product checks 通过，live Hermes / browser acceptance 留在后续 gate |
 | 7 Agency Conservation | COMPLETE | Source/Pack ownership audit 与越权/因果链测试通过；未发现需要生产语义修复的问题，因此不新增 architecture layer |
-| 8 Content / World Correctness | NOT_STARTED | |
+| 8 Content / World Correctness | COMPLETE | Remote Offer/Agreement obey route-delivery causality; Shanhai fixed operation/pressure and Nanjing source bounds have regression evidence |
 | 9 Harness Ablation | NOT_STARTED | |
 | 10 V6 Game Tests | NOT_STARTED | |
 | 11 Archive / UX | NOT_STARTED | |

@@ -1307,6 +1307,10 @@ class VolumeRuntime:
                     "source": message.get("source", ""),
                     "assertion_ids": list(message.get("assertion_ids", [])),
                     "disputed": bool(message.get("disputed", False)),
+                    "offer_id": str(message.get("offer_id", "")),
+                    "offer_action": str(message.get("offer_action", "")),
+                    "counter_offer_id": str(message.get("counter_offer_id", "")),
+                    "agreement_id": str(message.get("agreement_id", "")),
                 },
                 seat_id=message["recipient"],
                 provenance=Provenance.BRANCH_DERIVED.value,
@@ -1320,6 +1324,32 @@ class VolumeRuntime:
                 raise VolumeRuntimeError(
                     f"message recipient Lifetime is missing: {message['recipient']}"
                 )
+            if message.get("source") == "volume_offer":
+                offer_change = self._apply_delivered_volume_offer(
+                    worldline_id,
+                    target,
+                    projection,
+                    message,
+                    delivered,
+                    events,
+                )
+                if offer_change is None:
+                    continue
+                knowledge_item = offer_change["knowledge"]
+                admit_knowledge(
+                    message["recipient"],
+                    knowledge_item,
+                    {
+                        "event_id": offer_change["change_event"]["id"],
+                        "event_type": "OFFER_CHANGED",
+                        "wake_type": "OFFER_CHANGE",
+                        "wake_id": f"{worldline_id}:wake:{offer_change['change_event']['id']}",
+                        "actor_id": message["sender"],
+                        "offer_id": offer_change["offer"]["id"],
+                        "structured_shock": True,
+                    },
+                )
+                continue
             knowledge_item = {
                 "type": "MESSAGE",
                 "message_id": message["id"],
@@ -2556,6 +2586,14 @@ class VolumeRuntime:
         if offer_action == OfferAction.PROPOSE:
             if not recipient:
                 return payload, {"status": "rejected", "code": "invalid_offer_recipient"}
+            start = str(projection.get("positions", {}).get(lifetime["seat"], ""))
+            end = str(projection.get("positions", {}).get(recipient, ""))
+            travel = self._volume_route_days(start, end)
+            if travel is None:
+                return payload, {"status": "rejected", "code": "no_route"}
+            arrival_tick = tick + max(1, travel)
+            if expires_tick is not None and arrival_tick > int(expires_tick):
+                return payload, {"status": "rejected", "code": "offer_delivery_too_late"}
             for crisis_id, pack in active_packs:
                 validated, code = pack.offer_terms_request(
                     lifetime["seat"], recipient, requested
@@ -2572,6 +2610,7 @@ class VolumeRuntime:
                             "offer_id": f"offer-{uuid.uuid4().hex[:16]}",
                             "created_tick": tick,
                             "expires_tick": expires_tick,
+                            "arrival_tick": arrival_tick,
                         },
                     )
                 if code != "invalid_offer_recipient":
@@ -2594,12 +2633,28 @@ class VolumeRuntime:
         if offer.get("status") != OfferStatus.PROPOSED.value:
             return payload, {"status": "rejected", "code": "offer_not_open"}
         actor_id = lifetime["seat"]
+        visible_to = offer.get("visible_to")
+        if isinstance(visible_to, list) and visible_to and actor_id not in visible_to:
+            return payload, {"status": "rejected", "code": "offer_not_received"}
+        if offer.get("response_pending"):
+            return payload, {"status": "rejected", "code": "offer_response_in_transit"}
         if offer_action in {OfferAction.ACCEPT, OfferAction.REJECT, OfferAction.COUNTER} and offer.get(
             "recipient"
         ) != actor_id:
             return payload, {"status": "rejected", "code": "offer_response_denied"}
         if offer_action == OfferAction.WITHDRAW and offer.get("issuer") != actor_id:
             return payload, {"status": "rejected", "code": "offer_withdrawal_denied"}
+        counterpart = str(
+            offer["recipient"] if offer_action == OfferAction.WITHDRAW else offer["issuer"]
+        )
+        start = str(projection.get("positions", {}).get(actor_id, ""))
+        end = str(projection.get("positions", {}).get(counterpart, ""))
+        travel = self._volume_route_days(start, end)
+        if travel is None:
+            return payload, {"status": "rejected", "code": "no_route"}
+        response_arrival_tick = tick + max(1, travel)
+        if offer.get("expires_tick") is not None and response_arrival_tick > int(offer["expires_tick"]):
+            return payload, {"status": "rejected", "code": "offer_response_too_late"}
         if offer_action == OfferAction.COUNTER:
             validated, code = pack.offer_terms_request(
                 actor_id, str(offer["issuer"]), requested
@@ -2618,6 +2673,7 @@ class VolumeRuntime:
                     "status": "accepted",
                     "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}",
                     "counter_normalized_to_accept": True,
+                    "arrival_tick": response_arrival_tick,
                 }
             return counter_payload, {
                 "status": "accepted",
@@ -2625,12 +2681,14 @@ class VolumeRuntime:
                 "parent_offer_id": str(offer["id"]),
                 "created_tick": tick,
                 "expires_tick": expires_tick,
+                "arrival_tick": response_arrival_tick,
             }
         return {**payload, "crisis_id": crisis_id}, {
             "status": "accepted",
             "agreement_id": f"agreement-{uuid.uuid4().hex[:16]}"
             if offer_action == OfferAction.ACCEPT
             else "",
+            "arrival_tick": response_arrival_tick,
         }
 
     @staticmethod
@@ -3654,25 +3712,50 @@ class VolumeRuntime:
         offers = state.setdefault("offers", [])
         action = str(payload.get("action", "")).upper()
 
-        def queue_wake(actor_id: str, wake_type: str, trigger_event_id: str, result_data: dict[str, Any]) -> None:
-            lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
-            if lifetime is None:
-                return
-            wake_creates.append(
-                {
-                    "id": f"{worldline_id}:wake:{trigger_event_id}:{actor_id}:{wake_type}",
-                    "actor_id": actor_id,
-                    "wake_type": wake_type,
-                    # Offer/Agreement changes are committed after the current
-                    # actor slice.  A same-tick Wake would not be picked up by
-                    # the global clock once this Moment is cleared.
-                    "tick": tick + 1,
-                    "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
-                    "source": "volume-offer",
-                    "trigger_event_id": trigger_event_id,
-                    "result": result_data,
-                }
+        def dispatch_offer_message(
+            *,
+            offer: dict[str, Any],
+            recipient: str,
+            offer_action: str,
+            arrival_tick: int,
+            counter_offer_id: str = "",
+            normalized_from: str = "",
+            agreement_id: str = "",
+        ) -> dict[str, Any]:
+            message = {
+                "id": f"{worldline_id}:offer:{offer['id']}:{offer_action.lower()}:{uuid.uuid4().hex[:12]}",
+                "source_crisis_id": crisis_id,
+                "sender": str(wake["actor_id"]),
+                "recipient": recipient,
+                "content": str(payload.get("message", "")) or str(offer.get("message", "")),
+                "dispatch_tick": tick,
+                "delivery_tick": arrival_tick,
+                "arrival_tick": arrival_tick,
+                "status": "in_transit",
+                "source": "volume_offer",
+                "disputed": False,
+                "assertion_ids": [],
+                "offer_id": str(offer["id"]),
+                "offer_action": offer_action,
+                "counter_offer_id": counter_offer_id,
+                "normalized_from": normalized_from,
+                "agreement_id": agreement_id,
+            }
+            projection.setdefault("messages", []).append(message)
+            dispatched = self._event(
+                worldline_id,
+                tick,
+                "MESSAGE_DISPATCHED",
+                message,
+                seat_id=wake["actor_id"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
             )
+            message["dispatch_event_id"] = dispatched["id"]
+            dispatched["payload"] = message
+            events.append(dispatched)
+            return message
 
         if action == OfferAction.PROPOSE.value:
             offer = {
@@ -3685,6 +3768,7 @@ class VolumeRuntime:
                 "expires_tick": result.get("expires_tick"),
                 "status": OfferStatus.PROPOSED.value,
                 "visibility": "PRIVATE",
+                "visible_to": [str(wake["actor_id"])],
                 "crisis_id": crisis_id,
             }
             offers.append(offer)
@@ -3695,7 +3779,7 @@ class VolumeRuntime:
                 {
                     "wake_id": wake["id"],
                     "offer": offer,
-                    "visibility": sorted({offer["issuer"], offer["recipient"]}),
+                    "visibility": [offer["issuer"]],
                 },
                 seat_id=wake["actor_id"],
                 provenance=Provenance.BRANCH_DERIVED.value,
@@ -3704,27 +3788,29 @@ class VolumeRuntime:
             )
             offer["proposal_event_id"] = proposed["id"]
             events.append(proposed)
-            queue_wake(
-                offer["recipient"],
-                "OFFER_CHANGE",
-                proposed["id"],
-                {"offer_id": offer["id"]},
+            message = dispatch_offer_message(
+                offer=offer,
+                recipient=str(offer["recipient"]),
+                offer_action=OfferAction.PROPOSE.value,
+                arrival_tick=int(result["arrival_tick"]),
             )
+            offer["proposal_message_id"] = message["id"]
             return
         offer = next((item for item in offers if str(item.get("id")) == str(payload.get("offer_id"))), None)
         if offer is None or offer.get("status") != OfferStatus.PROPOSED.value:
             raise VolumeRuntimeConflict("offer is no longer open at commit")
-        visible = sorted({str(offer["issuer"]), str(offer["recipient"])})
+        actor_id = str(wake["actor_id"])
+        if offer.get("response_pending"):
+            raise VolumeRuntimeConflict("offer response is already in transit")
         normalized_counter = action == OfferAction.COUNTER.value and bool(
             result.get("counter_normalized_to_accept")
         )
-        if normalized_counter:
-            action = OfferAction.ACCEPT.value
-        if action == OfferAction.COUNTER.value:
-            offer["status"] = OfferStatus.COUNTERED.value
+        response_action = OfferAction.ACCEPT.value if normalized_counter else action
+        counter_offer: dict[str, Any] | None = None
+        if response_action == OfferAction.COUNTER.value:
             counter_offer = {
                 "id": result["offer_id"],
-                "issuer": str(wake["actor_id"]),
+                "issuer": actor_id,
                 "recipient": str(offer["issuer"]),
                 "terms": list(payload.get("terms", [])),
                 "message": payload.get("message", ""),
@@ -3733,103 +3819,225 @@ class VolumeRuntime:
                 "status": OfferStatus.PROPOSED.value,
                 "parent_offer_id": offer["id"],
                 "visibility": "PRIVATE",
+                "visible_to": [actor_id],
                 "crisis_id": crisis_id,
             }
             offers.append(counter_offer)
-            countered = self._event(
-                worldline_id,
-                tick,
-                "OFFER_COUNTERED",
-                {
-                    "wake_id": wake["id"],
-                    "offer": offer,
-                    "counter_offer": counter_offer,
-                    "visibility": visible,
-                },
-                seat_id=wake["actor_id"],
-                provenance=Provenance.BRANCH_DERIVED.value,
-                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
-                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
-            )
-            offer["counter_event_id"] = countered["id"]
-            counter_offer["proposal_event_id"] = countered["id"]
-            events.append(countered)
-            queue_wake(
-                counter_offer["recipient"],
-                "OFFER_CHANGE",
-                countered["id"],
-                {"offer_id": counter_offer["id"]},
-            )
-            return
-        if action == OfferAction.ACCEPT.value:
-            offer["status"] = OfferStatus.ACCEPTED.value
-            accepted = self._event(
-                worldline_id,
-                tick,
-                "OFFER_ACCEPTED",
-                {"wake_id": wake["id"], "offer": offer, "visibility": visible},
-                seat_id=wake["actor_id"],
-                provenance=Provenance.BRANCH_DERIVED.value,
-                causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
-                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
-            )
-            offer["accept_event_id"] = accepted["id"]
-            events.append(accepted)
-            agreement = {
-                "id": result["agreement_id"],
-                "parties": visible,
-                "terms": list(offer["terms"]),
-                "effective_tick": tick,
-                "status": AgreementStatus.ACTIVE.value,
-                "source_offer_ids": [offer["id"]],
-                "visibility": "PRIVATE",
-                "crisis_id": crisis_id,
-            }
-            state.setdefault("agreements", []).append(agreement)
-            created = self._event(
-                worldline_id,
-                tick,
-                "AGREEMENT_CREATED",
-                {"wake_id": wake["id"], "agreement": agreement, "visibility": visible},
-                seat_id=wake["actor_id"],
-                provenance=Provenance.BRANCH_DERIVED.value,
-                causal_parent_ids=[accepted["id"]],
-                runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
-            )
-            agreement["creation_event_id"] = created["id"]
-            events.append(created)
-            for party_id in visible:
-                queue_wake(
-                    party_id,
-                    "AGREEMENT_CHANGE",
-                    created["id"],
-                    {"agreement_id": agreement["id"]},
+        message = dispatch_offer_message(
+            offer=offer,
+            recipient=(
+                str(offer["issuer"])
+                if response_action in {
+                    OfferAction.ACCEPT.value,
+                    OfferAction.REJECT.value,
+                    OfferAction.COUNTER.value,
+                }
+                else str(offer["recipient"])
+            ),
+            offer_action=response_action,
+            arrival_tick=int(result["arrival_tick"]),
+            counter_offer_id=str((counter_offer or {}).get("id", "")),
+            normalized_from=OfferAction.COUNTER.value if normalized_counter else "",
+            agreement_id=str(result.get("agreement_id", "")),
+        )
+        offer["response_pending"] = {
+            "action": response_action,
+            "actor_id": actor_id,
+            "message_id": message["id"],
+            "counter_offer_id": str((counter_offer or {}).get("id", "")),
+        }
+        if counter_offer is not None:
+            counter_offer["proposal_message_id"] = message["id"]
+        return
+
+    @staticmethod
+    def _offer_lineage_ids(offers: list[dict[str, Any]], offer: dict[str, Any]) -> list[str]:
+        by_id = {str(item["id"]): item for item in offers}
+        lineage: list[str] = []
+        current = offer
+        while current:
+            lineage.append(str(current["id"]))
+            parent_id = str(current.get("parent_offer_id") or "")
+            current = by_id.get(parent_id)
+        return list(reversed(lineage))
+
+    def _apply_delivered_volume_offer(
+        self,
+        worldline_id: str,
+        target: int,
+        projection: dict[str, Any],
+        message: dict[str, Any],
+        delivered: dict[str, Any],
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        crisis_id = str(message.get("source_crisis_id", ""))
+        state = projection.get("crisis_instances", {}).get(crisis_id)
+        if not isinstance(state, dict):
+            return None
+        offers = state.setdefault("offers", [])
+        offer = next(
+            (item for item in offers if str(item.get("id")) == str(message.get("offer_id", ""))),
+            None,
+        )
+        if offer is None:
+            return None
+        action = str(message.get("offer_action", "")).upper()
+        if action == OfferAction.PROPOSE.value:
+            if offer.get("status") != OfferStatus.PROPOSED.value:
+                return None
+            visible_to = list(offer.get("visible_to", []))
+            if str(message["recipient"]) not in visible_to:
+                visible_to.append(str(message["recipient"]))
+            offer["visible_to"] = sorted(set(visible_to))
+            offer["proposal_delivery_event_id"] = delivered["id"]
+            change_type = "PROPOSED"
+            specialized = delivered
+            specialized_event_id = delivered["id"]
+        else:
+            pending = offer.get("response_pending") or {}
+            if str(pending.get("message_id", "")) != str(message.get("id", "")):
+                return None
+            if offer.get("status") != OfferStatus.PROPOSED.value:
+                offer.pop("response_pending", None)
+                return None
+            offer.pop("response_pending", None)
+            visible = sorted({str(offer["issuer"]), str(offer["recipient"])})
+            if action == OfferAction.COUNTER.value:
+                offer["status"] = OfferStatus.COUNTERED.value
+                counter_offer = next(
+                    (
+                        item
+                        for item in offers
+                        if str(item.get("id")) == str(message.get("counter_offer_id", ""))
+                    ),
+                    None,
                 )
-            return
-        event_type = {
-            OfferAction.REJECT.value: "OFFER_REJECTED",
-            OfferAction.WITHDRAW.value: "OFFER_WITHDRAWN",
-        }.get(action)
-        if event_type is None:
-            raise VolumeRuntimeError(f"unsupported V5 offer action: {action}")
-        offer["status"] = {
-            "OFFER_REJECTED": OfferStatus.REJECTED.value,
-            "OFFER_WITHDRAWN": OfferStatus.WITHDRAWN.value,
-        }[event_type]
+                if counter_offer is None:
+                    return None
+                counter_offer["visible_to"] = sorted(set(visible))
+                countered = self._event(
+                    worldline_id,
+                    target,
+                    "OFFER_COUNTERED",
+                    {
+                        "offer": offer,
+                        "counter_offer": counter_offer,
+                        "visibility": visible,
+                    },
+                    seat_id=message["sender"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[delivered["id"]],
+                    runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+                )
+                offer["counter_event_id"] = countered["id"]
+                counter_offer["proposal_event_id"] = countered["id"]
+                events.append(countered)
+                specialized = countered
+                specialized_event_id = countered["id"]
+                change_type = "COUNTERED"
+            elif action == OfferAction.ACCEPT.value:
+                offer["status"] = OfferStatus.ACCEPTED.value
+                accepted_payload: dict[str, Any] = {"offer": offer, "visibility": visible}
+                if message.get("normalized_from"):
+                    accepted_payload["normalized_from"] = message["normalized_from"]
+                accepted = self._event(
+                    worldline_id,
+                    target,
+                    "OFFER_ACCEPTED",
+                    accepted_payload,
+                    seat_id=message["sender"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[delivered["id"]],
+                    runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+                )
+                offer["accept_event_id"] = accepted["id"]
+                events.append(accepted)
+                agreement = {
+                    "id": str(message.get("agreement_id", ""))
+                    or f"agreement-{uuid.uuid4().hex[:16]}",
+                    "parties": visible,
+                    "terms": list(offer["terms"]),
+                    "effective_tick": target,
+                    "status": AgreementStatus.ACTIVE.value,
+                    "source_offer_ids": self._offer_lineage_ids(offers, offer),
+                    "visibility": "PRIVATE",
+                    "crisis_id": crisis_id,
+                }
+                state.setdefault("agreements", []).append(agreement)
+                created = self._event(
+                    worldline_id,
+                    target,
+                    "AGREEMENT_CREATED",
+                    {"agreement": agreement, "visibility": visible},
+                    seat_id=message["sender"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[accepted["id"]],
+                    runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+                )
+                agreement["creation_event_id"] = created["id"]
+                events.append(created)
+                specialized = accepted
+                specialized_event_id = accepted["id"]
+                change_type = "ACCEPTED"
+            elif action in {OfferAction.REJECT.value, OfferAction.WITHDRAW.value}:
+                event_type = (
+                    "OFFER_REJECTED"
+                    if action == OfferAction.REJECT.value
+                    else "OFFER_WITHDRAWN"
+                )
+                offer["status"] = (
+                    OfferStatus.REJECTED.value
+                    if action == OfferAction.REJECT.value
+                    else OfferStatus.WITHDRAWN.value
+                )
+                changed = self._event(
+                    worldline_id,
+                    target,
+                    event_type,
+                    {"offer": offer, "visibility": visible},
+                    seat_id=message["sender"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[delivered["id"]],
+                    runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
+                )
+                offer["status_event_id"] = changed["id"]
+                events.append(changed)
+                specialized = changed
+                specialized_event_id = changed["id"]
+                change_type = action
+            else:
+                return None
         changed = self._event(
             worldline_id,
-            tick,
-            event_type,
-            {"wake_id": wake["id"], "offer": offer, "visibility": visible},
-            seat_id=wake["actor_id"],
+            target,
+            "OFFER_CHANGED",
+            {
+                "offer_id": str(offer["id"]),
+                "change_type": change_type,
+                "offer": offer,
+                "visibility": sorted(set(offer.get("visible_to", visible if "visible" in locals() else []))),
+            },
+            seat_id=message["recipient"],
             provenance=Provenance.BRANCH_DERIVED.value,
-            causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
+            causal_parent_ids=[specialized_event_id],
             runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
         )
-        offer["status_event_id"] = changed["id"]
         events.append(changed)
-        counterpart = offer["issuer"] if action == OfferAction.REJECT.value else offer["recipient"]
-        queue_wake(counterpart, "OFFER_CHANGE", changed["id"], {"offer_id": offer["id"]})
+        return {
+            "offer": offer,
+            "change_event": changed,
+            "knowledge": {
+                "kind": "offer",
+                "type": "OFFER",
+                "offer_id": str(offer["id"]),
+                "from": str(message["sender"]),
+                "content": str(message.get("content", "")),
+                "terms": copy.deepcopy(offer.get("terms", [])),
+                "change_type": change_type,
+                "tick": target,
+                "source": "volume_offer",
+            },
+        }
 
     def _active_worldline(self, worldline_id: str) -> dict[str, Any]:
         row = self.db.worldline(worldline_id)

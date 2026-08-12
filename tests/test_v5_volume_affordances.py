@@ -175,12 +175,20 @@ def test_volume_operation_offer_and_revisit_survive_commit(app_config):
     ]
     assert offer["status"] == "accepted"
     assert state["offers"][0]["status"] == "PROPOSED"
-    assert runtime.next_tick(worldline_id) == runtime.worldline(worldline_id)["worldline"]["current_tick"] + 1
+    assert runtime.next_tick(worldline_id) == runtime.worldline(worldline_id)["worldline"]["current_tick"] + 2
     advanced_offer = runtime.advance_one(worldline_id)
-    assert advanced_offer["tick"] == 4
-    offer_wakes = [
+    assert advanced_offer["tick"] == 5
+    assert any(event["event_type"] == "MESSAGE_DISPATCHED" for event in advanced_offer["events"]) is False
+    assert not [
         wake
         for wake in runtime.db.subject_wakes(worldline_id, tick=4)
+        if wake["wake_type"] == "OFFER_CHANGE"
+    ]
+    assert any(event["event_type"] == "MESSAGE_DELIVERED" for event in advanced_offer["events"])
+    assert any(event["event_type"] == "OFFER_CHANGED" for event in advanced_offer["events"])
+    offer_wakes = [
+        wake
+        for wake in runtime.db.subject_wakes(worldline_id, tick=5)
         if wake["wake_type"] == "OFFER_CHANGE"
     ]
     assert len(offer_wakes) == 1

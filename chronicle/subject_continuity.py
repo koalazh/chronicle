@@ -459,18 +459,22 @@ class LifetimeContextBuilder:
     def _subject_items(values: Any, seat: str) -> list[dict[str, Any]]:
         if not isinstance(values, list):
             return []
-        return [
-            copy.deepcopy(value)
-            for value in values
-            if isinstance(value, dict)
-            and (
+        result = []
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            visible_to = value.get("visible_to")
+            if isinstance(visible_to, list) and visible_to and seat not in visible_to:
+                continue
+            if (
                 value.get("actor_id") == seat
                 or value.get("issuer") == seat
                 or value.get("recipient") == seat
                 or seat in value.get("parties", [])
                 or value.get("visibility") == "PUBLIC"
-            )
-        ][:6]
+            ):
+                result.append(copy.deepcopy(value))
+        return result[:6]
 
     def _relevance_tokens(
         self,

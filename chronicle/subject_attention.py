@@ -64,6 +64,18 @@ def evaluate_attention(
             _event_ids(structural_shocks),
         )
 
+    structured_commitment_changes = [
+        event
+        for event in new_known_events
+        if str(event.get("event_type", "")) in {"OFFER_CHANGED", "AGREEMENT_CHANGED"}
+    ]
+    if structured_commitment_changes:
+        return AttentionResult(
+            AttentionDecision.REOPEN,
+            "STRUCTURED_COMMITMENT_CHANGE",
+            _event_ids(structured_commitment_changes),
+        )
+
     matched_dependency_ids, matching_events = _matched_dependencies(
         course.get("open_dependencies", []), new_known_events
     )

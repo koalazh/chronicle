@@ -120,6 +120,12 @@ Phase 9 的“未运行”是证据边界，不是静默跳过：Prompt 与 auto
 
 这些测试证明 Host/Pack/policy 的结构性边界；它们不替代 stronger Agent 的 Canonical History paired run、Role-State live swap 或真人选择结果。后者必须在隔离 real Hermes acceptance 中单独记录。
 
+## Phase 11 Archive projection boundary
+
+`judgment_history` 是 Archive 的只读派生投影，不增加表、不回写 `plan_json`，也不把可变的 `Lifetime.plan[0]` 当作历史。它按 Lifetime seat 过滤 append-only Horizon events，并用 public-safe event copy 组织为“此前 / 这次决定 / 后来知道 / 之后发生”；事件 ID 只作为稳定的 API 标识，不进入页面文案。
+
+selected Lifetime replay 仍必须由用户显式选择；公共回看不会加载其他 Lifetime 的 Course、Belief、Knowledge 或判断史。没有 Horizon event 的 Lifetime 返回空历史，而不是从当前 Course 猜测过去。浏览器布局检查只证明 fixture/API 的产品边界，不证明 live Hermes 状态。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

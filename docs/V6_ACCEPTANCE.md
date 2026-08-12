@@ -140,6 +140,17 @@ Phase 9 proves only the bounded scaffold decisions above. The two `BOUNDED` rows
 
 Phase 10 deterministic PASS does not claim strong-model Canonical History, live Role-State Swap or human product acceptance.
 
+## Phase 11 Archive / UX
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| append-only judgment history | PASS | `tests/test_v6_archive_history.py` verifies `judgment_history` is rebuilt from the selected Lifetime's Horizon events and does not expose ledger field names |
+| Archive product copy | PASS | Public replay, Lifetime replay and judgment replay are separated; selected replay remains opt-in and the page text contains no Profile/Session/Memory/Wake/Runtime or thinking-animation jargon |
+| responsive browser surface | PASS | Isolated fixture server `127.0.0.1:18880`, sealed `worldline-2d4eaec1219045d0`, Archive → 吴三桂 judgment replay checked at 1440/1280/768/390; all four had `scrollWidth == innerWidth` and no error/warn logs |
+| deterministic regression | PASS | `uv run pytest -q`: 357 passed; Ruff, compileall, JS syntax and diff check pass |
+
+Phase 11 evidence is deterministic fixture/API plus browser product evidence. It does not prove the Phase 12 real Hermes business chain or replace human product answers.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

@@ -44,7 +44,7 @@ Leave 把这段人生交还给世界。它只改变 controller/presence metadata
 
 Crisis settlement 只是局部局势留下了 Meaning，Volume 仍保持 `ACTIVE`。只有整卷到达结构性边界——所有 Crisis Instance 已有结果或被抑制、没有待处理 Logical Moment、没有到期唤醒、没有在途消息或待应用历史字段——才允许 Volume Ending 和 Archive。
 
-Archive 默认展示安全的公共回看；用户明确选择某一 Lifetime 后，才增加这一段人生的 selected replay，并区分“当时知道”“后来才知道”和“卷册结束时仍未知”。它不会把其他 Lifetime 的私有内容拼成全知叙事。
+Archive 默认展示安全的公共回看；用户明确选择某一 Lifetime 后，才增加这一段人生的 selected replay，并区分“当时知道”“后来才知道”和“卷册结束时仍未知”。V6 进一步从 append-only decision-horizon 事件投影“此前的判断、这次决定、为什么重新判断、后来知道的事和之后发生的事”，不把其他 Lifetime 的私有内容拼成全知叙事，也不展示未落笔的思考。
 
 ## 产品心智模型
 
@@ -74,11 +74,11 @@ Host 负责唯一世界时钟、历史来源、位置、路线、消息抵达、
 - 不允许用户从公共 World 反推其他 Lifetime 的私有计划、Belief、未送达消息或工具调用；
 - 不把后来的历史锚点自动播放成唯一命运，不用中央模型替所有 Lifetime 决定。
 
-## 当前实现与未完成边界
+## V6 演进与未完成边界
 
-V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell；隔离 live harness 已验证一条真实 Hermes Wake 通过 `logical_intent` staging 并进入原子 commit。fixture 和单 Wake live 证据仍不能替代完整的 P0–P5 产品证明。
+V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product shell；V6 在此基础上增加 Course、Attention、deliberation、连续 Human judgment、真实路线上的 Offer/Agreement transport，以及 Archive judgment history。Phase 11 的 fixture/API 与浏览器证据已通过；隔离 live harness 的单 Wake 证据仍不能替代 Phase 12 完整 Hermes 业务链。
 
-当前还没有证明真实 Hermes 在 Human↔Hermes handoff、跨 Subject 因果、Memory 学习和 off-screen continuation 中产生正确行为。完整状态不以页面可点击或一次 Wake 文本推断，见 [V5 验收记录](docs/V5_ACCEPTANCE.md)。
+当前还没有证明真实 Hermes 在 Human↔Hermes handoff、跨 Subject 因果、Memory 学习和 off-screen continuation 中产生正确行为，也没有真人试玩回答或正式 Completion Challenge。完整状态不以页面可点击或一次 Wake 文本推断，见 [V6 验收记录](docs/V6_ACCEPTANCE.md)。
 
 ## 相关文档
 
@@ -86,4 +86,5 @@ V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product she
 - [前端合同](docs/FRONTEND.md)：页面状态、文案、隐私、API 接缝和响应式要求。
 - [运维与验收](docs/OPERATIONS.md)：安全启动、隔离数据库、Hermes preflight、迁移和清理。
 - [V5 验收记录](docs/V5_ACCEPTANCE.md)：逐条 acceptance evidence、P0–P5 和 blocker。
+- [V6 实施与验收](docs/V6_IMPLEMENTATION.md)、[V6 验收记录](docs/V6_ACCEPTANCE.md)：Phase 0–11 证据、Phase 12 blocker 和最终挑战边界。
 - [历史与视野](docs/HISTORY.md)：史料、争议、建模假设和信息盲区。

@@ -1,6 +1,6 @@
 # Chronicle V5 运维与验收
 
-这是 V5 的本地 runbook。它把“服务能启动”“代码合同通过”“Hermes 环境可用”“真实 V5 业务成立”和“浏览器体验合格”分开记录。任何一层都不能替代另一层。
+这是 V5/V6 的本地 runbook。它把“服务能启动”“代码合同通过”“Hermes 环境可用”“真实业务成立”和“浏览器体验合格”分开记录。任何一层都不能替代另一层。
 
 ## 1. 安全边界
 
@@ -132,7 +132,7 @@ uv run chronicle doctor
 - textarea 在 rerender 前被捕获，busy mutation 不能 double-submit；
 - 页面不出现 Agent/Profile/Session/Memory、crisis dashboard、meter 或 AI thinking animation。
 
-Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave。2026-08-12 又在独立 fixture SQLite 上复核了 Phase 11 Archive/Ending：unsealed/sealed 两态、Archive → Public Replay → 明确选择 Lifetime Replay，以及 1440/1280/768/390 四种 viewport；检查记录了 no-overflow、按钮可聚焦/有可访问名称和空 dev logs。该证据仍是 fixture/API 的 UI proof，不替代真实 live API 下的最终状态表现，完整 P0–P5 仍未通过，详见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave。2026-08-13 在独立 fixture server `127.0.0.1:18880` 上复核了 Phase 11 Archive/Ending：sealed Archive、明确选择吴三桂、判断回看，以及 1440/1280/768/390 四种 viewport；四种宽度均无 horizontal overflow，页面不含内部执行术语，error/warn logs 为空。该证据仍是 fixture/API 的 UI proof，不替代 Phase 12 real Hermes business chain，详见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。
 
 ## 9. 证据归档
 

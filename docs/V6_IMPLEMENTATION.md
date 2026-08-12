@@ -134,6 +134,14 @@ Offer / Agreement transport 现在复用同一个 Volume global clock 与既有 
 
 Phase 10 定向测试 4 passed；证据仍是 fixture / Pack / pure policy，不等价于强模型真人试玩或 real Hermes trajectory。
 
+## Phase 11 Archive / UX
+
+Archive 的 selected Lifetime replay 现在从 append-only `DECISION_HORIZON_ESTABLISHED`、`DECISION_HORIZON_REVISED` 和 `DECISION_HORIZON_HELD` 重建 `judgment_history`。每个条目只投影已经落下的判断：此前的打算、这次决定、为什么在此刻重新判断、后来进入所知的事实和之后留下的公开后果；不存储或显示 chain-of-thought、候选方案、Wake/Profile/Session 等执行术语。
+
+前端 Archive 将公共回看、人生回看和判断回看分层呈现，保留显式选择 Lifetime 才加载私有 replay。新增 `.judgment-history` 响应式布局，并在 1440、1280、768、390 宽度上验证 `document/body.scrollWidth == innerWidth`；页面文本未出现 `Profile`、`Session`、`Memory`、`Wake`、`Runtime`、`Agent is thinking` 等内部术语，也没有错误日志。
+
+证据：`tests/test_v6_archive_history.py` 覆盖 Ledger 重建和内部字段隔离；完整 `uv run pytest -q` 为 357 tests passed，Ruff、compileall、JS syntax、diff check 均通过；隔离 fixture server `127.0.0.1:18880` 的 sealed Worldline `worldline-2d4eaec1219045d0` 通过 Archive → 吴三桂判断回看浏览器检查。该证据仍是 deterministic fixture/API 与浏览器产品证据，不替代 Phase 12 real Hermes 业务链。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -159,7 +167,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 8 Content / World Correctness | COMPLETE | Remote Offer/Agreement obey route-delivery causality; Shanhai fixed operation/pressure and Nanjing source bounds have regression evidence |
 | 9 Harness Ablation | COMPLETE | One-action and authored-maneuver ablations are source/Host bounded; prompt and autonomous fixed-pressure Provider experiments remain explicitly unrun |
 | 10 V6 Game Tests | COMPLETE | Perfect Wait, canonicality perturbation, role-state swap and Shanhai/Nanjing causal probes pass; live strong-agent evidence remains |
-| 11 Archive / UX | NOT_STARTED | |
+| 11 Archive / UX | COMPLETE | Append-only judgment history projection, Chinese product copy, and 1440/1280/768/390 no-overflow/browser checks pass; evidence remains fixture/API/browser |
 | 12 Real Hermes live acceptance | NOT_STARTED | |
 
 ## Open questions

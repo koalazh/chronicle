@@ -32,6 +32,23 @@ function listMarkup(items, className = "folio-list") {
   return `<ul class="${className}">${items.map((item) => `<li>${text(itemText(item))}</li>`).join("")}</ul>`;
 }
 
+function judgmentHistoryMarkup(items) {
+  if (!items?.length) return `<p class="empty-copy">这段人生没有留下可回看的判断。</p>`;
+  return `<ol class="judgment-history">${items.map((item) => `
+    <li class="judgment-entry">
+      <div class="judgment-meta"><span>第 ${text(item.tick)} 个时刻</span><strong>${text(item.label)}</strong></div>
+      <div class="judgment-copy">
+        <p class="judgment-why">${text(item.why_now)}</p>
+        <dl class="judgment-fields">
+          <div><dt>此前</dt><dd>${text(item.before)}</dd></div>
+          <div><dt>这次决定</dt><dd>${text(item.decision)}：${text(item.course)}</dd></div>
+        </dl>
+        ${item.new_facts?.length ? `<div class="judgment-note"><span>后来知道</span>${listMarkup(item.new_facts, "desk-list")}</div>` : ""}
+        ${item.consequences?.length ? `<div class="judgment-note"><span>之后发生</span>${listMarkup(item.consequences, "desk-list")}</div>` : ""}
+      </div>
+    </li>`).join("")}</ol>`;
+}
+
 function chrome(content, { compact = false } = {}) {
   const nav = [
     ["volume", "卷册"],
@@ -230,13 +247,20 @@ function archivePage() {
         <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回封存卷册</button></div>
       </section>
       <section class="world-section archive-replay">
-        <div class="section-heading"><span>Public Replay</span><h2>世界留下的轨迹</h2></div>
+        <div class="section-heading"><span>公共回看</span><h2>世界留下的轨迹</h2></div>
         <ol class="trace-list">${replay.map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind)}</strong><p>${text(event.text)}</p></div></li>`).join("") || `<li class="empty-copy">没有可公开回看的事件。</li>`}</ol>
       </section>
       <section class="world-section">
-        <div class="section-heading"><span>Lifetime Replay</span><h2>从一段人生回看</h2></div>
+        <div class="section-heading"><span>人生回看</span><h2>从一段人生回看</h2></div>
         <div class="people-grid">${(detail.world?.people || []).map((person) => `<article class="person-card"><div><span class="column-label">${text(person.display_name)}</span><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
-        ${state.selectedReplayLifetime && detail.replay?.lifetime ? `<div class="known-strip"><span>${text(detail.replay.lifetime.display_name)} · 后知事实</span>${listMarkup(detail.replay.lifetime.later_known, "desk-list")}</div>` : ""}
+        ${state.selectedReplayLifetime && detail.replay?.lifetime ? `
+          <section class="judgment-history-section">
+            <div class="section-heading"><span>判断回看</span><h3>${text(detail.replay.lifetime.display_name)} 的判断如何变化</h3></div>
+            <p class="history-intro">这里只回看已经落下的判断、后来进入所知的事实，以及它们留下的后果；不展示未落笔的思考。</p>
+            ${judgmentHistoryMarkup(detail.replay.lifetime.judgment_history)}
+          </section>
+          <div class="known-strip"><span>${text(detail.replay.lifetime.display_name)} · 后知事实</span>${listMarkup(detail.replay.lifetime.later_known, "desk-list")}</div>
+        ` : ""}
       </section>
     `, { compact: true });
   }

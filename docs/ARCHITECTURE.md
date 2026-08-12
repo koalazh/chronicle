@@ -1,6 +1,6 @@
 # Chronicle V5 架构
 
-本文是当前 V5 的架构入口。产品旅程见 [PRODUCT.md](../PRODUCT.md)，页面合同见 [FRONTEND.md](FRONTEND.md)，运行与验收见 [OPERATIONS.md](OPERATIONS.md) 和 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。旧 V3/V4 文档、旧 `/api/runs` 和 legacy router 只描述兼容边界，不再作为新 V5 的设计来源。
+本文是当前 V5/V6 的架构入口。产品旅程见 [PRODUCT.md](../PRODUCT.md)，页面合同见 [FRONTEND.md](FRONTEND.md)，运行与验收见 [OPERATIONS.md](OPERATIONS.md) 和 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。旧 V3/V4 文档、旧 `/api/runs` 和 legacy router 只描述兼容边界，不再作为新 V5/V6 的设计来源。
 
 ## 一条因果链
 
@@ -96,6 +96,10 @@ Crisis 的 `SETTLED` 或 `SUPPRESSED` 只写入 Instance outcome、world effects
 - required historical field 已实际应用。
 
 安全 horizon 可以说明“尚未收束”的 fallback，却不能把未满足条件的卷册伪装成产品 Ending。Seal event 会记录 boundary policy、evidence event/assertion IDs 和 reason，之后才允许 Archive。
+
+### V6 judgment history
+
+Archive 的 selected Lifetime replay 通过 `chronicle/product_api.py` 从 append-only `DECISION_HORIZON_*` Ledger events 派生判断史。它只保留此前 Course、已提交的 HOLD/REVISE 结果、公开可解释的重新判断原因、后来进入 Knowledge 的事实和可见后果；不新增可变历史表，不暴露 chain-of-thought，也不让当前 `plan[0]` 覆盖过去。
 
 ### Seal 与清理
 

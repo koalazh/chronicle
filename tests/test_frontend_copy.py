@@ -30,6 +30,9 @@ def test_frontend_uses_the_v5_product_language_and_ia():
         "data-human-actor-id",
         "/api/runs",
         "Crisis Engine",
+        "Public Replay",
+        "Lifetime Replay",
+        "Agent is thinking",
     ):
         assert forbidden not in source
         assert forbidden not in index
@@ -99,7 +102,14 @@ def test_frontend_does_not_render_internal_ids_as_product_copy():
         "VOLUME ENDING",
     ):
         assert forbidden not in source
-    for required in ("item.observation", "archiveKindText", "archiveStatusText", "卷册边界"):
+    for required in (
+        "item.observation",
+        "archiveKindText",
+        "archiveStatusText",
+        "卷册边界",
+        "judgmentHistoryMarkup",
+        "判断回看",
+    ):
         assert required in source
 
 

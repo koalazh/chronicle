@@ -10,7 +10,7 @@ Volume Home
   │    ├─ Follow a Lifetime
   │    └─ Inhabit → Life Desk → Leave
   ├─ Volume Ending
-  └─ Archive → Public Replay → selected Lifetime Replay
+  └─ Archive → 公共回看 → 人生回看 → 判断回看
 ```
 
 当前正式 hash pages 是 `volume`、`world`、`follow/{lifetime_id}`、`desk`、`archive` 和 `ending`。旧 Watch、Takeover、Settlement、Compare 页面不属于 V5 正式导航；旧代码只能作为 legacy compatibility 使用。
@@ -56,8 +56,10 @@ Leave 是显式动作，文案说明“把这段人生交还给世界”。它�
 
 打开一个已封存卷册后，页面分成两层：
 
-1. `Public Replay`：只显示 public-safe 的事件文本和世界轨迹；
-2. `Lifetime Replay`：用户主动选择一段人生后，显示该 Lifetime 的回看和 `later_known` 事实。
+1. 公共回看：只显示 public-safe 的事件文本和世界轨迹；
+2. 人生回看：用户主动选择一段人生后，显示该 Lifetime 的回看和 `later_known` 事实。
+
+选定 Lifetime 后，人生回看增加 `judgment_history`：它从 append-only decision-horizon 事件投影此前的打算、这次决定、重新判断的公开原因、后来才知道的事实和公开后果。它不显示未落笔的思考，也不显示内部 Ledger、Wake、Profile、Session 或 Memory 字段。
 
 默认不加载任何 Lifetime private replay。封存页面不显示 raw event payload、Profile 名、token、Session ID 或其他 Lifetime 的私有内容。
 
@@ -74,8 +76,8 @@ Leave 是显式动作，文案说明“把这段人生交还给世界”。它�
 | 继续/决定 | `POST .../continue`, `POST .../decision` | world, pending moment, desk |
 | 离席 | `POST /api/worldlines/{id}/leave` | public world |
 | 封存卷册列表 | `GET /api/worldlines` | sealed archive rows |
-| 公共回看 | `GET /api/worldlines/{id}/archive` | public replay |
-| 选定一段人生回看 | `GET .../archive?lifetime_id=...` | selected Lifetime replay only |
+| 公共回看 | `GET /api/worldlines/{id}/archive` | 公共轨迹 |
+| 选定一段人生回看 | `GET .../archive?lifetime_id=...` | selected Lifetime replay 与 judgment history |
 | Volume Ending | `POST /api/worldlines/{id}/seal` | boundary/ending result |
 
 前端只加载产品投影和提交用户 intent，不复制时间调度、权限、路由、消息抵达、seal boundary 或 privacy 规则。后端错误必须翻译成下一步可执行的中文，不显示 traceback、HTTP status code、数据库表名或原始模型配置。
@@ -114,7 +116,7 @@ Chronicle 是可交互的历史文书，不是策略游戏 HUD、地图编辑器
 - Leave 显式且不会误封存；
 - textarea 在 rerender 和提交前保留输入；
 - busy mutation 不能 double-submit；
-- Archive/Ending 在手机仍可读，public/lifetime replay 层次不混淆；
+- Archive/Ending 在手机仍可读，公共回看/人生回看/判断回看层次不混淆；
 - 不出现 Agent/Profile/Session/Memory 技术术语、crisis dashboard、meter 或 AI thinking animation。
 
-本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；2026-08-12 在独立 fixture 上补充了 Phase 11 Archive/Ending 的 sealed/unsealed 交互及 1440/1280/768/390 四种 viewport、no-overflow、focusable accessible buttons 和 dev logs 检查。它仍不替代真实 live API 状态验证，详细边界见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；2026-08-13 在隔离 fixture `127.0.0.1:18880` 上补充了 Archive → sealed → 选定吴三桂 → 判断回看的交互及 1440/1280/768/390 四种 viewport、no-overflow、内部术语扫描和空 error/warn logs 检查。它仍不替代真实 live API 状态验证，详细边界见 [V6_ACCEPTANCE.md](V6_ACCEPTANCE.md)。

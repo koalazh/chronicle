@@ -10,11 +10,12 @@ Chronicle 是一个本地运行、以 V5 `Volume Worldline` 为根的历史体�
 
 ## 先看结论
 
-当前仓库处于 **V5 candidate** 状态：
+当前仓库处于 **V6 deterministic candidate** 状态：
 
 - V5 Volume、Global World Tick、Persistent Lifetime、Inhabit/Leave、Pending Logical Moment、跨 Crisis 传播、Archive/Ending 和 vanilla 前端已经落地；
+- V6 已增加持久 Current Course、Knowledge/Attention 分离、HOLD/REVISE deliberation、连续 Human judgment、remote Offer/Agreement transport、agency/content/game probes，以及 Archive 的可读判断回看；
 - Source/Scenario/Volume validators、自动化回归、前端静态检查和隔离 live Hermes 证据已归档；
-- 当前代码不是一个已经完成最终用户验收的产品。P5 的真实试玩回答和正式 Completion Challenge 仍未完成；完整边界见 [`docs/V5_ACCEPTANCE.md`](docs/V5_ACCEPTANCE.md)。
+- Phase 11 的 fixture/API 与浏览器证据已通过；Phase 12 的隔离 real Hermes 业务链、真人试玩回答和正式 Completion Challenge 仍未完成，因此当前不能称为最终验收完成。完整边界见 [`docs/V6_ACCEPTANCE.md`](docs/V6_ACCEPTANCE.md)。
 
 因此，README 里的“已支持”指代码和相应证据层已经存在，不等于所有真实 Hermes 行为或最终体验已经通过验收。
 
@@ -69,9 +70,9 @@ Volume → World → Follow → Inhabit → Life Desk → Leave → Archive / En
 | Inhabit | 我要不要接过这段人生？ | Human 一次只能接过一条 Lifetime |
 | Life Desk | 这个人现在收到什么、知道什么、还承担什么？ | 只展示当前 Lifetime 的私有上下文 |
 | Leave | 我是否把下一步交还给世界？ | 只改变 controller/presence，不重置人物或时间 |
-| Archive / Ending | 这一卷怎样成为过去？ | 只有 Volume 到达结构边界后才能封存和回看 |
+| Archive / Ending | 这一卷怎样成为过去？ | 只有 Volume 到达结构边界后才能封存；选定 Lifetime 后可回看判断史 |
 
-普通用户不需要理解 Profile、Wake、Session、Memory 或 Runtime。这些是执行边界，不是产品页面的心智模型。
+普通用户不需要理解 Profile、Wake、Session、Memory 或 Runtime。这些是执行边界，不是产品页面的心智模型。封存后选定一段人生，还可以回看“此前的判断、这次决定、后来知道的事和之后发生的事”，但不会看到未落笔的思考。
 
 ## V5 的核心模型
 
@@ -109,7 +110,7 @@ VOLUME_SEALED / ARCHIVED
 撤销 bindings，清理只属于本卷册的 Profile/Gateway 资源
 ```
 
-Public Replay 默认只返回公共轨迹；选择某一 Lifetime 后，才显示该人物的 selected replay，并区分“当时知道”“后来才知道”和“当时仍未知”。
+公共回看默认只返回公共轨迹；选择某一 Lifetime 后，才显示该人物的 selected replay，并区分“当时知道”“后来才知道”和“当时仍未知”。
 
 ## 本地运行方式
 
@@ -223,8 +224,10 @@ V5 不是：
 | 页面状态、文案、隐私和响应式合同 | [`docs/FRONTEND.md`](docs/FRONTEND.md) |
 | 本地启动、隔离、迁移、Hermes 和清理 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 | V5 迁移原则和 invariants | [`docs/V5_MIGRATION.md`](docs/V5_MIGRATION.md) |
+| V6 实施记录与迁移边界 | [`docs/V6_IMPLEMENTATION.md`](docs/V6_IMPLEMENTATION.md)、[`docs/V6_MIGRATION.md`](docs/V6_MIGRATION.md) |
 | 史料、来源和建模盲区 | [`docs/HISTORY.md`](docs/HISTORY.md) |
 | 当前验收矩阵、证据和 blocker | [`docs/V5_ACCEPTANCE.md`](docs/V5_ACCEPTANCE.md) |
+| V6 验收矩阵与证据边界 | [`docs/V6_ACCEPTANCE.md`](docs/V6_ACCEPTANCE.md) |
 
 ## License
 

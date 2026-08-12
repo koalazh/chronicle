@@ -346,6 +346,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .trace-list li > span { color: var(--red); font-size: 10px; letter-spacing: .08em; }
 .trace-list strong { font-family: var(--serif); font-size: 17px; font-weight: 500; }
 .trace-list p { margin: 7px 0 0; color: var(--ink-soft); font-family: var(--serif); line-height: 1.8; }
+.judgment-history-section { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--line); }
+.judgment-history-section .section-heading { padding: 30px 0 18px; }
+.judgment-history-section .section-heading h3 { margin: 0; font-family: var(--serif); font-size: clamp(23px, 3vw, 34px); font-weight: 500; }
+.history-intro { max-width: 650px; margin: 0 0 28px; color: var(--ink-soft); font-family: var(--serif); font-size: 13px; line-height: 1.9; }
+.judgment-history { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
+.judgment-entry { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 25px; padding: 25px 0 28px; border-bottom: 1px solid var(--line-soft); }
+.judgment-meta span, .judgment-meta strong { display: block; }
+.judgment-meta span { color: var(--red); font-size: 10px; letter-spacing: .08em; }
+.judgment-meta strong { margin-top: 8px; font-family: var(--serif); font-size: 17px; font-weight: 500; }
+.judgment-copy { min-width: 0; }
+.judgment-why { margin: 0 0 17px; color: var(--ink); font-family: var(--serif); font-size: 18px; line-height: 1.8; }
+.judgment-fields { display: grid; gap: 10px; margin: 0; }
+.judgment-fields div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 13px; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft); }
+.judgment-fields dt { color: var(--red); font-size: 10px; letter-spacing: .08em; }
+.judgment-fields dd { margin: 0; color: var(--ink-soft); font-family: var(--serif); line-height: 1.8; overflow-wrap: anywhere; }
+.judgment-note { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 13px; margin-top: 15px; }
+.judgment-note > span { color: var(--ink-faint); font-size: 10px; letter-spacing: .08em; }
+.judgment-note .desk-list { padding-left: 17px; }
 .v5-desk .desk-surface { padding-bottom: 30px; }
 .decision-desk h2 { margin: 0; font-family: var(--serif); font-size: 31px; font-weight: 500; line-height: 1.5; }
 .decision-desk > p:not(.kicker) { color: var(--ink-soft); font-family: var(--serif); line-height: 1.8; }
@@ -390,6 +408,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .assertion-register { padding-left: 0; grid-template-columns: 1fr; }
   .assertion-register article:nth-child(even) { padding-left: 0; border-left: 0; }
   .archive-row { grid-template-columns: 1fr; gap: 5px; }
+  .judgment-entry { grid-template-columns: 1fr; gap: 12px; }
+  .judgment-meta strong { margin-top: 5px; }
   .compare-folios, .compare-columns { grid-template-columns: 1fr; }
   .compare-folio, .compare-folio + .compare-folio, .compare-fact-column, .compare-fact-column + .compare-fact-column, .compare-path-column, .compare-path-column + .compare-path-column { padding: 28px 0; border-left: 0; border-bottom: 1px solid var(--line-soft); }
   .compare-folio:last-child, .compare-fact-column:last-child, .compare-path-column:last-child { border-bottom: 0; }
@@ -431,6 +451,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .letter-sheet p { margin-right: 36px; }
   .ongoing-sheet { grid-template-columns: 1fr; gap: 9px; }
   .replay-item { grid-template-columns: 58px 1fr; gap: 8px; padding-left: 18px; }
+  .judgment-fields, .judgment-note { grid-template-columns: 1fr; gap: 4px; }
   .setup-form { padding: 24px 20px; }
 }
 

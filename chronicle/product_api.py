@@ -510,6 +510,191 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             "private_to_lifetime": True,
         }
 
+    def judgment_course_text(active: ChronicleHost, course: Any) -> str:
+        if not isinstance(course, dict):
+            return "此前还没有明确打算。"
+        summary = str(course.get("course") or course.get("objective") or "").strip()
+        return public_copy(active, summary) if summary else "此前还没有明确打算。"
+
+    def judgment_event_text(active: ChronicleHost, event: dict[str, Any]) -> str:
+        """Project one admitted fact into archive copy without exposing ledger vocabulary."""
+
+        event_type = str(event.get("event_type", ""))
+        payload = event.get("payload", {})
+        if event_type == "DECISION_DEPENDENCY_DUE":
+            return "此前等待的期限已经到来。"
+        if event_type in {"OBSERVATION_OBTAINED", "INVESTIGATION_COMPLETED"}:
+            observation = payload.get("observation", {})
+            value = observation.get("content") if isinstance(observation, dict) else observation
+            return public_copy(active, value or "一项调查结果进入所知范围。")
+        if event_type in {"OPERATION_COMPLETED", "ENTITY_STATE_CHANGED"}:
+            return "一项行动留下了可见结果。"
+        return replay_event_text(active, event)
+
+    def judgment_why_now(
+        active: ChronicleHost,
+        event: dict[str, Any],
+        previous_course: Any,
+        attention_events: list[dict[str, Any]],
+    ) -> str:
+        event_type = str(event.get("event_type", ""))
+        if event_type == "DECISION_HORIZON_HELD":
+            return "新的事实还没有改变此前判断的基础。"
+        if previous_course is None:
+            return "这是这段人生第一次留下明确打算。"
+        matching = [
+            attention
+            for attention in attention_events
+            if int(attention.get("tick", -1)) <= int(event.get("tick", 0))
+            and str(attention.get("payload", {}).get("decision", "")) == "REOPEN"
+        ]
+        if matching:
+            reason = str(matching[-1].get("payload", {}).get("reason_code", ""))
+            return {
+                "OPEN_DEPENDENCY_MATCH": "此前等待的一项事实终于到达。",
+                "STRUCTURED_COMMITMENT_CHANGE": "一项正式约定发生了变化。",
+                "STRUCTURAL_WORLD_SHOCK": "世界边界发生了结构性变化。",
+                "OWN_CONSEQUENCE_UNEXPECTED": "此前的行动留下了意外后果。",
+                "NO_CURRENT_COURSE": "新的事实进入时，还没有现成的打算。",
+            }.get(reason, "新的事实进入了这段人生。")
+        return "你在新的判断下改了主意。"
+
+    def judgment_history(
+        active: ChronicleHost,
+        lifetime: dict[str, Any],
+        events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Rebuild the public judgment history from append-only Horizon events."""
+
+        lifetime_id = str(lifetime["seat"])
+        horizon_types = {
+            "DECISION_HORIZON_ESTABLISHED",
+            "DECISION_HORIZON_REVISED",
+            "DECISION_HORIZON_HELD",
+        }
+        horizons = [
+            event
+            for event in events
+            if str(event.get("event_type", "")) in horizon_types
+            and (
+                str(event.get("seat_id", "")) == lifetime_id
+                or str(event.get("payload", {}).get("seat", "")) == lifetime_id
+            )
+        ]
+        horizons.sort(key=lambda item: (int(item.get("tick", 0)), str(item.get("id", ""))))
+        if not horizons:
+            return []
+
+        event_by_id = {str(item.get("id", "")): item for item in events}
+        attention_events = [
+            event
+            for event in events
+            if event.get("event_type") == "ATTENTION_EVALUATED"
+            and str(event.get("seat_id", "")) == lifetime_id
+        ]
+        later_known = []
+        dispatches = {
+            str(event.get("payload", {}).get("id", "")): event
+            for event in events
+            if event.get("event_type") == "MESSAGE_DISPATCHED"
+            and event.get("payload", {}).get("recipient") == lifetime_id
+        }
+        deliveries = {
+            str(event.get("payload", {}).get("message_id", "")): event
+            for event in events
+            if event.get("event_type") == "MESSAGE_DELIVERED"
+            and event.get("payload", {}).get("recipient") == lifetime_id
+        }
+        for message_id, dispatch in dispatches.items():
+            delivery = deliveries.get(message_id)
+            if delivery is not None and int(dispatch.get("tick", 0)) < int(delivery.get("tick", 0)):
+                later_known.append((int(delivery["tick"]), judgment_event_text(active, delivery)))
+        later_known.sort(key=lambda item: item[0])
+
+        history: list[dict[str, Any]] = []
+        previous_course: Any = None
+        hidden_types = {
+            "TIME_ADVANCED",
+            "ATTENTION_EVALUATED",
+            "DELIBERATION_COMMITTED",
+            "DECISION_HORIZON_ESTABLISHED",
+            "DECISION_HORIZON_REVISED",
+            "DECISION_HORIZON_HELD",
+            "PLAN_UPDATED",
+            "BELIEF_UPDATED",
+            "INTENT_COMMITTED",
+            "AGENT_INTENT_ACCEPTED",
+            "HUMAN_INTENT_ACCEPTED",
+            "MOMENT_COMMITTED",
+        }
+        for index, horizon in enumerate(horizons):
+            tick = int(horizon.get("tick", 0))
+            next_tick = int(horizons[index + 1]["tick"]) if index + 1 < len(horizons) else None
+            course = horizon.get("payload", {}).get("course")
+            event_type = str(horizon.get("event_type", ""))
+            if event_type == "DECISION_HORIZON_HELD":
+                label = "暂时维持"
+                decision = "暂时维持原来的打算"
+            elif event_type == "DECISION_HORIZON_ESTABLISHED":
+                label = "第一次判断"
+                decision = "形成了新的打算"
+            else:
+                label = "重新判断"
+                decision = "改成了新的打算"
+
+            facts: list[str] = []
+            for attention in attention_events:
+                attention_tick = int(attention.get("tick", 0))
+                if attention_tick <= tick or (next_tick is not None and attention_tick > next_tick):
+                    continue
+                for event_id in attention.get("payload", {}).get("new_known_event_ids", []):
+                    admitted = event_by_id.get(str(event_id))
+                    if admitted is None:
+                        continue
+                    value = judgment_event_text(active, admitted)
+                    if value not in facts:
+                        facts.append(value)
+            for known_tick, value in later_known:
+                if known_tick <= tick or (next_tick is not None and known_tick > next_tick):
+                    continue
+                if value not in facts:
+                    facts.append(value)
+
+            consequences: list[str] = []
+            for candidate in events:
+                candidate_tick = int(candidate.get("tick", 0))
+                candidate_type = str(candidate.get("event_type", ""))
+                if candidate_tick <= tick or (next_tick is not None and candidate_tick > next_tick):
+                    continue
+                if candidate_type in hidden_types:
+                    continue
+                public = lifetime_replay_event(active, candidate, lifetime_id)
+                if public is None:
+                    continue
+                value = str(public.get("text") or "").strip()
+                if value and value not in consequences:
+                    consequences.append(value)
+                if len(consequences) >= 4:
+                    break
+
+            history.append(
+                {
+                    "id": str(horizon["id"]),
+                    "tick": tick,
+                    "label": label,
+                    "before": judgment_course_text(active, previous_course),
+                    "decision": decision,
+                    "course": judgment_course_text(active, course),
+                    "why_now": judgment_why_now(
+                        active, horizon, previous_course, attention_events
+                    ),
+                    "new_facts": [{"text": value} for value in facts[:4]],
+                    "consequences": [{"text": value} for value in consequences],
+                }
+            )
+            previous_course = course
+        return history
+
     def lifetime_replay(
         active: ChronicleHost,
         state: dict[str, Any],
@@ -581,6 +766,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             "known_at_time": known_at_time,
             "later_known": later_known,
             "unknown_at_time": unknown_at_time,
+            "judgment_history": judgment_history(active, lifetime, events),
         }
 
     def volume_archive(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:

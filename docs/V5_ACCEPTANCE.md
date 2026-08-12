@@ -2,9 +2,9 @@
 
 > 记录日期：2026-08-12
 > 分支：`dev_v5`
-> 状态：**NOT COMPLETE — P5 与完整 live V5 业务链尚未通过**
+> 状态：**CANDIDATE — P5 与完整 live V5 业务链已形成；正式 Completion Challenge 待执行**
 
-本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。此前 live slice 的历史记录早于本轮 Envelope/restart-reconcile 复核；除非重新在当前代码上执行，否则不能把它们单独升级为最终同一 Volume 证据。
+本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。当前候选基于 `c4b962f` 及其后的前端错误文案修复；在正式 Completion Challenge 通过前，不把候选写成最终完成。
 
 ## 1. 目标链路
 
@@ -26,7 +26,7 @@ Volume
 → only then revoke and clean owned runtime resources
 ```
 
-当前实现已经固定了这条链的 deterministic Host/API/Archive 结构，但还没有用真实 V5 Hermes cognition 完整走通它。
+当前候选已在同一真实 V5 Volume 走通这条链，并保留了真实 Hermes 的等待、消息、调查、操作和边界结果；独立 evaluator 与正式 Completion Challenge 仍分别作为验收闸门记录。
 
 ## 2. Phase 证据
 
@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` + `0d742fc` + `451f237` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录、主体级 affordance 合同、离席后 Agent 接管 Pending Moment、exact Wake 路由和同一 Wake 单次 action guard；P5 与完整 live V5 业务链仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` + `0d742fc` + `451f237` + `f21722b` + `c4b962f` + `443034a` + `554ba37` + `6c2ceee` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录、主体级 affordance 合同、离席后 Agent 接管 Pending Moment、exact Wake 路由和同一 Wake 单次 action guard、Crisis Envelope/restart reconcile、Controller Boundary public-trace exporter/evaluator、owned Gateway cleanup state normalization 以及两条 P5 live candidate；正式 Completion Challenge 待执行 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -141,6 +141,32 @@ homepage → World（初始 2 个 eligible knots；结算后第 3 个才进入�
 - 新建的 fresh Browser tab 在 tick 10 能读到真实 World 页面；随后同一 live API 真实打开 Archive → Public Replay → 吴三桂 Lifetime Replay，四个 viewport 均无横向 overflow，浏览器 dev logs 为 `[]`。tick 19 的正式 `VOLUME_SEALED` 之后，6 个 bindings 变为 `REVOKED`、owned Profile 目录被清理、Gateway owner 被精确停止。
 
 这条记录证明真实 live API 与用户可见 shell 已接通同一 Volume/Host/MCP 边界；它不把浏览器可见 tick 或一条 off-screen causal chain 误当成 P0–P5 全部通过。原运行资源在本记录完成后按精确 owner/runtime 归属停止并清理。
+
+### 当前 P5 candidate：同一 live Volume `worldline-11646e76ec1f49b0`
+
+2026-08-12 在独立临时 SQLite、Hermes Home、runtime owner 和 loopback ports `18830`（产品 server）/`18831`（Gateway）上，以真实产品页面完成了一条连续 Volume：
+
+- 首页开始卷册后 materialize 6 个 Lifetime Profile；浏览器完成 World → Follow 吴三桂 → Inhabit → 等待世界推进 → Leave，离席后同一 Lifetime 继续由 fresh Hermes Session 接管；Follow 页面保留了离席期间的外部轨迹，重新进入同一 Life Desk 时可见新的跨时刻来书；
+- tick 9 的 `north-south-recognition-bridge` 进入公共历史，tick 10 后史可法/马士英/韩赞周等南方主体获得跨 Knot 的公开军情；第一、第二 Crisis settlement 后 Volume 仍 ACTIVE，southern consolidation 在南京 settlement gate 满足后激活并完成；
+- 同一 worldline 最终到 tick 16，三个 Crisis Instance 均 `SETTLED`（before-shanhaiguan、nanjing-succession 在 tick 14；southern-consolidation 在 tick 14），形成 `VOLUME_SEALED`；产品页面随后完成 Archive → Public Replay → 吴三桂 Lifetime Replay；
+- 脱敏 SQLite 复核为：34 个 `COMPLETED` Subject Wake、12 个 `MOMENT_FROZEN`/12 个 `MOMENT_COMMITTED`、14 条 `MESSAGE_DISPATCHED`/14 条 `MESSAGE_DELIVERED`、3 次 `LIFETIME_INHABITED`/3 次 `LIFETIME_LEFT`、6/6 bindings `REVOKED`；seal 后 owned Profile 目录为空且 Gateway owner 文件消失；
+- 运行中一次长时 provider 请求超过客户端等待上限，但数据库最终只保留对应的一次 atomic Moment/operation，没有把 timeout 当成成功；这作为 provider latency 边界保留在记录中；
+- 运行中发现 no-due wake 时前端曾把 `there are no due Subject Wakes to freeze` 原文显示给用户。已在当前代码的 `web/api.js` 做内部错误中文化/未知英文错误降级，`tests/test_frontend_copy.py` 与 Node 行为检查均通过；该修复只改变错误投影，不改变 Host 状态机，未将原始英文泄漏隐藏为 P5 成功证据。
+
+该 candidate 的浏览器路径、最终封存状态、同一 Volume 因果链和清理顺序已关联到同一 worldline；正式 Completion Challenge 仍需以隔离上下文重新作最终 verdict。
+
+### 修复后复核 candidate：同一 live Volume `worldline-505f3f12c80b4644`
+
+2026-08-12 在前端错误中文化、严格 blind evaluator 和 owned Gateway state 修复后，使用新的隔离产品 server `18840`、Gateway `18841`、SQLite 和 Hermes Home 重新运行真实产品链：
+
+- 浏览器完成开始卷册、跟随并进入吴三桂、推进到 tick 1、离席；同一 Volume 随后在 tick 9 通过 `north-south-recognition-bridge` 进入南北公开信息交汇点。no-due wake 场景在真实 Life Desk 中显示 `当前这一刻没有需要你处理的下一步。`，不再泄漏 `Subject Wake` 内部英文；
+- 在同一 worldline 以 Host 的明确 Meaning 边界记录 settlement outcome（before-shanhaiguan 与 nanjing-succession 各包含可公开的历史结果），Envelope 随后正常激活 `southern-consolidation`，没有直接把 later Knot 当作已结束；
+- 浏览器重新进入史可法的 Life Desk 后，tick 10 收到同一北方公开军情；同一 Pending Logical Moment 中真实 Hermes 的韩赞周执行 `investigate(jiangbei-command)`，产生 `INVESTIGATION_STARTED`，tick 11 产生带 `mingji-nanlue-1`、`mingji-yiwen-2`、`hongguang-shilu-chao-1` 来源的 `OBSERVATION_OBTAINED`。这条 later-Knot-specific action 先于 settlement，结果写入 southern outcome；
+- 通过产品 `/seal` 在 tick 11 完成 Archive/Ending。浏览器随后完成 Archive → Public Replay → 史可法 Lifetime Replay；公共回放显示北方军情进入南京、江北整饬激活、调查结果和封存边界，Life Replay 显示史可法后来知道的公开文书；
+- 该 worldline 脱敏复核为：3 个 Crisis 均 `SETTLED`，9 个 Wake `COMPLETED`，7 个 `MOMENT_FROZEN`/`MOMENT_COMMITTED`，5 条消息派发/送达，6/6 bindings `REVOKED`；seal 后 Profile directory 数为 0、Gateway owner/PID 均不存在、lifecycle 为 `exited`、owned `gateway_state.json` 为 `gateway_state=exited` 且 `exit_reason=chronicle_cleanup`；
+- `scripts/v5_export_public_trace.py` 从该真实 SQLite 只导出公开事件字段，生成 19 条 controller-blind trace；`scripts/v5_controller_boundary_evaluator.py` 对该 trace 返回 `PASS`（无 unexplained discontinuity），且输入不含 Human/Hermes/Profile/Session 等隐藏标签。
+
+这条修复后 candidate 关闭了上一轮 evaluator 指出的 later Knot 空结算、盲评合成 trace 和 cleanup state 不一致；它仍标记为 candidate，因为 P5 的最终主观体验回答和正式 Completion Challenge 尚未分别记录。
 
 ## 5. Hermes live evidence
 
@@ -330,8 +356,8 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 - **Crisis Envelope**：`CrisisReference` 现在持有 `earliest_activation_tick`、`activation_preconditions`、`participants` 和 `local_horizon`；Volume genesis 原子登记每个 Envelope 和 `DORMANT` Instance。`reconcile_crisis_envelopes()` 只激活 eligible knot，能在前置结构性条件消失时写 `CRISIS_SUPPRESSED`/`SUPPRESSED`，并对重复 reconcile/activation 保持幂等；southern knot 的 Nanjing settlement gate 由 `tests/test_v5_envelopes.py` 覆盖。
 - **V5 restart reconcile**：`reconcile_live_runtime()` 和 app startup hook 核对唯一 Volume owner、6 条 Lifetime、Profile marker/identity、binding/token、V5 MCP allowlist 以及 Pending Logical Moment 的 Wake/operation 一致性；漂移写 `FAILED`，sealed cleanup 失败保留 `CLEANUP_PENDING`。startup success 与 binding identity drift 的 fail-closed 回归在 `tests/test_v5_live_bridge.py`。
-- **Adversarial semantics**：现有 memory-ablation/Controller Boundary fixture 之外，新增 central-agent/persona-switch impostor negative control、peer private-context divergence、No-Offscreen cognition boundary contrast，以及 stage-before-commit/commit-before-ack 两个 restart fault-injection tests；Controller Boundary 的 hidden-label independent evaluator 和 P5 真实用户判断仍未完成。
-- **Deterministic regression**：Envelope、restart、adversarial 及相关 Phase 6–11 tests 在当前工作树定向通过；完整回归与当前代码的 live chain 仍是后续 gate。
+- **Adversarial semantics**：现有 memory-ablation/Controller Boundary fixture 之外，新增 central-agent/persona-switch impostor negative control、peer private-context divergence、No-Offscreen cognition boundary contrast，以及 stage-before-commit/commit-before-ack 两个 restart fault-injection tests；`scripts/v5_controller_boundary_evaluator.py` 以不接收隐藏 controller label 的独立进程对 blind trace 做行为指纹断点检查，当前测试通过。
+- **Deterministic regression**：Envelope、restart、adversarial 及相关 Phase 6–11 tests 在当前工作树定向通过；完整回归、validators、JS syntax 和当前代码的同一 live chain 均已通过，正式 Completion Challenge 仍是最后 gate。
 
 ## 7. P0–P5 Proof Gates
 
@@ -342,33 +368,33 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 | P2 Temporal Proof | **PASS（live temporal + order pair）** | port `18715` 完成 A sends → B pre-arrival decision → delivery → B fresh-session reconsideration，且到达前 Perspective 不含正文；ports `18722/18723` 完成 Human-first/Agent-first semantic equality、无 pending moment 和精确 teardown。 |
 | P3 Learning Causality | **PASS（controlled live paired）** | ports `18752/18753` 与 `18754/18755` 从同一 tick 10 基线 clone，真实 Hermes fresh Session 在同一 tick 11 消息上分别检索 memory 并 `communicate` committed，或 memory 为空并 `investigate` rejected；Moment 两边均 atomic commit。 |
 | P4 Game Proof | **PASS（strict one-Knot live trajectory）** | Gateway port `18813` 的单一 `before-shanhaiguan` Knot 产生 21 Wake/21 fresh Session/15 atomic Moment，全部完成且每 Wake exactly one operation；覆盖真实 Investigation、Operation、Offer/Agreement、Wait/update_plan、model-error rejected path，Agreement finite，resolver 给出 `ambiguity_used=false` 的唯一 Deferred 结果。 |
-| P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
+| P5 30-minute Product Proof | **CANDIDATE（修复后同一 live Volume + evaluator 证据已形成，主观回答/正式 Challenge 待记录）** | `worldline-505f3f12c80b4644` 已完成修复后产品浏览器试玩、离席后同一 Lifetime continuation、跨 Knot、later-Knot-specific investigation、settlement、Archive/Replay、seal/cleanup；真实 SQLite public trace evaluator=`PASS`，但 P5 主观体验回答与正式 Completion Challenge 尚未执行。 |
 
 ## 8. Live V5 acceptance checklist
 
-计划要求同一真实 V5 中记录以下项目；当前均未形成完整可关联链：
+计划要求同一真实 V5 中记录以下项目；修复后 candidate 已关联到 `worldline-505f3f12c80b4644`（较早的 `worldline-11646e76ec1f49b0` 作为补充记录保留）：
 
-- 4+ persistent Profiles（port `18718` materialize 6 个并使用其中 5 个完成真实 Wake；port `18734/18735` 另在产品浏览器中 materialize 6 个并完成真实 Human→Leave→off-screen chain；`18813` 的单 Knot 轨迹使用 6 个 materialized Profiles，其中 5 个产生真实 Wake）；
+- 4+ persistent Profiles（同一 candidate materialize 6 个并在产品/真实 Hermes 链中使用多个；此前 `18718`、`18734/18735`、`18813` 证据另行保留）；
 - 初次 Human Life 的 dormant Profile；
 - 0 mandatory ORIENT（已通过单次 live V5 创建与 Wake 证据）；
 - 至少一条真实 `logical_intent` staging → `INTENT_COMMITTED` → `MOMENT_COMMITTED`（已通过单次 live V5 证据）；
 - Human→Hermes handoff、same Profile、fresh Session（P0 隔离正向候选已通过：同一 Wu Profile、2 个 Session）；
 - Human plan 进入后续 Hermes context，并在新 evidence 后形成不同的后续 plan/belief（P0 隔离正向候选已记录）；
 - off-screen Dorgon Agent 产生 `MESSAGE_DISPATCHED`（P0 隔离正向候选已记录）；
-- delayed message、operation/offer crossing through the shared Volume graph、off-screen Agent↔Agent causal chain（port `18718` 有 directed continuous coverage，port `18734/18735` 有真实产品 API 的 Agent↔Agent delayed-message chain，尚未形成同一条最终 seal acceptance chain）；
+- delayed message、operation/offer crossing through the shared Volume graph、off-screen Agent↔Agent causal chain（candidate 在同一 Volume 中完成延迟消息、南北 Field/跨 Knot 传播、工具结果 Wake 与后续 settlement）；
 - evidence-backed past affecting future（P3 controlled live pair 已证明 memory 检索导致后续 `communicate`，而无 memory 分支选择 `investigate` 并按能力边界 rejected）；
-- Crisis settlement 后 Profiles 仍存活（port `18734/18735` 在 tick 10 的第一 Crisis settlement 后仍保持 ACTIVE，随后同一 slice 才在 tick 19 seal）；
-- second Crisis / later Knot continuation；
+- Crisis settlement 后 Profiles 仍存活（candidate 在第一批 settlement 后仍保持 ACTIVE，随后才完成 southern settlement 与 seal）；
+- second Crisis / later Knot continuation（同一 candidate 的 southern-consolidation 在前置 settlement 后激活，真实 Hermes 韩赞周调查在 tick 10 开始、tick 11 完成）；
 - later cross-crisis knowledge arrival；
-- final Volume seal（port `18734/18735` 同一 live slice 在 tick 19 通过 boundary 后完成）；
-- seal 之后才 revoke/clean owned Profiles（port `18734/18735` 记录了 `VOLUME_SEALED` 后 6 bindings revoke、owned Profile cleanup 和 Gateway stop；仍不等于 P0–P5 全部通过）。
+- final Volume seal（修复后 candidate 在 tick 11 通过 boundary 后完成）；
+- seal 之后才 revoke/clean owned Profiles（修复后 candidate 记录了 `VOLUME_SEALED` 后 6 bindings revoke、owned Profile cleanup 和 normalized Gateway state）。
 
 当前不能用 preflight、fixture 或旧 V4 live runtime 填充这些空项。
 
 ## 9. 当前 blockers 与下一步
 
-1. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
-2. 将 P0–P4 的证据与同一最终 live Volume 的完整业务链（Human→Leave→off-screen→cross-Knot→settlement→second Knot→Archive→seal→cleanup）关联到一条可复核记录；port `18734/18735` 已分别证明产品链和最终 seal/cleanup，但仍不能替代这条完整关联链。
-3. 将 fixture Archive/Ending 浏览器证据与真实 live Volume/API 状态分开保留。
+1. 由独立 evaluator 记录三项 P5 主观问题的脱敏回答或明确的不可替代边界，并执行新的 context-isolated Completion Challenge。
+2. 保留 `worldline-505f3f12c80b4644` 的修复后同一 live Volume 业务链作为 P5 主证据，不用 fixture 或旧 live slice 替代。
+3. 将前端错误中文化、public-trace evaluator、Gateway cleanup normalization 的全量回归和最终文档 commit 一并归档；在 Challenge PASS 前保持 CANDIDATE 状态。
 
 在以上 blocker 关闭前，不能把本文件状态改成 `COMPLETE`，也不能把 README、产品发布说明或 commit message 写成“V5 已完成”。

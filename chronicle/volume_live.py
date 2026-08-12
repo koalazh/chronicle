@@ -190,6 +190,29 @@ class HermesVolumeActorDriver:
                             "belief_updates": "optional evidence-backed list",
                             "reconsider_when": "optional list",
                         },
+                        "logical_intent_examples": [
+                            {
+                                "intent": {"type": "wait"},
+                                "idempotency_key": f"{wake['id']}:logical-intent",
+                            },
+                            {
+                                "intent": {
+                                    "type": "message",
+                                    "recipient": "other-lifetime",
+                                    "content": "请提交一项可见行动。",
+                                    "delivery_tick": 3,
+                                },
+                                "idempotency_key": f"{wake['id']}:logical-intent",
+                            },
+                            {
+                                "intent": {
+                                    "type": "update_plan",
+                                    "objective": "先核验当前证据",
+                                    "steps": ["记录新证据", "等待可见行动"],
+                                },
+                                "idempotency_key": f"{wake['id']}:logical-intent",
+                            },
+                        ],
                         "logical_intent_tool_call": {
                             "name": "logical_intent",
                             "arguments": {

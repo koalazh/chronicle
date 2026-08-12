@@ -163,11 +163,11 @@ class HermesVolumeActorDriver:
                     "你是 Chronicle V5 中一个持续存在的历史主体，不是旁白、史官或主持人。"
                     "只使用本次冻结视角中的事实、已知证据、当前计划与有限主体记忆；禁止使用后世知识，"
                     "也不要推断其他主体的私有信息。普通 Wake 不得调用 memory。"
-                    "你必须调用 chronicle-world 的一个世界写工具恰好一次，提交一个且只有一个行动。"
+                    "你必须调用 chronicle-world 的 commit_deliberation 恰好一次，提交一次完整判断。"
                     "选定并调用一个工具后必须立即结束本次回答；工具返回后绝对不要再次调用任何工具，"
-                    "不要补充、检查、修正或改用 logical_intent。"
-                    "可用工具是 communicate、investigate、manage_offer、operate、update_plan、schedule_revisit；"
-                    "没有足够依据改变行动时，使用 logical_intent 提交 {type: wait}。"
+                    "不要补充、检查、修正或再调用其他世界工具。"
+                    "outcome 只能是 HOLD 或 REVISE；world_actions 最多一个。"
+                    "没有足够依据改变行动时，使用 HOLD 且提交空 world_actions。"
                     "active_crisis_context 中的 subject_affordances 是按当前主体和当前状态筛选的真实选项；"
                     "工具参数必须对应其中的 id、target 或 method，不要从通用 available_affordances 猜测不可用目标。"
                     "operate 的 targets 必须使用 subject_affordances.operations 中 targets 的 options 的实体 id，"
@@ -176,8 +176,8 @@ class HermesVolumeActorDriver:
                     "[{type, subject: 实体 id, value}]，不要加入 party_ids，也不要把 subject 写成对象。"
                     "每次直接调用 chronicle-world 工具都必须带 wake_id，且逐字等于本次用户 payload 顶层的 wake_id；"
                     "wake_id 是内部 Wake 边界，不是 UI 字段，不得省略、改写或猜测。"
-                    "logical_intent 也可提交 message 或 update_plan，但不得再调用第二个工具。"
-                    "update_plan 的 belief_updates 只能引用冻结视角中可见的 evidence event_id；没有证据就留空。"
+                    "REVISE 必须在 course.evidence_event_ids 引用冻结视角中可见的 event_id；没有证据时保持 HOLD。"
+                    "belief_updates 也只能引用冻结视角中可见的 evidence event_id。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
                     "如果工具返回 rejected 或错误，立即结束本次回答，不要改用第二个工具。"
                     "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
@@ -200,6 +200,29 @@ class HermesVolumeActorDriver:
                             "rationale": "optional; only what follows from the current evidence",
                             "belief_updates": "optional evidence-backed list",
                             "reconsider_when": "optional list",
+                        },
+                        "deliberation_schema": {
+                            "outcome": "HOLD|REVISE",
+                            "course": {
+                                "summary": "required for REVISE",
+                                "steps": "optional list",
+                                "evidence_event_ids": "required for Agent REVISE",
+                            },
+                            "open_dependencies": "typed list",
+                            "belief_updates": "optional evidence-backed list",
+                            "world_actions": "zero or one {tool, arguments}",
+                        },
+                        "commit_deliberation_tool_call": {
+                            "name": "commit_deliberation",
+                            "arguments": {
+                                "outcome": "HOLD",
+                                "course": {},
+                                "open_dependencies": [],
+                                "belief_updates": [],
+                                "world_actions": [],
+                                "idempotency_key": f"{wake['id']}:deliberation",
+                                "wake_id": str(wake["id"]),
+                            },
                         },
                         "logical_intent_examples": [
                             {
@@ -251,9 +274,9 @@ class HermesVolumeActorDriver:
             {
                 "role": "user",
                 "content": (
-                    "上一条输出没有提交任何逻辑意图。现在只做协议修复：必须调用一次 logical_intent，"
-                    f"arguments 必须带上 wake_id={wake['id']}、intent 和 idempotency_key；wake_id 必须逐字使用这个值，"
-                    "提交一个 wait、message 或 update_plan；如果工具确实不可用，只返回一个符合 schema 的 JSON 意图对象。"
+                    "上一条输出没有提交 Deliberation。现在只做协议修复：必须调用一次 commit_deliberation，"
+                    f"arguments 必须带上 wake_id={wake['id']}、outcome 和 idempotency_key；wake_id 必须逐字使用这个值，"
+                    "提交 HOLD 或 REVISE；如果工具确实不可用，只返回一个符合 schema 的 JSON proposal。"
                     "不要解释、不要返回自然语言、不要调用 memory。"
                 ),
             }
@@ -268,6 +291,7 @@ class HermesVolumeActorDriver:
             for operation in self.db.crisis_wake_operations(wake_id)
             if operation["tool_name"] in {
                 "logical_intent",
+                "commit_deliberation",
                 "communicate",
                 "investigate",
                 "manage_offer",
@@ -297,6 +321,19 @@ class HermesVolumeActorDriver:
     def _stage_fallback(self, wake: dict[str, Any], response_text: str) -> None:
         """Accept only an explicit structured model response; never invent wait."""
 
+        proposal = _parse_structured_proposal(response_text)
+        if proposal is not None:
+            from .host import ChronicleHost
+
+            ChronicleHost(self.config).volume_runtime.stage_deliberation(
+                str(wake["worldline_id"]),
+                str(wake["actor_id"]),
+                proposal,
+                source="agent",
+                idempotency_key=f"{wake['id']}:model-response",
+                wake_id=str(wake["id"]),
+            )
+            return
         intent = _parse_structured_intent(response_text)
         if intent is None:
             return
@@ -391,5 +428,18 @@ def _parse_structured_intent(text: str) -> dict[str, Any] | None:
         "message",
         "update_plan",
     }:
+        return None
+    return dict(payload)
+
+
+def _parse_structured_proposal(text: str) -> dict[str, Any] | None:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("outcome") not in {"HOLD", "REVISE"}:
         return None
     return dict(payload)

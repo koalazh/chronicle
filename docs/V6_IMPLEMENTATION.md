@@ -72,6 +72,22 @@ Offer / Agreement 的事实 transport 仍是 Phase 8 的专门改动；本阶段
 
 Reality sections 在 selective relevance / memory 之前生成，旧的 bounded `beliefs`、`relevant_evidence`、`subjective_memory` 字段继续保留给 V5 consumers。测试覆盖了“当前 Course 预期等待 Dorgon，但 Li 的公开东进事实仍进入 `since_last_deliberation`”以及 Nanjing 的主体私有 affordance 边界；不存在跨 Lifetime Knowledge 泄漏。定向 Phase 4 tests 2 passed，静态检查通过；完整回归和 content validators 将在本 Phase commit 前复跑。
 
+## Phase 5 Deliberation Protocol
+
+新增开发层 `commit_deliberation`，但不改变用户对 Chronicle 的概念模型。它在一个已冻结且绑定 exact `wake_id` 的 Pending Logical Moment 中提交完整 proposal：
+
+```text
+HOLD | REVISE
+course
+typed open_dependencies
+evidence-backed belief_updates
+0..1 world_actions
+```
+
+`HOLD` 是一等认知结果，不是一个 wait World action；它保留 Course，只更新 `last_deliberated_tick/event_id` 并追加 `DELIBERATION_COMMITTED` / `DECISION_HORIZON_HELD`。Agent 的 `REVISE` 必须引用 actor-visible `evidence_event_ids`（首次建立 Course 时可引用当前 Wake 的可见触发）；Human 仍可在明确输入下不受该 Agent 证据门槛约束。
+
+World action 在 stage 时通过现有 Host / pack affordance 预校验，最多一个；任何 shape、权限、证据、typed dependency 或 action 错误都不会写入 staged operation。commit 时 proposal、Course、belief、action 和 `MOMENT_COMMITTED` 仍在一个 atomic DB moment 中收束，action 的 causal parent 是 `DELIBERATION_COMMITTED`。`tests/test_v6_deliberation.py` 覆盖 HOLD 零行动、REVISE + message、无证据拒绝、多个 action 原子拒绝及 restart/idempotent replay；定向 5 passed，完整回归在提交前复跑。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -91,7 +107,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 2 Decision Horizon | COMPLETE | `plan[0]` 原位升级为唯一 Course、typed dependencies、established/last-deliberated Ledger 边界与 V5 read compatibility 已验证 |
 | 3 Knowledge / Attention | COMPLETE | Knowledge admission 与 deterministic BACKGROUND/REOPEN 已分离；无关消息与预期操作不再直接创建 Wake |
 | 4 Context Compiler | COMPLETE | Frozen Perspective 增加 reality-first 六段；contrary background fact 保留，旧 V5 bounded context 与 privacy 边界保持 |
-| 5 Deliberation Protocol | NOT_STARTED | |
+| 5 Deliberation Protocol | COMPLETE | `commit_deliberation` 支持 HOLD/REVISE、证据门槛、typed dependency update、0..1 action 与 restart-safe atomic commit |
 | 6 Product Continuous Agency | NOT_STARTED | |
 | 7 Agency Conservation | NOT_STARTED | |
 | 8 Content / World Correctness | NOT_STARTED | |

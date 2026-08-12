@@ -66,6 +66,19 @@ affordances
 
 `since_last_deliberation` 使用 Course 的 typed `last_deliberated_tick`，不是 last Wake；因此没有 Wake 的 Background Knowledge 也不会消失。`binding_reality` 和 `affordances` 先于 token relevance / private memory 计算，当前 Course 不得过滤与之相反的 actor-known fact。所有 operation、investigation、offer term 都继续由现有 pack 的主体可见性与能力函数提供，其他 Lifetime 的私有 Knowledge 不进入这些 sections。
 
+## Phase 5 deliberation boundary
+
+`commit_deliberation` 是开发层 staging contract，不是新的用户领域对象。它必须绑定当前 Volume、Lifetime、Pending Logical Moment 与 exact Wake：
+
+| Proposal | Host result |
+| --- | --- |
+| `HOLD` + 0 action | Course remains in force; append `DELIBERATION_COMMITTED` and `DECISION_HORIZON_HELD`; advance last-deliberated boundary |
+| `REVISE` + 0 action | replace the single Course; Agent must cite actor-visible evidence; append revised horizon Ledger events |
+| either + 1 action | validate existing capability and commit the one action with the Deliberation event as causal parent |
+| malformed / unauthorized / 2 actions / invalid effect | reject before staging, with no partial World or Course write |
+
+`belief_updates` remain evidence-backed and private. Existing V5 logical intent and direct World-tool paths remain readable for compatibility, but the V6 live prompt advertises one complete `commit_deliberation`; a model cannot obtain an action by probing multiple rejected proposals in one frozen moment. Restart finds the same one staged `commit_deliberation` operation and retries it idempotently.
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

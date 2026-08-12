@@ -308,6 +308,57 @@ def logical_intent(
     }
 
 
+@mcp.tool()
+def commit_deliberation(
+    outcome: str,
+    idempotency_key: str,
+    course: dict[str, Any] | None = None,
+    open_dependencies: list[dict[str, Any]] | None = None,
+    belief_updates: list[dict[str, Any]] | None = None,
+    world_actions: list[dict[str, Any]] | None = None,
+    rationale_source: str = "",
+    belief_source: str = "",
+    wake_id: str = "",
+) -> dict[str, Any]:
+    """Stage one complete V6 HOLD/REVISE proposal for the frozen Wake."""
+
+    from .host import ChronicleHost
+
+    config, _db, binding, wake = _volume_context(wake_id)
+    proposal_payload: dict[str, Any] = {
+        "outcome": outcome,
+        "course": course or {},
+        "belief_updates": belief_updates or [],
+        "world_actions": world_actions or [],
+        "rationale_source": rationale_source,
+        "belief_source": belief_source,
+    }
+    if open_dependencies is not None:
+        proposal_payload["open_dependencies"] = open_dependencies
+    try:
+        staged = ChronicleHost(config).volume_runtime.stage_deliberation(
+            str(binding["worldline_id"]),
+            str(binding["role"]),
+            proposal_payload,
+            source="agent",
+            idempotency_key=f"{wake['id']}:{idempotency_key or 'deliberation'}",
+            wake_id=str(wake["id"]),
+        )
+    except Exception as exc:
+        return {
+            "status": "rejected",
+            "code": type(exc).__name__,
+            "message": str(exc)[:400],
+        }
+    return {
+        "status": "accepted",
+        "moment_id": staged["moment_id"],
+        "operation_id": staged["operation"]["id"],
+        "outcome": staged["outcome"],
+        "idempotent": bool(staged["idempotent"]),
+    }
+
+
 def main() -> None:
     mcp.run(transport="stdio")
 

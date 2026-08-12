@@ -24,6 +24,11 @@ from .decision_horizon import (
     current_course_from_plan,
     normalize_open_dependencies,
 )
+from .deliberation import (
+    DELIBERATION_WORLD_TOOLS,
+    DeliberationError,
+    normalize_deliberation,
+)
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_attention import AttentionDecision, evaluate_attention
 from .subject_continuity import LifetimeContextBuilder
@@ -1929,6 +1934,206 @@ class VolumeRuntime:
             "idempotent": existing is not None,
         }
 
+    def stage_deliberation(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        proposal: dict[str, Any],
+        *,
+        source: str | None = None,
+        idempotency_key: str | None = None,
+        wake_id: str = "",
+    ) -> dict[str, Any]:
+        """Stage one complete V6 Deliberation proposal without World mutation."""
+
+        try:
+            normalized = normalize_deliberation(proposal)
+        except DeliberationError as exc:
+            raise VolumeRuntimeError(str(exc)) from exc
+
+        row = self._active_worldline(worldline_id)
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        pending = projection.get("pending_moment")
+        if not pending:
+            raise VolumeRuntimeConflict("freeze the current logical moment before staging deliberation")
+        lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
+        if lifetime is None:
+            raise VolumeRuntimeError(f"Lifetime not found: {lifetime_id}")
+        seat = str(lifetime["seat"])
+        expected_source = "human" if lifetime["controller"] == "HUMAN" else "agent"
+        actual_source = source or expected_source
+        if actual_source != expected_source:
+            raise VolumeRuntimeConflict(
+                f"{seat} is controlled by {lifetime['controller']}, not {actual_source}"
+            )
+
+        wake = self.db.crisis_wake(wake_id) if wake_id else self._pending_wake_for_lifetime(
+            worldline_id, pending, seat
+        )
+        if wake is None:
+            raise VolumeRuntimeConflict(f"{seat} has no Wake in Pending Logical Moment")
+        if (
+            str(wake["worldline_id"]) != worldline_id
+            or str(wake["actor_id"]) not in {seat, str(lifetime["id"])}
+            or str(wake["id"]) not in {str(item) for item in pending.get("wake_ids", [])}
+        ):
+            raise VolumeRuntimeConflict("wake identity is not in this Pending Logical Moment")
+        if wake["status"] == "COMPLETED":
+            raise VolumeRuntimeConflict("this Wake has already completed")
+        if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "RUNNING", "STAGED"}:
+            raise VolumeRuntimeConflict(f"Wake is not stageable: {wake['status']}")
+
+        current_course = current_course_from_plan(list(lifetime.get("plan", [])), fallback_tick=tick)
+        if normalized.outcome == "HOLD" and current_course is None:
+            raise VolumeRuntimeError("HOLD requires an existing Current Course")
+
+        course = normalized.course
+        if normalized.outcome == "HOLD":
+            objective = str(current_course.get("course") or current_course.get("objective") or "")
+            steps = list(current_course.get("steps") or [objective])
+            evidence_event_ids = list(current_course.get("evidence_event_ids", []))
+            dependencies = (
+                normalized.open_dependencies
+                if "open_dependencies" in proposal
+                else list(current_course.get("open_dependencies", []))
+            )
+            rationale = ""
+            rationale_source = ""
+        else:
+            objective = str(course.get("summary", course.get("objective", ""))).strip()
+            steps = [str(step).strip() for step in course.get("steps", []) if str(step).strip()]
+            if not steps:
+                steps = [objective]
+            evidence_event_ids = [
+                str(event_id)
+                for event_id in course.get("evidence_event_ids", [])
+                if str(event_id)
+            ]
+            if actual_source == "agent" and not evidence_event_ids:
+                if current_course is None and wake.get("trigger_event_id"):
+                    evidence_event_ids = [str(wake["trigger_event_id"])]
+                else:
+                    raise VolumeRuntimeConflict(
+                        "Agent REVISE requires actor-visible evidence_event_ids"
+                    )
+            dependencies = normalized.open_dependencies
+            rationale = str(course.get("rationale", "")).strip()
+            rationale_source = normalized.rationale_source or str(
+                course.get("rationale_source", "")
+            ).strip()
+
+        course_intent = self._normalize_plan_intent(
+            worldline_id,
+            lifetime,
+            wake,
+            {
+                "type": "update_plan",
+                "objective": objective,
+                "steps": steps,
+                "rationale": rationale,
+                "rationale_source": rationale_source,
+                "belief_source": normalized.belief_source,
+                "belief_updates": normalized.belief_updates,
+                "evidence_event_ids": evidence_event_ids,
+                "open_dependencies": dependencies,
+            },
+            source=actual_source,
+        )
+
+        action_projection = self._action_projection(projection)
+        staged_action: dict[str, Any] | None = None
+        if normalized.world_actions:
+            action = normalized.world_actions[0]
+            action_tool = action["tool"]
+            arguments = action["arguments"]
+            active_packs = self._active_packs_for_actor(worldline_id, seat, projection)
+            if action_tool not in DELIBERATION_WORLD_TOOLS:
+                raise VolumeRuntimeError(f"unsupported Deliberation world action: {action_tool}")
+            if action_tool not in set(lifetime.get("authority", [])):
+                raise VolumeRuntimeConflict(
+                    f"Deliberation world action is outside {seat} authority: {action_tool}"
+                )
+            if action_tool == "communicate":
+                action_payload, action_result = self._prepare_volume_communication(
+                    worldline_id, lifetime, arguments, action_projection, tick
+                )
+            elif action_tool == "schedule_revisit":
+                action_payload, action_result = self._prepare_volume_revisit(
+                    lifetime, arguments, tick
+                )
+            elif action_tool == "investigate":
+                action_payload, action_result = self._prepare_volume_investigation(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            elif action_tool == "operate":
+                action_payload, action_result = self._prepare_volume_operation(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            else:
+                action_payload, action_result = self._prepare_volume_offer(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            if action_result.get("status") != "accepted":
+                raise VolumeRuntimeConflict(
+                    f"Deliberation world action is invalid: {action_result.get('code', 'rejected')}"
+                )
+            staged_action = {
+                "tool": action_tool,
+                "payload": action_payload,
+                "result": action_result,
+            }
+
+        stored_proposal = {
+            **normalized.as_dict(),
+            "course": course_intent,
+            "open_dependencies": list(course_intent["open_dependencies"]),
+            "belief_updates": list(course_intent["belief_updates"]),
+        }
+        payload = {
+            "proposal": stored_proposal,
+            "course_intent": course_intent,
+            "world_action": staged_action,
+        }
+        key = idempotency_key or stable_hash(
+            {"moment_id": pending["id"], "seat": seat, "proposal": stored_proposal}
+        )
+        existing = next(
+            (
+                operation
+                for operation in self.db.crisis_wake_operations(wake["id"])
+                if operation["idempotency_key"] == key
+            ),
+            None,
+        )
+        operation = existing or self.db.add_crisis_wake_operation(
+            {
+                "wake_id": wake["id"],
+                "tool_name": "commit_deliberation",
+                "payload": {
+                    "moment_id": pending["id"],
+                    "lifetime_id": lifetime["id"],
+                    "seat": seat,
+                    "source": actual_source,
+                    **payload,
+                },
+                "result": {"status": "accepted", "moment_id": pending["id"]},
+                "status": "PROPOSED",
+                "idempotency_key": key,
+            }
+        )
+        if wake["status"] != "STAGED":
+            self.db.update_crisis_wake(wake["id"], status="STAGED")
+        return {
+            "moment_id": pending["id"],
+            "lifetime_id": lifetime["id"],
+            "seat": seat,
+            "source": actual_source,
+            "outcome": normalized.outcome,
+            "operation": operation,
+            "idempotent": existing is not None,
+        }
+
     def stage_actor_tool(
         self,
         worldline_id: str,
@@ -2451,7 +2656,23 @@ class VolumeRuntime:
         for lifetime, wake, operation in staged:
             operation_payload = operation["payload"]
             tool_name = str(operation["tool_name"])
-            intent = dict(operation_payload.get("intent", operation_payload))
+            is_deliberation = tool_name == "commit_deliberation"
+            if is_deliberation:
+                proposal = dict(operation_payload.get("proposal", {}))
+                course_intent = dict(operation_payload.get("course_intent", {}))
+                intent = {
+                    "type": "deliberation",
+                    "outcome": str(proposal.get("outcome", "")),
+                    "belief_keys": [
+                        str(item.get("subject", ""))
+                        for item in course_intent.get("belief_updates", [])
+                        if str(item.get("subject", ""))
+                    ],
+                }
+            else:
+                proposal = {}
+                course_intent = {}
+                intent = dict(operation_payload.get("intent", operation_payload))
             if tool_name == "logical_intent":
                 tool_name = str(intent.get("type", "wait"))
             elif tool_name == "communicate":
@@ -2475,6 +2696,15 @@ class VolumeRuntime:
                     [
                         *([wake["trigger_event_id"]] if wake["trigger_event_id"] else []),
                         *belief_parent_ids,
+                        *(
+                            [
+                                str(event_id)
+                                for event_id in course_intent.get("evidence_event_ids", [])
+                                if str(event_id)
+                            ]
+                            if is_deliberation
+                            else []
+                        ),
                     ]
                 )
             )
@@ -2519,6 +2749,23 @@ class VolumeRuntime:
                 )
                 events.append(rejected)
                 outcome = {"status": "rejected", "code": operation["result"].get("code", "rejected")}
+            elif is_deliberation:
+                outcome.update(
+                    self._commit_deliberation(
+                        worldline_id,
+                        tick,
+                        projection,
+                        pending,
+                        wake,
+                        lifetime,
+                        operation,
+                        intent_event,
+                        events,
+                        lifetime_updates,
+                        wake_creates,
+                        row["runtime_epoch"],
+                    )
+                )
             elif intent["type"] == "update_plan":
                 previous_course = current_course_from_plan(
                     list(lifetime.get("plan", [])), fallback_tick=tick
@@ -2822,6 +3069,339 @@ class VolumeRuntime:
             "moment_id": pending["id"],
             "events": events,
             "idempotent": False,
+        }
+
+    def _commit_deliberation(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        pending: dict[str, Any],
+        wake: dict[str, Any],
+        lifetime: dict[str, Any],
+        operation: dict[str, Any],
+        intent_event: dict[str, Any],
+        events: list[dict[str, Any]],
+        lifetime_updates: list[dict[str, Any]],
+        wake_creates: list[dict[str, Any]],
+        runtime_epoch: str,
+    ) -> dict[str, Any]:
+        """Apply one already-validated V6 proposal inside the atomic moment."""
+
+        proposal = operation["payload"]["proposal"]
+        course_intent = operation["payload"]["course_intent"]
+        outcome_name = str(proposal["outcome"])
+        evidence_event_ids = [
+            str(event_id)
+            for event_id in course_intent.get("evidence_event_ids", [])
+            if str(event_id)
+        ]
+        deliberation_event = self._event(
+            worldline_id,
+            tick,
+            "DELIBERATION_COMMITTED",
+            {
+                "moment_id": pending["id"],
+                "wake_id": wake["id"],
+                "seat": lifetime["seat"],
+                "outcome": outcome_name,
+                "evidence_event_ids": evidence_event_ids,
+                "world_action_count": 1 if operation["payload"].get("world_action") else 0,
+            },
+            seat_id=lifetime["seat"],
+            provenance=Provenance.BRANCH_DERIVED.value,
+            causal_parent_ids=[intent_event["id"], *evidence_event_ids],
+            event_id=f"{intent_event['id']}:deliberation",
+            runtime_epoch=runtime_epoch,
+        )
+        events.append(deliberation_event)
+
+        current_course = current_course_from_plan(
+            list(lifetime.get("plan", [])), fallback_tick=tick
+        )
+        if outcome_name == "HOLD":
+            if current_course is None:
+                raise VolumeRuntimeConflict("HOLD requires an existing Current Course")
+            plan = copy.deepcopy(current_course)
+            plan["open_dependencies"] = copy.deepcopy(course_intent["open_dependencies"])
+            plan["last_deliberated_tick"] = tick
+            plan["last_deliberated_event_id"] = deliberation_event["id"]
+            plan["updated_tick"] = tick
+            horizon_event = self._event(
+                worldline_id,
+                tick,
+                "DECISION_HORIZON_HELD",
+                {
+                    "moment_id": pending["id"],
+                    "wake_id": wake["id"],
+                    "seat": lifetime["seat"],
+                    "course": plan,
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[deliberation_event["id"]],
+                event_id=f"{deliberation_event['id']}:decision-horizon",
+                runtime_epoch=runtime_epoch,
+            )
+            events.append(horizon_event)
+        else:
+            horizon_event_id = f"{deliberation_event['id']}:decision-horizon"
+            plan = build_current_course(
+                course_intent,
+                course_version=(
+                    f"{pending['id']}:course:{lifetime['seat']}:{stable_hash(course_intent)[:12]}"
+                ),
+                tick=tick,
+                event_id=horizon_event_id,
+            )
+            plan["last_deliberated_event_id"] = deliberation_event["id"]
+            plan_event = self._event(
+                worldline_id,
+                tick,
+                "PLAN_UPDATED",
+                {
+                    "moment_id": pending["id"],
+                    "wake_id": wake["id"],
+                    "seat": lifetime["seat"],
+                    "plan": plan,
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[deliberation_event["id"]],
+                event_id=f"{deliberation_event['id']}:plan",
+                runtime_epoch=runtime_epoch,
+            )
+            events.append(plan_event)
+            horizon_event = self._event(
+                worldline_id,
+                tick,
+                "DECISION_HORIZON_ESTABLISHED" if current_course is None else "DECISION_HORIZON_REVISED",
+                {
+                    "moment_id": pending["id"],
+                    "wake_id": wake["id"],
+                    "seat": lifetime["seat"],
+                    "course": plan,
+                    "previous_course_event_id": (
+                        str(current_course.get("established_event_id", ""))
+                        if current_course is not None
+                        else ""
+                    ),
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[plan_event["id"]],
+                event_id=horizon_event_id,
+                runtime_epoch=runtime_epoch,
+            )
+            events.append(horizon_event)
+
+        beliefs = dict(lifetime["beliefs"])
+        belief_keys: list[str] = []
+        for update in course_intent.get("belief_updates", []):
+            subject = update["subject"]
+            belief = {
+                "assessment": update["assessment"],
+                "confidence": update["confidence"],
+                "updated_tick": tick,
+                "evidence_event_ids": list(update["evidence_event_ids"]),
+            }
+            if update.get("condition"):
+                belief["condition"] = update["condition"]
+            beliefs[subject] = belief
+            belief_keys.append(subject)
+            belief_event = self._event(
+                worldline_id,
+                tick,
+                "BELIEF_UPDATED",
+                {
+                    "moment_id": pending["id"],
+                    "wake_id": wake["id"],
+                    "seat": lifetime["seat"],
+                    "belief_key": subject,
+                    "belief": belief,
+                    "evidence_event_ids": list(update["evidence_event_ids"]),
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[
+                    horizon_event["id"],
+                    *[str(item) for item in update["evidence_event_ids"]],
+                ],
+                event_id=f"{horizon_event['id']}:belief:{stable_hash(update)[:12]}",
+                runtime_epoch=runtime_epoch,
+            )
+            events.append(belief_event)
+        lifetime_updates.append(
+            {
+                "id": lifetime["id"],
+                "plan_json": json.dumps([plan], ensure_ascii=False, sort_keys=True),
+                "belief_json": json.dumps(beliefs, ensure_ascii=False, sort_keys=True),
+            }
+        )
+
+        action = operation["payload"].get("world_action")
+        action_result = {}
+        if action:
+            action_result = self._commit_deliberation_action(
+                worldline_id,
+                tick,
+                projection,
+                wake,
+                lifetime,
+                action,
+                events,
+                lifetime_updates,
+                wake_creates,
+                deliberation_event["id"],
+                runtime_epoch,
+            )
+        return {
+            "outcome": outcome_name,
+            "deliberation_event_id": deliberation_event["id"],
+            "course_event_id": horizon_event["id"],
+            "belief_keys": belief_keys,
+            **action_result,
+        }
+
+    def _commit_deliberation_action(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        wake: dict[str, Any],
+        lifetime: dict[str, Any],
+        action: dict[str, Any],
+        events: list[dict[str, Any]],
+        lifetime_updates: list[dict[str, Any]],
+        wake_creates: list[dict[str, Any]],
+        causal_parent_id: str,
+        runtime_epoch: str,
+    ) -> dict[str, Any]:
+        tool_name = str(action["tool"])
+        payload = dict(action["payload"])
+        result = dict(action["result"])
+        operation = {"tool_name": tool_name, "payload": payload, "result": result}
+        if tool_name == "communicate":
+            payload["delivery_tick"] = int(result["arrival_tick"])
+            message = self._logical_message(
+                worldline_id,
+                str(wake["frozen_perspective"].get("moment_id", "")),
+                lifetime["seat"],
+                payload,
+                tick,
+            )
+            message["id"] = str(result["message_id"])
+            projection.setdefault("messages", []).append(message)
+            dispatch = self._event(
+                worldline_id,
+                tick,
+                "MESSAGE_DISPATCHED",
+                message,
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id],
+                event_id=f"{causal_parent_id}:message:{stable_hash(message)[:12]}",
+                runtime_epoch=runtime_epoch,
+            )
+            message["dispatch_event_id"] = dispatch["id"]
+            dispatch["payload"] = message
+            events.append(dispatch)
+            return {
+                "world_action_tool": tool_name,
+                "message_id": message["id"],
+                "delivery_tick": message["delivery_tick"],
+            }
+        if tool_name == "schedule_revisit":
+            revisit = {
+                "id": result["revisit_id"],
+                "actor_id": lifetime["seat"],
+                "reason": payload["reason"],
+                "created_tick": tick,
+                "due_tick": int(result["due_tick"]),
+                "status": "PENDING",
+                "event_id": f"{causal_parent_id}:revisit",
+            }
+            revisits = list(lifetime["revisits"])
+            revisits.append(revisit)
+            revisit_event = self._event(
+                worldline_id,
+                tick,
+                "REVISIT_SCHEDULED",
+                {"wake_id": wake["id"], "revisit": revisit},
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[causal_parent_id],
+                runtime_epoch=runtime_epoch,
+            )
+            events.append(revisit_event)
+            lifetime["revisits"] = revisits
+            lifetime_updates.append(
+                {
+                    "id": lifetime["id"],
+                    "revisits_json": json.dumps(revisits, ensure_ascii=False, sort_keys=True),
+                }
+            )
+            wake_creates.append(
+                {
+                    "id": f"{worldline_id}:wake:{revisit['id']}",
+                    "actor_id": lifetime["seat"],
+                    "wake_type": "REVISIT_DUE",
+                    "tick": revisit["due_tick"],
+                    "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                    "source": "volume-revisit",
+                    "trigger_event_id": revisit_event["id"],
+                    "result": {"revisit_id": revisit["id"]},
+                }
+            )
+            return {
+                "world_action_tool": tool_name,
+                "revisit_id": revisit["id"],
+                "due_tick": revisit["due_tick"],
+            }
+        if tool_name == "investigate":
+            self._commit_volume_investigation_start(
+                worldline_id,
+                tick,
+                projection,
+                wake,
+                operation,
+                events,
+                causal_parent_id,
+            )
+            return {
+                "world_action_tool": tool_name,
+                "investigation_id": result["investigation_id"],
+                "expected_result_tick": result["expected_result_tick"],
+            }
+        if tool_name == "operate":
+            self._commit_volume_operation_start(
+                worldline_id,
+                tick,
+                projection,
+                wake,
+                operation,
+                events,
+                causal_parent_id,
+            )
+            return {
+                "world_action_tool": tool_name,
+                "operation_id": result["operation_id"],
+                "expected_complete_tick": result["expected_complete_tick"],
+            }
+        self._commit_volume_offer(
+            worldline_id,
+            tick,
+            projection,
+            wake,
+            operation,
+            events,
+            wake_creates,
+            causal_parent_id,
+        )
+        return {
+            "world_action_tool": tool_name,
+            "offer_id": result.get("offer_id", ""),
+            "agreement_id": result.get("agreement_id", ""),
         }
 
     def _late_rejection(

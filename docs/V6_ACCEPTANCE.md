@@ -67,6 +67,19 @@ Phase 3 尚未把 Offer / Agreement 的现有 V5 `tick+1` scaffold 当作真实 
 
 Phase 4 仍只是冻结 context 编译证据；尚未证明 HOLD / REVISE、continuous `/continue`、P6–P9、browser 或 real Hermes business chain。
 
+## Phase 5 Deliberation Protocol
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| HOLD as cognition | PASS | `commit_deliberation` emits `DELIBERATION_COMMITTED` + `DECISION_HORIZON_HELD` with zero World action and advances the last-deliberated boundary |
+| Agent REVISE evidence | PASS | missing `evidence_event_ids` is rejected before staging; actor-visible delivery can revise Course and commit one message |
+| 0..1 agency | PASS | proposal shape rejects two world actions; existing Host/pack validators reject invalid action before any staged operation |
+| Atomicity / causal chain | PASS | Course, belief, one action, `MOMENT_COMMITTED` are committed in one DB moment; action parent is `DELIBERATION_COMMITTED` |
+| Restart / idempotency | PASS | staged proposal survives new `ChronicleHost`, commits once, and repeated commit is idempotent |
+| Regression | PASS | Phase 5 focused tests 5 passed; full pytest, Ruff, compileall, content validators and web syntax are rerun at phase close |
+
+Phase 5 deterministic evidence does not prove Provider behavior, continuous `/continue`, P6–P9, browser, human acceptance or isolated real Hermes business evidence.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

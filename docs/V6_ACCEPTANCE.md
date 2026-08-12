@@ -55,6 +55,18 @@ Phase 1 不主张 Continuous Agency、Attention、bounded agency 或 real Hermes
 
 Phase 3 尚未把 Offer / Agreement 的现有 V5 `tick+1` scaffold 当作真实 remote transport；该边界留给 Phase 8。上述不是 continuous `/continue`、browser 或 real Hermes business evidence。
 
+## Phase 4 Reality-first Context
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| Frozen sections | PASS | `why_now`、`since_last_deliberation`、`binding_reality`、`previous_course`、`relevant_experience`、`affordances` 已由现有 `LifetimeContextBuilder` 生成 |
+| Reality before memory | PASS | Course 等待 Dorgon 时，Li 的公开东进消息仍进入 `since_last_deliberation`；不会被 token relevance 或 Course 过滤 |
+| Last deliberated boundary | PASS | 使用 Course `last_deliberated_tick`，保留无 Wake 的 Background Knowledge |
+| Privacy / affordance scope | PASS | Nanjing context 只暴露 Ma 可用的 operation / investigation / offer terms，未泄漏其他主体私有能力 |
+| Regression | PASS | Phase 4 定向 2 passed；Ruff、compileall、diff check 已通过；完整 pytest 与三项 validators 在提交前复跑 |
+
+Phase 4 仍只是冻结 context 编译证据；尚未证明 HOLD / REVISE、continuous `/continue`、P6–P9、browser 或 real Hermes business chain。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

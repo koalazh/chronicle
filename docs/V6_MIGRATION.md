@@ -51,6 +51,21 @@ V6 不增加物理 Horizon table，也不递增 SQLite schema version；`worldli
 
 首次进入 Knowledge 而尚无 Course 的 Lifetime 以 `NO_CURRENT_COURSE` 重开，以建立第一个判断。`REOPEN` 仅授权新的 Deliberation；它不自动发送消息、接受 Offer、执行操作或替任何 Subject 作选择。Offer / Agreement notification 要等 Phase 8 接入真实 transport 后再进入这张表。
 
+## Phase 4 reality-first context
+
+Context 仍由原有 `LifetimeContextBuilder` 在冻结时构造，没有新表或平行 Perspective runtime。V6 section 顺序为：
+
+```text
+why_now
+since_last_deliberation
+binding_reality
+previous_course
+relevant_experience
+affordances
+```
+
+`since_last_deliberation` 使用 Course 的 typed `last_deliberated_tick`，不是 last Wake；因此没有 Wake 的 Background Knowledge 也不会消失。`binding_reality` 和 `affordances` 先于 token relevance / private memory 计算，当前 Course 不得过滤与之相反的 actor-known fact。所有 operation、investigation、offer term 都继续由现有 pack 的主体可见性与能力函数提供，其他 Lifetime 的私有 Knowledge 不进入这些 sections。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

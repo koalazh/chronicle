@@ -72,7 +72,8 @@ class LifetimeContextBuilder:
         events = self.db.worldline_events(worldline_id)
         events_by_id = {str(event["id"]): event for event in events}
         trigger_id = str(trigger_event_id or (wake or {}).get("trigger_event_id", ""))
-        trigger = self._event_view(events_by_id.get(trigger_id))
+        raw_trigger = events_by_id.get(trigger_id)
+        trigger = self._event_view(raw_trigger)
         tokens = self._relevance_tokens(lifetime, trigger, wake)
         crisis_context = self._crisis_context(projection, lifetime["seat"], tick)
         relevant_beliefs = self._relevant_beliefs(lifetime["beliefs"], tokens)
@@ -97,6 +98,19 @@ class LifetimeContextBuilder:
             )
         ][: self.MAX_OBLIGATIONS]
         obligations = self._obligations(lifetime, current_plan, due_revisits, crisis_context)
+        why_now = self._why_now(events_by_id, lifetime, raw_trigger)
+        since_last_deliberation = self._since_last_deliberation(lifetime, current_course)
+        binding_reality = self._binding_reality(
+            lifetime,
+            position,
+            assets,
+            crisis_context,
+        )
+        relevant_experience = {
+            "beliefs": copy.deepcopy(relevant_beliefs),
+            "evidence": copy.deepcopy(knowledge["relevant"]),
+            "memory": copy.deepcopy(memory),
+        }
         return {
             "worldline_id": worldline_id,
             "lifetime_id": lifetime["id"],
@@ -107,6 +121,13 @@ class LifetimeContextBuilder:
                 "id": str((wake or {}).get("id", "")),
                 "wake_type": str((wake or {}).get("wake_type", "")),
             },
+            # V6 deliberation uses actor-known reality before selective memory.
+            "why_now": why_now,
+            "since_last_deliberation": since_last_deliberation,
+            "binding_reality": binding_reality,
+            "previous_course": copy.deepcopy(current_course),
+            "relevant_experience": relevant_experience,
+            "affordances": self._affordances(crisis_context),
             "role": {
                 "display_name": lifetime.get("display_name", lifetime["seat"]),
                 "genesis_context": copy.deepcopy(lifetime.get("genesis_context", {})),
@@ -135,6 +156,106 @@ class LifetimeContextBuilder:
             "subjective_memory": memory,
             "known_uncertainty": self._uncertainty(projection, trigger, lifetime["seat"]),
         }
+
+    def _why_now(
+        self,
+        events_by_id: dict[str, dict[str, Any]],
+        lifetime: dict[str, Any],
+        trigger: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not trigger:
+            return {"reason_code": "NO_TRIGGER", "facts": []}
+
+        payload = trigger.get("payload", {})
+        if trigger.get("event_type") == "ATTENTION_EVALUATED" and isinstance(payload, dict):
+            facts = [
+                self._event_view(event)
+                for event_id in payload.get("trigger_event_ids", [])
+                if (event := events_by_id.get(str(event_id))) is not None
+                and self._event_visible_to_lifetime(event, lifetime)
+            ]
+            return {
+                "attention_event_id": str(trigger.get("id", "")),
+                "decision": str(payload.get("decision", "")),
+                "reason_code": str(payload.get("reason_code", "")),
+                "matched_dependency_ids": [
+                    str(item)
+                    for item in payload.get("matched_dependency_ids", [])
+                    if str(item)
+                ],
+                "facts": facts,
+            }
+
+        event = events_by_id.get(str(trigger.get("id", "")))
+        facts = [self._event_view(event)] if event and self._event_visible_to_lifetime(event, lifetime) else []
+        return {"reason_code": "WAKE_TRIGGER", "facts": facts}
+
+    def _since_last_deliberation(
+        self, lifetime: dict[str, Any], current_course: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        boundary_tick = int((current_course or {}).get("last_deliberated_tick", 0))
+        facts = []
+        for item in lifetime.get("knowledge", []):
+            if not isinstance(item, dict):
+                continue
+            knowledge_tick = self._knowledge_tick(item)
+            if knowledge_tick is not None and knowledge_tick > boundary_tick:
+                facts.append(copy.deepcopy(item))
+        return {"after_tick": boundary_tick, "facts": facts}
+
+    def _binding_reality(
+        self,
+        lifetime: dict[str, Any],
+        position: dict[str, Any],
+        assets: list[dict[str, Any]],
+        crisis_context: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "position": copy.deepcopy(position),
+            "authority": list(lifetime.get("authority", [])),
+            "active_operations": self._crisis_items(crisis_context, "active_operations"),
+            "active_investigations": self._crisis_items(
+                crisis_context, "active_investigations"
+            ),
+            "active_offers": self._crisis_items(crisis_context, "active_offers"),
+            "active_agreements": self._crisis_items(crisis_context, "active_agreements"),
+            "commitments": copy.deepcopy(lifetime.get("commitments", [])),
+            "owned_assets": copy.deepcopy(assets),
+            "resources": copy.deepcopy(lifetime.get("resources", {})),
+        }
+
+    @staticmethod
+    def _crisis_items(
+        crisis_context: list[dict[str, Any]], key: str
+    ) -> list[dict[str, Any]]:
+        return [
+            {"crisis_id": context["crisis_id"], "item": copy.deepcopy(item)}
+            for context in crisis_context
+            for item in context.get(key, [])
+        ]
+
+    @staticmethod
+    def _affordances(crisis_context: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        return {
+            key: [
+                {"crisis_id": context["crisis_id"], "item": copy.deepcopy(item)}
+                for context in crisis_context
+                for item in context.get("subject_affordances", {}).get(key, [])
+            ]
+            for key in ("operations", "investigations", "offer_terms")
+        }
+
+    @staticmethod
+    def _knowledge_tick(item: dict[str, Any]) -> int | None:
+        for key in ("received_tick", "tick", "obtained_tick", "due_tick"):
+            value = item.get(key)
+            if isinstance(value, bool):
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def validate_evidence(
         self,

@@ -59,6 +59,19 @@
 
 Offer / Agreement 的事实 transport 仍是 Phase 8 的专门改动；本阶段未把现有 `tick+1` offer scaffold 伪装成 transport semantics。`tests/test_v6_attention.py` 覆盖无关已知消息、typed sender match、预期操作完成、deadline 与 pure policy；完整 pytest exit 0（334 tests collected），Ruff、compileall 和三项 content validator 均 exit 0。
 
+## Phase 4 Context Compiler
+
+现有 `LifetimeContextBuilder` 继续负责冻结、actor-scoped Perspective，并新增六个 reality-first section：
+
+- `why_now`：当前 Wake / `ATTENTION_EVALUATED` 的 reason、匹配依赖和真正触发事实；
+- `since_last_deliberation`：以 Course 的 `last_deliberated_tick` 为边界，汇总该 Lifetime Knowledge 中之后到达的事实，包括此前只产生 `BACKGROUND` 的事实；
+- `binding_reality`：当前位置、authority、进行中的 operation / investigation / offer / agreement、commitments、owned assets 与 resources；
+- `previous_course`：此前唯一 Current Course 的只读副本；
+- `relevant_experience`：现有 bounded beliefs、evidence 与 private memory；
+- `affordances`：Host 按主体和当前状态筛出的真实 operations、investigations 与 offer terms。
+
+Reality sections 在 selective relevance / memory 之前生成，旧的 bounded `beliefs`、`relevant_evidence`、`subjective_memory` 字段继续保留给 V5 consumers。测试覆盖了“当前 Course 预期等待 Dorgon，但 Li 的公开东进事实仍进入 `since_last_deliberation`”以及 Nanjing 的主体私有 affordance 边界；不存在跨 Lifetime Knowledge 泄漏。定向 Phase 4 tests 2 passed，静态检查通过；完整回归和 content validators 将在本 Phase commit 前复跑。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -77,7 +90,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 1 Characterization + seam | COMPLETE | V5 wake、Current Plan、MCP 单写入与 `/continue` 单推进已由 6 项特征测试固定；未作生产语义变更 |
 | 2 Decision Horizon | COMPLETE | `plan[0]` 原位升级为唯一 Course、typed dependencies、established/last-deliberated Ledger 边界与 V5 read compatibility 已验证 |
 | 3 Knowledge / Attention | COMPLETE | Knowledge admission 与 deterministic BACKGROUND/REOPEN 已分离；无关消息与预期操作不再直接创建 Wake |
-| 4 Context Compiler | NOT_STARTED | |
+| 4 Context Compiler | COMPLETE | Frozen Perspective 增加 reality-first 六段；contrary background fact 保留，旧 V5 bounded context 与 privacy 边界保持 |
 | 5 Deliberation Protocol | NOT_STARTED | |
 | 6 Product Continuous Agency | NOT_STARTED | |
 | 7 Agency Conservation | NOT_STARTED | |

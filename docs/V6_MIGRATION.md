@@ -19,6 +19,13 @@ V6 改的是现有 Volume Runtime 的认知时间语义，不重造 V5。Agent �
 | verbose protocol prompt | model scaffold | No | 先把硬规则移到 Host/schema/MCP，后期在不削弱安全性的前提下实验 |
 | fixed Shanhai pressure | content pacing | Unknown | Source-first ablation；只有真实结构必要时保留 |
 
+## Phase 1 observed baseline
+
+- 当前 V5 将 message、operation completion、investigation observation 直接从 Knowledge admission 连到 Wake；Phase 3 必须在不丢失 Knowledge 的前提下切开这个耦合。
+- 当前 `plan[0]` 是唯一对 Lifetime Context 可见的 Current Plan，且 `reconsider_when` 是 prose；Phase 2 在该字段原位升级，不建 parallel Horizon store。
+- 当前 Volume MCP 把“一 Wake 一个世界写入”作为 harness 约束；Phase 5 先把 commit schema 固化为 `0..1` action，Phase 9 才依据实验决定是否消减具体 prompt / tool scaffolding。
+- 当前 `/continue` 一次 request 只做一次 Global advance；Phase 6 可在不改变 Host-owned single advance 原子边界的前提下循环至有意义的人类 Attention。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

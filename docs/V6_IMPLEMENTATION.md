@@ -25,6 +25,18 @@
 
 根据 `docs/V5_ACCEPTANCE.md`，P0–P4 仅在各自所列证据层为 PASS；P5 是 `CANDIDATE`，仍缺真人试玩逐题回答与正式 Completion Challenge。V6 不改写这个事实。
 
+## Phase 1 Characterization + seam
+
+本阶段只新增 `tests/test_v6_characterization.py`，没有改变生产运行时语义。它固定当前 V5 的实际边界：
+
+- `MESSAGE_DELIVERED` 会写入 recipient Knowledge，并立即产生 `OBSERVATION` Wake；
+- `OPERATION_COMPLETED` 与 `OBSERVATION_OBTAINED` 分别会写入 Knowledge，并产生相应结果 Wake；
+- `Lifetime.plan` 当前仅投影 `plan[0]` 为 Current Plan，`reconsider_when` 仍是 prose；
+- Volume MCP 在同一 Wake 内拒绝第二个不同 idempotency key 的世界写入；
+- 现有 `/continue` 每个 request 只调用一次 Global advance（一个 `TIME_ADVANCED`）。
+
+2026-08-13 实际执行：`uv run pytest -q tests/test_v6_characterization.py` 为 6 passed；完整 `uv run pytest -q` exit 0（324 tests collected）；`uv run ruff check .` 与 `uv run python -m compileall -q chronicle tests` 均 exit 0。上述是 fixture / deterministic 证据，不构成 P6–P9 或 live Hermes 证明。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -40,7 +52,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | Phase | 状态 | 说明 |
 | --- | --- | --- |
 | 0 Baseline | COMPLETE | V6 文档、实际 V5 baseline 与 staged scope review 已完成；本 commit 只包含此 Phase |
-| 1 Characterization + seam | NOT_STARTED | |
+| 1 Characterization + seam | COMPLETE | V5 wake、Current Plan、MCP 单写入与 `/continue` 单推进已由 6 项特征测试固定；未作生产语义变更 |
 | 2 Decision Horizon | NOT_STARTED | |
 | 3 Knowledge / Attention | NOT_STARTED | |
 | 4 Context Compiler | NOT_STARTED | |

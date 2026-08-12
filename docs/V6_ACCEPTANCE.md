@@ -18,6 +18,18 @@ V5 P0–P4 在 `docs/V5_ACCEPTANCE.md` 所列证据层为 PASS。V5 P5 仍为 `C
 | web syntax / diff check | PASS | `web/app.js`、`web/router.js`、`web/state.js` syntax 与初始 `git diff --check` 均 exit 0 |
 | baseline test count / warnings / schema / P0–P5 | PASS | schema `10`；pytest 4 条既有 warning；V5 P0–P4 scoped PASS，P5 CANDIDATE |
 
+## Phase 1 characterization
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| Event → Knowledge → Wake | PASS | 6 项 `tests/test_v6_characterization.py` 覆盖 message、operation completion 与 investigation observation 的现有 V5 链路 |
+| Current Plan | PASS | 已固定 `plan[0]` 与 prose `reconsider_when` 的现状，作为 Phase 2 migration 的回归边界 |
+| Live harness write boundary | PASS | 通过 Volume MCP staging 测试同一 Wake 的第二个不同写入被拒绝；这不是 Provider 调用证据 |
+| `/continue` step boundary | PASS | fixture API 测试每 request 仅新增一个 `TIME_ADVANCED` |
+| Full deterministic regression | PASS | `uv run pytest -q` exit 0，324 tests collected；Ruff、compileall exit 0 |
+
+Phase 1 不主张 Continuous Agency、Attention、bounded agency 或 real Hermes 成功；P6–P9 仍是 `NOT_RUN`。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

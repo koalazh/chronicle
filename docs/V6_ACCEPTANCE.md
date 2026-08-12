@@ -30,6 +30,18 @@ V5 P0–P4 在 `docs/V5_ACCEPTANCE.md` 所列证据层为 PASS。V5 P5 仍为 `C
 
 Phase 1 不主张 Continuous Agency、Attention、bounded agency 或 real Hermes 成功；P6–P9 仍是 `NOT_RUN`。
 
+## Phase 2 Decision Horizon
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| One persisted Current Course | PASS | 新 Course 只写入 `Lifetime.plan[0]`；未增加 Horizon 表或 parallel Runtime |
+| Course ledger | PASS | `PLAN_UPDATED` 同 Moment 追加 `DECISION_HORIZON_ESTABLISHED` 或 `DECISION_HORIZON_REVISED`，可由 append-only events 重建变化 |
+| Typed dependencies | PASS | data-only allow-list；拒绝 arbitrary predicate / unsupported fields；未使用 LLM relevance |
+| Continuity | PASS | tick、SQLite restart、HUMAN↔AGENT controller switch 与 fresh-session prompt 均保留相同 Course |
+| V5 compatibility / regression | PASS | legacy `plan_json` read-only 投影；`tests/test_v6_decision_horizon.py` 5 passed；完整 pytest exit 0（329 tests collected）、Ruff / compileall exit 0 |
+
+这是 deterministic fixture / mocked fresh-session payload 证据，尚未证明 Attention、continuous product flow 或 real Hermes business chain。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

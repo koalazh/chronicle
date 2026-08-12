@@ -7,6 +7,7 @@ from typing import Any
 
 from .crisis import VolumePack
 from .db import ChronicleDB
+from .decision_horizon import current_course_from_plan
 
 
 class SubjectContinuityError(ValueError):
@@ -84,6 +85,7 @@ class LifetimeContextBuilder:
         }
         assets = self._assets(projection, lifetime["seat"], crisis_context)
         current_plan = list(lifetime.get("plan", []))[:1]
+        current_course = current_course_from_plan(current_plan, fallback_tick=tick)
         due_revisits = [
             copy.deepcopy(item)
             for item in lifetime.get("revisits", [])
@@ -124,6 +126,7 @@ class LifetimeContextBuilder:
             "authority": list(lifetime.get("authority", [])),
             "active_obligations": obligations,
             "current_plan": current_plan,
+            "current_course": current_course,
             "due_revisits": due_revisits,
             "active_crisis_context": crisis_context,
             "beliefs": relevant_beliefs,

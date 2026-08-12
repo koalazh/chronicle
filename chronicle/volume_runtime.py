@@ -18,6 +18,12 @@ from .crisis import (
     VolumePack,
 )
 from .db import content_hash, stable_hash
+from .decision_horizon import (
+    DecisionHorizonError,
+    build_current_course,
+    current_course_from_plan,
+    normalize_open_dependencies,
+)
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .subject_continuity import LifetimeContextBuilder
 from .volume_boundary import VolumeBoundaryPolicy
@@ -2400,15 +2406,19 @@ class VolumeRuntime:
                 events.append(rejected)
                 outcome = {"status": "rejected", "code": operation["result"].get("code", "rejected")}
             elif intent["type"] == "update_plan":
-                plan = {
-                    "version": f"{pending['id']}:plan:{lifetime['seat']}:{stable_hash(intent)[:12]}",
-                    "objective": intent["objective"],
-                    "steps": list(intent["steps"]),
-                    "rationale": intent["rationale"],
-                    "rationale_source": intent.get("rationale_source", ""),
-                    "reconsider_when": list(intent.get("reconsider_when", [])),
-                    "updated_tick": tick,
-                }
+                previous_course = current_course_from_plan(
+                    list(lifetime.get("plan", [])), fallback_tick=tick
+                )
+                plan_version = (
+                    f"{pending['id']}:course:{lifetime['seat']}:{stable_hash(intent)[:12]}"
+                )
+                horizon_event_id = f"{intent_event['id']}:decision-horizon"
+                plan = build_current_course(
+                    intent,
+                    course_version=plan_version,
+                    tick=tick,
+                    event_id=horizon_event_id,
+                )
                 plan_event = self._event(
                     worldline_id,
                     tick,
@@ -2426,6 +2436,33 @@ class VolumeRuntime:
                     runtime_epoch=row["runtime_epoch"],
                 )
                 events.append(plan_event)
+                horizon_event_type = (
+                    "DECISION_HORIZON_ESTABLISHED"
+                    if previous_course is None
+                    else "DECISION_HORIZON_REVISED"
+                )
+                horizon_event = self._event(
+                    worldline_id,
+                    tick,
+                    horizon_event_type,
+                    {
+                        "moment_id": pending["id"],
+                        "wake_id": wake["id"],
+                        "seat": lifetime["seat"],
+                        "course": plan,
+                        "previous_course_event_id": (
+                            str(previous_course.get("established_event_id", ""))
+                            if previous_course is not None
+                            else ""
+                        ),
+                    },
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[plan_event["id"]],
+                    event_id=horizon_event_id,
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(horizon_event)
                 beliefs = dict(lifetime["beliefs"])
                 belief_keys: list[str] = []
                 for update in intent.get("belief_updates", []):
@@ -3376,10 +3413,26 @@ class VolumeRuntime:
             "rationale_source": rationale_source,
             "belief_source": str(intent.get("belief_source", "")).strip(),
             "belief_updates": normalized_beliefs,
+            "evidence_event_ids": builder.validate_evidence(
+                worldline_id,
+                lifetime["id"],
+                intent.get("evidence_event_ids"),
+                fallback_event_id="",
+            ),
+            "open_dependencies": self._normalize_open_dependencies(intent, current_tick=int(wake["tick"])),
             "reconsider_when": [
                 str(item).strip() for item in intent.get("reconsider_when", []) if str(item).strip()
             ],
         }
+
+    @staticmethod
+    def _normalize_open_dependencies(intent: dict[str, Any], *, current_tick: int) -> list[dict[str, Any]]:
+        try:
+            return normalize_open_dependencies(
+                intent.get("open_dependencies", []), current_tick=current_tick
+            )
+        except DecisionHorizonError as exc:
+            raise VolumeRuntimeError(str(exc)) from exc
 
     def _logical_message(
         self,

@@ -26,6 +26,18 @@ V6 改的是现有 Volume Runtime 的认知时间语义，不重造 V5。Agent �
 - 当前 Volume MCP 把“一 Wake 一个世界写入”作为 harness 约束；Phase 5 先把 commit schema 固化为 `0..1` action，Phase 9 才依据实验决定是否消减具体 prompt / tool scaffolding。
 - 当前 `/continue` 一次 request 只做一次 Global advance；Phase 6 可在不改变 Host-owned single advance 原子边界的前提下循环至有意义的人类 Attention。
 
+## Phase 2 data migration
+
+V6 不增加物理 Horizon table，也不递增 SQLite schema version；`worldline_lifetimes.plan_json` 已能承载一个 JSON Course。新写入始终替换为单元素列表 `[course]`，因此旧 Course 历史只留在 append-only Ledger，不能被 mutable list 覆盖。
+
+| Existing V5 data | V6 read behaviour | V6 write behaviour |
+| --- | --- | --- |
+| `plan == []` | no Current Course | 首次 `update_plan` 建立 `[course]` 与 `DECISION_HORIZON_ESTABLISHED` |
+| `plan[0]` only has V5 fields | 只读投影 `course=objective`、`IN_FORCE`、empty typed dependencies；不回写 | 下次合法 Course 写入替换为完整 V6 shape，并追加 `DECISION_HORIZON_REVISED` |
+| V5 `reconsider_when` prose | 继续对旧 consumer 可见，但不作为 machine predicate | 新 machine-visible condition 只写 `open_dependencies` allow-list |
+
+`open_dependencies` 只允许实际 Volume 已有的消息、调查、操作、offer/agreement、实体变化与 deadline 事实 ID/tick；没有 free-form predicate、nested DSL、LLM relevance 或自动行动。依赖只会在 Phase 3 作为重新思考资格，绝不直接提交世界动作。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

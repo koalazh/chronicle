@@ -89,10 +89,10 @@ class HermesVolumeActorDriver:
         operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
             try:
-                repair_text, repaired_session = client.chat(
-                    profile,
-                    key,
-                    self._repair_messages(),
+                    repair_text, repaired_session = client.chat(
+                        profile,
+                        key,
+                        self._repair_messages(wake),
                     session_id,
                     f"{wake['worldline_id']}:{actor_id}",
                 )
@@ -164,6 +164,8 @@ class HermesVolumeActorDriver:
                     "只使用本次冻结视角中的事实、已知证据、当前计划与有限主体记忆；禁止使用后世知识，"
                     "也不要推断其他主体的私有信息。普通 Wake 不得调用 memory。"
                     "你必须调用 chronicle-world 的一个世界写工具恰好一次，提交一个且只有一个行动。"
+                    "选定并调用一个工具后必须立即结束本次回答；工具返回后绝对不要再次调用任何工具，"
+                    "不要补充、检查、修正或改用 logical_intent。"
                     "可用工具是 communicate、investigate、manage_offer、operate、update_plan、schedule_revisit；"
                     "没有足够依据改变行动时，使用 logical_intent 提交 {type: wait}。"
                     "active_crisis_context 中的 subject_affordances 是按当前主体和当前状态筛选的真实选项；"
@@ -172,9 +174,12 @@ class HermesVolumeActorDriver:
                     "不能使用 target 槽位名；investigate 的 target 必须使用 investigations 中 target.id。"
                     "manage_offer 的 recipient 使用 offer_terms 中 recipient.id；terms 必须是"
                     "[{type, subject: 实体 id, value}]，不要加入 party_ids，也不要把 subject 写成对象。"
+                    "每次直接调用 chronicle-world 工具都必须带 wake_id，且逐字等于本次用户 payload 顶层的 wake_id；"
+                    "wake_id 是内部 Wake 边界，不是 UI 字段，不得省略、改写或猜测。"
                     "logical_intent 也可提交 message 或 update_plan，但不得再调用第二个工具。"
                     "update_plan 的 belief_updates 只能引用冻结视角中可见的 evidence event_id；没有证据就留空。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
+                    "如果工具返回 rejected 或错误，立即结束本次回答，不要改用第二个工具。"
                     "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
                 ),
             },
@@ -200,6 +205,7 @@ class HermesVolumeActorDriver:
                             {
                                 "intent": {"type": "wait"},
                                 "idempotency_key": f"{wake['id']}:logical-intent",
+                                "wake_id": str(wake["id"]),
                             },
                             {
                                 "intent": {
@@ -209,6 +215,7 @@ class HermesVolumeActorDriver:
                                     "delivery_tick": 3,
                                 },
                                 "idempotency_key": f"{wake['id']}:logical-intent",
+                                "wake_id": str(wake["id"]),
                             },
                             {
                                 "intent": {
@@ -217,6 +224,7 @@ class HermesVolumeActorDriver:
                                     "steps": ["记录新证据", "等待可见行动"],
                                 },
                                 "idempotency_key": f"{wake['id']}:logical-intent",
+                                "wake_id": str(wake["id"]),
                             },
                         ],
                         "logical_intent_tool_call": {
@@ -224,11 +232,12 @@ class HermesVolumeActorDriver:
                             "arguments": {
                                 "intent": {"type": "wait"},
                                 "idempotency_key": f"{wake['id']}:logical-intent",
+                                "wake_id": str(wake["id"]),
                             },
                         },
                         "tool_call_rule": (
-                            "logical_intent 的 arguments 必须同时包含顶层 intent 和 idempotency_key；"
-                            "不要把 intent 的字段提升为顶层参数，也不要省略任一字段。"
+                            "logical_intent 的 arguments 必须同时包含顶层 wake_id、intent 和 idempotency_key；"
+                            "wake_id 必须复制本次 payload 顶层值；不要把 intent 的字段提升为顶层参数，也不要省略任一字段。"
                         ),
                     },
                     ensure_ascii=False,
@@ -237,12 +246,13 @@ class HermesVolumeActorDriver:
         ]
 
     @staticmethod
-    def _repair_messages() -> list[dict[str, str]]:
+    def _repair_messages(wake: dict[str, Any]) -> list[dict[str, str]]:
         return [
             {
                 "role": "user",
                 "content": (
                     "上一条输出没有提交任何逻辑意图。现在只做协议修复：必须调用一次 logical_intent，"
+                    f"arguments 必须带上 wake_id={wake['id']}、intent 和 idempotency_key；wake_id 必须逐字使用这个值，"
                     "提交一个 wait、message 或 update_plan；如果工具确实不可用，只返回一个符合 schema 的 JSON 意图对象。"
                     "不要解释、不要返回自然语言、不要调用 memory。"
                 ),
@@ -298,6 +308,7 @@ class HermesVolumeActorDriver:
             intent,
             source="agent",
             idempotency_key=f"{wake['id']}:model-response",
+            wake_id=str(wake["id"]),
         )
 
     def _fail_wake(

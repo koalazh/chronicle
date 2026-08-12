@@ -79,7 +79,7 @@ def test_private_gateway_uses_the_configured_base_url_port(app_config):
 
 
 @pytest.mark.asyncio
-async def test_world_mcp_exposes_only_identity_free_crisis_tools():
+async def test_world_mcp_exposes_identity_free_crisis_tools_with_optional_wake_boundary():
     tools = {tool.name: tool.inputSchema for tool in await mcp.list_tools()}
 
     assert set(tools) == {
@@ -92,9 +92,10 @@ async def test_world_mcp_exposes_only_identity_free_crisis_tools():
         "schedule_revisit",
     }
     for schema in tools.values():
-        assert not {"actor_id", "profile", "run_id", "wake_id"}.intersection(
+        assert not {"actor_id", "profile", "run_id"}.intersection(
             schema.get("properties", {})
         )
+        assert "wake_id" in schema.get("properties", {})
 
     assert "anyOf" in tools["communicate"]["properties"]["recipient"]
     assert "anyOf" in tools["investigate"]["properties"]["target"]

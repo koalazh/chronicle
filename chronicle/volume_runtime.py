@@ -1314,6 +1314,7 @@ class VolumeRuntime:
         *,
         source: str | None = None,
         idempotency_key: str | None = None,
+        wake_id: str = "",
     ) -> dict[str, Any]:
         """Stage one Human or Agent intent without changing the Volume projection."""
 
@@ -1333,21 +1334,31 @@ class VolumeRuntime:
             raise VolumeRuntimeConflict(
                 f"{seat} is controlled by {lifetime['controller']}, not {actual_source}"
             )
-        wake = next(
-            (
-                candidate
-                for candidate_id in pending["wake_ids"]
-                if (candidate := self.db.crisis_wake(candidate_id)) is not None
-                and (
-                    candidate_lifetime := self._lifetime_for_actor(
-                        worldline_id, str(candidate["actor_id"])
+        if wake_id:
+            wake = self.db.crisis_wake(wake_id)
+            if (
+                wake is None
+                or str(wake["worldline_id"]) != worldline_id
+                or str(wake["actor_id"]) != seat
+                or wake_id not in pending["wake_ids"]
+            ):
+                raise VolumeRuntimeConflict("wake identity is not in this Pending Logical Moment")
+        else:
+            wake = next(
+                (
+                    candidate
+                    for candidate_id in pending["wake_ids"]
+                    if (candidate := self.db.crisis_wake(candidate_id)) is not None
+                    and (
+                        candidate_lifetime := self._lifetime_for_actor(
+                            worldline_id, str(candidate["actor_id"])
+                        )
                     )
-                )
-                is not None
-                and candidate_lifetime["seat"] == seat
-            ),
-            None,
-        )
+                    is not None
+                    and candidate_lifetime["seat"] == seat
+                ),
+                None,
+            )
         if wake is None:
             raise VolumeRuntimeConflict(f"{seat} has no Wake in Pending Logical Moment")
         if wake["status"] == "COMPLETED":
@@ -1428,6 +1439,7 @@ class VolumeRuntime:
         *,
         source: str = "agent",
         idempotency_key: str = "",
+        wake_id: str = "",
     ) -> dict[str, Any]:
         """Stage one of the existing World tools in the V5 logical moment.
 
@@ -1447,7 +1459,17 @@ class VolumeRuntime:
         lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
         if lifetime is None:
             raise VolumeRuntimeError(f"Lifetime not found: {lifetime_id}")
-        wake = self._pending_wake_for_lifetime(worldline_id, pending, lifetime["seat"])
+        if wake_id:
+            wake = self.db.crisis_wake(wake_id)
+            if (
+                wake is None
+                or str(wake["worldline_id"]) != worldline_id
+                or str(wake["actor_id"]) != lifetime["seat"]
+                or wake_id not in pending["wake_ids"]
+            ):
+                raise VolumeRuntimeConflict("wake identity is not in this Pending Logical Moment")
+        else:
+            wake = self._pending_wake_for_lifetime(worldline_id, pending, lifetime["seat"])
         if wake is None:
             raise VolumeRuntimeConflict(f"{lifetime['seat']} has no Wake in Pending Logical Moment")
         expected_source = "human" if lifetime["controller"] == "HUMAN" else "agent"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 
 from chronicle.host import ChronicleHost
@@ -69,6 +70,59 @@ def test_volume_world_tools_share_one_atomic_moment_and_are_idempotent(app_confi
         "before-shanhaiguan"
     ]["investigations"][0]
     assert investigation["status"] == "COMPLETED"
+
+
+def test_volume_wake_id_routes_tools_to_the_exact_duplicate_subject_wake(app_config):
+    runtime, worldline_id, wu = _runtime(app_config, "world-tools-exact-wake")
+    snapshot = runtime.db.worldline_snapshot(worldline_id, 1)
+    assert snapshot is not None
+    pending = snapshot["projection"]["pending_moment"]
+    first_wake_id = pending["wake_ids"][0]
+    exact_wake_id = f"{worldline_id}:duplicate-wu-wake"
+    runtime.db.create_crisis_wake(
+        {
+            "id": exact_wake_id,
+            "worldline_id": worldline_id,
+            "actor_id": wu["seat"],
+            "wake_type": "OBSERVATION",
+            "tick": 1,
+            "status": "QUEUED",
+            "trigger_event_id": "duplicate-wu-trigger",
+            "frozen_perspective": pending,
+        }
+    )
+    projection = copy.deepcopy(snapshot["projection"])
+    projection["pending_moment"]["wake_ids"].append(exact_wake_id)
+    runtime.db.append_worldline_snapshot(
+        worldline_id,
+        1,
+        int(snapshot["ledger_cursor"]) + 1,
+        projection,
+    )
+
+    tool = runtime.stage_actor_tool(
+        worldline_id,
+        wu["id"],
+        "operate",
+        {
+            "operation_definition_id": "prepare_force",
+            "targets": ["wu-field-force"],
+            "description": "只写入指定的重复 Wake",
+        },
+        idempotency_key="exact-wake-tool",
+        wake_id=exact_wake_id,
+    )
+    intent = runtime.stage_intent(
+        worldline_id,
+        wu["id"],
+        {"type": "wait"},
+        source="agent",
+        idempotency_key="exact-wake-intent",
+        wake_id=first_wake_id,
+    )
+
+    assert tool["operation"]["wake_id"] == exact_wake_id
+    assert intent["operation"]["wake_id"] == first_wake_id
 
 
 def test_volume_operation_offer_and_revisit_survive_commit(app_config):

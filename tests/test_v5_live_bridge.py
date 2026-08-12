@@ -10,7 +10,7 @@ import pytest
 from chronicle import world_mcp
 from chronicle.host import ChronicleHost
 from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
-from chronicle.world import token_hash
+from chronicle.world import WorldAccessError, token_hash
 
 
 def test_update_plan_mcp_schema_allows_evidence_event_ids():
@@ -33,12 +33,15 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
         "arguments": {
             "intent": {"type": "wait"},
             "idempotency_key": "wake-1:logical-intent",
+            "wake_id": "wake-1",
         },
     }
-    assert "顶层 intent 和 idempotency_key" in payload["tool_call_rule"]
+    assert "顶层 wake_id" in payload["tool_call_rule"]
     assert "subject_affordances" in system_message["content"]
     assert "targets 的 options 的实体 id" in system_message["content"]
     assert "terms 必须是" in system_message["content"]
+    assert "wake_id" in system_message["content"]
+    assert "立即结束本次回答" in system_message["content"]
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):
@@ -67,6 +70,56 @@ def test_live_volume_binding_owns_each_materialized_world_token(app_config, monk
 
     assert {seat for seat, binding in bindings.items() if binding["token_hash"]} == set(tokens)
     assert all(binding["token_hash"] == token_hash(tokens[seat]) for seat, binding in bindings.items())
+
+
+def test_volume_mcp_requires_exact_wake_when_one_lifetime_has_duplicate_wakes(
+    app_config, monkeypatch, tmp_path: Path
+):
+    config = replace(
+        app_config,
+        database_path=tmp_path / "chronicle.db",
+        hermes_home=tmp_path / "hermes-home",
+        runtime_dir=tmp_path / "runtime",
+    )
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    lifetime = host.db.worldline_lifetime(worldline_id, "wu-sangui")
+    assert lifetime is not None
+    token = "volume-token-wu"
+    with host.db.transaction() as connection:
+        connection.execute(
+            "UPDATE worldline_agent_bindings SET token_hash = ?, profile_identity = ? "
+            "WHERE worldline_id = ? AND role = ?",
+            (token_hash(token), "profile-wu", worldline_id, "wu-sangui"),
+        )
+    for wake_id in ("wake-a", "wake-b"):
+        host.db.create_crisis_wake(
+            {
+                "id": wake_id,
+                "worldline_id": worldline_id,
+                "actor_id": "wu-sangui",
+                "wake_type": "OBSERVATION",
+                "tick": 1,
+                "status": "RUNNING",
+                "trigger_event_id": f"trigger-{wake_id}",
+                "frozen_perspective": {"moment_id": "moment-1"},
+            }
+        )
+
+    monkeypatch.setenv("CHRONICLE_WORLD_TOKEN", token)
+    monkeypatch.setattr(world_mcp, "load_config", lambda environ=None: config)
+
+    with pytest.raises(WorldAccessError, match="wake identity is required"):
+        world_mcp._volume_context()
+
+    assert world_mcp._volume_context("wake-a")[-1]["id"] == "wake-a"
+    assert world_mcp._volume_context("wake-b")[-1]["id"] == "wake-b"
+    host.db.update_crisis_wake("wake-b", status="STAGED")
+    with pytest.raises(WorldAccessError, match="wake identity is required"):
+        world_mcp._volume_context()
+    with pytest.raises(WorldAccessError, match="wake identity is not active"):
+        world_mcp._volume_context("wake-missing")
 
 
 def test_live_driver_stages_explicit_model_intent_without_default_wait(

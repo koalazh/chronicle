@@ -824,7 +824,7 @@ def _sync_lifetime_soul(profile_home: Path, lifetime: dict[str, Any]) -> None:
         f"主体：{lifetime.get('display_name', lifetime.get('seat', ''))}\n\n"
         f"Genesis context：{context_text}\n\n"
         f"Stable authority：{authority}\n"
-        "\nV5 Wake contract：每次唤醒只依据冻结的 Lifetime context 判断；通过 `logical_intent` 提交一个 wait、message 或 update_plan 意图。普通 Wake 不得调用 memory。\n"
+        "\nV5 Wake contract：每次唤醒只依据冻结的 Lifetime context 判断；通过一个且只有一个世界写工具提交行动（communicate、investigate、manage_offer、operate、update_plan、schedule_revisit，或用 `logical_intent` 提交 wait/message/update_plan）。普通 Wake 不得调用 memory。\n"
     )
     if "## Persistent Lifetime Genesis" not in common:
         path.write_text(common + stable_section, encoding="utf-8")

@@ -114,6 +114,12 @@ Agreement 的 `effective_tick` 是回应抵达的 global tick，而非提交 tic
 
 Phase 9 的“未运行”是证据边界，不是静默跳过：Prompt 与 autonomous fixed-pressure ablation 需要隔离 real Hermes Provider，留待 Phase 12；在此之前不能据此删掉 protocol 或 content scaffold。永久 invariants（frozen Perspective、private Knowledge、Host authority、atomicity、idempotency、causal chain、message latency、restart safety、cleanup）不参与消融。
 
+## Phase 10 game-proof boundary
+
+`tests/test_v6_game_proofs.py` 将 game proof 限定为四个可重跑的小测试：Perfect Wait 的有限推进、南京状态扰动导致 affordance 变化、相同状态交换 seat label 后 Attention 结果不变，以及 fixture boundary 的明确声明。Continuous Agency / Attention / Agency Conservation / Shanhai / Nanjing 则引用对应 Phase 测试，不另造 benchmark 或评分平台。
+
+这些测试证明 Host/Pack/policy 的结构性边界；它们不替代 stronger Agent 的 Canonical History paired run、Role-State live swap 或真人选择结果。后者必须在隔离 real Hermes acceptance 中单独记录。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

@@ -128,6 +128,18 @@ Phase 8 does not claim browser, Hermes Provider or real Hermes business-chain co
 
 Phase 9 proves only the bounded scaffold decisions above. The two `BOUNDED` rows require isolated real Hermes business evidence before any deletion.
 
+## Phase 10 V6 Game Tests
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| Perfect Wait | PASS | Silent fixture driver reaches finite Shanhai and Nanjing outcomes/limits; no benchmark claim |
+| canonicality perturbation | PASS | Actor-visible Nanjing court/recognition state perturbation changes Han affordances |
+| role-state swap | PASS | Pure Attention result is unchanged when only seat labels change under identical Course/Knowledge/dependency inputs |
+| Shanhai / Nanjing trajectories | PARTIAL | Existing Pack/causal loop tests pass; strong-agent paired trajectories remain for isolated real Hermes |
+| Regression | PASS | `tests/test_v6_game_proofs.py` 4 passed; full deterministic suite, Ruff and compileall pass |
+
+Phase 10 deterministic PASS does not claim strong-model Canonical History, live Role-State Swap or human product acceptance.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

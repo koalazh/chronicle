@@ -123,6 +123,17 @@ Offer / Agreement transport 现在复用同一个 Volume global clock 与既有 
 
 定向 ablation tests：`tests/test_v6_harness_ablation.py` 2 passed。上述结果只授权保留或删除 harness scaffold 的最小判断；未授权删除任何 frozen Perspective、private Knowledge、Host authority、atomicity、idempotency、causal parent、message latency 或 restart invariant。
 
+## Phase 10 V6 Game Tests
+
+新增 `tests/test_v6_game_proofs.py`，只做小而强的 deterministic probes，不建立 benchmark 平台：
+
+- Perfect Wait：无主体行动的 Shanhai / Nanjing fixture 都能在有限 simulation boundary 内推进，不因“等待”死锁；
+- Canonicality perturbation：只改变南京 actor-visible 的 court / recognition state，Han 的真实 operation affordance 随之变化，不机械复用原路径；
+- Role-State Swap：同一 Attention policy 在相同 Course / Knowledge / dependency 下交换 seat label，结果保持一致，说明 policy 不以名字猜历史角色；
+- Continuous Agency、Attention precision、Agency Conservation、Shanhai remote transport 与 Nanjing resolution 由各 Phase 专项测试共同覆盖。
+
+Phase 10 定向测试 4 passed；证据仍是 fixture / Pack / pure policy，不等价于强模型真人试玩或 real Hermes trajectory。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -147,7 +158,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 7 Agency Conservation | COMPLETE | Source/Pack ownership audit 与越权/因果链测试通过；未发现需要生产语义修复的问题，因此不新增 architecture layer |
 | 8 Content / World Correctness | COMPLETE | Remote Offer/Agreement obey route-delivery causality; Shanhai fixed operation/pressure and Nanjing source bounds have regression evidence |
 | 9 Harness Ablation | COMPLETE | One-action and authored-maneuver ablations are source/Host bounded; prompt and autonomous fixed-pressure Provider experiments remain explicitly unrun |
-| 10 V6 Game Tests | NOT_STARTED | |
+| 10 V6 Game Tests | COMPLETE | Perfect Wait, canonicality perturbation, role-state swap and Shanhai/Nanjing causal probes pass; live strong-agent evidence remains |
 | 11 Archive / UX | NOT_STARTED | |
 | 12 Real Hermes live acceptance | NOT_STARTED | |
 

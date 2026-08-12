@@ -1,9 +1,30 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 from chronicle.db import content_hash
 from chronicle.host import ChronicleHost
+
+BOUNDARY_EVALUATOR = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "v5_controller_boundary_evaluator.py"
+)
+
+
+def _blind_evaluate(trace: list[dict[str, object]]) -> tuple[int, dict[str, object]]:
+    completed = subprocess.run(
+        [sys.executable, str(BOUNDARY_EVALUATOR), "-"],
+        input=json.dumps({"trace": trace}, ensure_ascii=False),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return completed.returncode, json.loads(completed.stdout)
 
 
 def _two_subject_pending_moment(app_config, suffix: str):
@@ -139,3 +160,59 @@ def test_no_offscreen_cognition_changes_the_pending_user_boundary(app_config):
         event["event_type"] == "MOMENT_COMMITTED"
         for event in cognitive.db.worldline_events(cognitive_id)
     )
+
+
+def test_controller_boundary_uses_blind_external_evaluator(app_config):
+    runtime, worldline_id = _two_subject_pending_moment(app_config, "blind-controller-boundary")
+    dorgon = runtime.db.worldline_lifetime(worldline_id, "dorgon")
+    assert dorgon is not None
+    wake = next(
+        wake
+        for wake in runtime.db.subject_wakes(worldline_id)
+        if wake["actor_id"] in {dorgon["id"], dorgon["seat"]}
+    )
+
+    before = runtime.db.worldline_lifetime(worldline_id, dorgon["seat"])
+    assert before is not None
+    runtime.host.worldline_runtime.inhabit(worldline_id, dorgon["id"])
+    runtime.host.worldline_runtime.leave(worldline_id)
+    after = runtime.db.worldline_lifetime(worldline_id, dorgon["seat"])
+    assert after is not None
+    assert after["controller"] == before["controller"]
+    assert runtime.db.worldline(worldline_id)["current_tick"] == 1
+    persisted_wake = runtime.db.crisis_wake(wake["id"])
+    assert persisted_wake is not None
+    assert wake["trigger_event_id"] == persisted_wake["trigger_event_id"]
+
+    # The subprocess receives only public behavior. Human/Hermes labels and
+    # the lifecycle events are deliberately absent from its input.
+    public_trace = [
+        {
+            "tick": 1,
+            "subject": dorgon["seat"],
+            "action": "wait",
+            "public_state": "same_pending_trigger",
+            "cause": "same_pending_trigger",
+        },
+        {
+            "tick": 1,
+            "subject": dorgon["seat"],
+            "action": "wait",
+            "public_state": "same_pending_trigger",
+            "cause": "same_pending_trigger",
+        },
+    ]
+    return_code, result = _blind_evaluate(public_trace)
+    assert return_code == 0
+    assert result["verdict"] == "PASS"
+    assert result["unexplained_discontinuities"] == []
+
+    bad_code, bad_result = _blind_evaluate(
+        [
+            {"tick": 1, "subject": "dorgon", "action": "wait"},
+            {"tick": 1, "subject": "dorgon", "action": "message"},
+        ]
+    )
+    assert bad_code == 1
+    assert bad_result["verdict"] == "NEEDS_WORK"
+    assert bad_result["reason"] if "reason" in bad_result else bad_result["unexplained_discontinuities"]

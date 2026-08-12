@@ -228,3 +228,55 @@ def test_live_driver_fail_closes_malformed_structured_intent(
         HermesVolumeActorDriver(config, host.db).run_wake(wake, wake["frozen_perspective"])
 
     assert host.db.crisis_wake(wake["id"])["status"] == "FAILED"
+
+
+def test_live_driver_rejects_multiple_proposed_operations(
+    app_config, monkeypatch, tmp_path: Path
+):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    seat = str(wake["actor_id"])
+    profile = f"chronicle-{worldline_id}-{seat}"
+    host.db.update_worldline_lifetime(worldline_id, seat, profile_name=profile)
+    memory = config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("", encoding="utf-8")
+    moment_id = str(wake["frozen_perspective"]["moment_id"])
+    for index, tool_name in enumerate(("update_plan", "communicate")):
+        host.db.add_crisis_wake_operation(
+            {
+                "wake_id": wake["id"],
+                "tool_name": tool_name,
+                "payload": {"moment_id": moment_id, "seat": seat},
+                "result": {"status": "accepted"},
+                "idempotency_key": f"seeded-operation-{index}",
+            }
+        )
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def create_fresh_session(self, _profile, _key, _wake_id):
+            return "fresh-session"
+
+        def chat(self, _profile, _key, _messages, session_id, _memory_key):
+            return '{"type":"wait"}', session_id
+
+    monkeypatch.setattr("chronicle.volume_live.HermesClient", FakeClient)
+    monkeypatch.setattr("chronicle.volume_live.profile_api_key", lambda *_args: "profile-key")
+
+    with pytest.raises(VolumeActorDriverError, match="multiple logical intents"):
+        HermesVolumeActorDriver(config, host.db).run_wake(wake, wake["frozen_perspective"])
+
+    assert host.db.crisis_wake(wake["id"])["status"] == "FAILED"
+    operations = host.db.crisis_wake_operations(wake["id"])
+    assert [operation["status"] for operation in operations] == ["REJECTED", "REJECTED"]
+    assert all(operation["result"]["code"] == "multiple_logical_intents" for operation in operations)

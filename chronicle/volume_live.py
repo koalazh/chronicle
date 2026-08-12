@@ -86,7 +86,7 @@ class HermesVolumeActorDriver:
                 f"ordinary live V5 Wake attempted a durable Memory mutation for {actor_id}"
             )
 
-        operation = self._logical_operation(str(wake["id"]), perspective)
+        operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
             try:
                 repair_text, repaired_session = client.chat(
@@ -119,18 +119,18 @@ class HermesVolumeActorDriver:
                 raise VolumeActorDriverError(
                     f"repair V5 Wake attempted a durable Memory mutation for {actor_id}"
                 )
-            operation = self._logical_operation(str(wake["id"]), perspective)
+            operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
             try:
                 self._stage_fallback(wake, response_text)
             except Exception as exc:
-                self._fail_wake(wake, actor_id)
+                self._fail_wake(wake, actor_id, failure_code="invalid_structured_intent")
                 raise VolumeActorDriverError(
                     f"live V5 Wake returned an invalid structured logical intent for {actor_id}"
                 ) from exc
-            operation = self._logical_operation(str(wake["id"]), perspective)
+            operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
-            self._fail_wake(wake, actor_id)
+            self._fail_wake(wake, actor_id, failure_code="missing_logical_intent")
             raise VolumeActorDriverError(
                 f"live V5 Wake did not produce one logical_intent operation for {actor_id}"
             )
@@ -266,6 +266,18 @@ class HermesVolumeActorDriver:
             raise VolumeActorDriverError("one V5 Wake produced multiple logical intents")
         return operations[0] if operations else None
 
+    def _logical_operation_or_fail(
+        self,
+        wake: dict[str, Any],
+        perspective: dict[str, Any],
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._logical_operation(str(wake["id"]), perspective)
+        except VolumeActorDriverError:
+            self._fail_wake(wake, actor_id, failure_code="multiple_logical_intents")
+            raise
+
     def _stage_fallback(self, wake: dict[str, Any], response_text: str) -> None:
         """Accept only an explicit structured model response; never invent wait."""
 
@@ -290,14 +302,25 @@ class HermesVolumeActorDriver:
         before_text: str = "",
         before_hash: str = "",
         before_existed: bool = False,
+        failure_code: str = "live_wake_failed",
     ) -> None:
         if profile and before_hash:
             _current_text, current_hash = read_profile_memory(self.config, profile)
             if current_hash != before_hash:
                 restore_profile_memory(self.config, profile, before_existed, before_text)
+        for operation in self.db.crisis_wake_operations(str(wake["id"])):
+            if operation["status"] != "PROPOSED":
+                continue
+            result = dict(operation.get("result") or {})
+            result.update({"status": "rejected", "code": failure_code})
+            self.db.update_crisis_wake_operation_status(
+                str(operation["id"]), "REJECTED", result=result
+            )
         try:
             self.db.update_crisis_wake(
-                str(wake["id"]), status="FAILED", error={"actor_id": actor_id}
+                str(wake["id"]),
+                status="FAILED",
+                error={"actor_id": actor_id, "code": failure_code},
             )
         except KeyError:
             pass

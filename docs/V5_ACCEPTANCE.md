@@ -2,7 +2,7 @@
 
 > 记录日期：2026-08-12
 > 分支：`dev_v5`
-> 状态：**NOT COMPLETE — P1、P4、P5 与完整 live V5 业务链尚未通过**
+> 状态：**NOT COMPLETE — P4、P5 与完整 live V5 业务链尚未通过**
 
 本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。
 
@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录，以及离席后 Agent 接管 Pending Moment 的产品修复；P1、P4、P5 与完整 live V5 业务链仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` + `0d742fc` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录、主体级 affordance 合同和离席后 Agent 接管 Pending Moment 的产品修复；P4、P5 与完整 live V5 业务链仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -259,6 +259,16 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 当前代码 `d5aa8d4` 又在独立 Hermes Gateway port `18780` 复测了 fail-closed 边界：一个目标 Wake 未产生合法 structured intent，另一个目标 Wake 产生 exactly one `message` operation；未把半成品 pair 计为 PASS，两个 Profile/Gateway 均精确清理。该负向运行说明 duplicate/malformed/missing intent 不会被 Host 猜成默认 wait，但也说明 P1 的自然/独立 peer proof 仍未闭合。
 
+### P1 subject-scoped undirected live pair：port `18792`
+
+在修复 `0d742fc` 后，于另一独立临时 Volume、SQLite、Hermes Home 和 loopback Gateway port `18792` 运行同一 tick `10` 的 frozen Pending Moment。harness 只为两个主体提供不同的私有历史判断，不指定工具；`subject_affordances` 由当前主体、当前状态、合法 target/method 计算，Host 仍保留最终校验：
+
+- Han 的私有过去聚焦“福王位置与可接触性”这一未决，真实 Hermes fresh Session `0657ade2-6272-4ba1-a218-a49fde4bf51a` 选择 `investigate`，definition=`claimant-position-report`，target=`fu-prince`；该 Wake 只有一条 operation，提交后产生 `INTENT_COMMITTED → INVESTIGATION_STARTED`。
+- Ma 的私有过去聚焦“福王一侧的现实军政支持”这一期待，真实 Hermes fresh Session `ec20fb3b-37a9-4c27-b2be-f4fe5281f675` 选择 `operate`，definition=`make_fu_backing_visible`，target=`jiangbei-military-backing`；该 Wake 只有一条 operation，提交后产生 `INTENT_COMMITTED → OPERATION_STARTED`。
+- 两个不同 Lifetime 针对同一福王相关第三方形成不同 evidence/expectation/action；第三个同片 Wake 以显式 `wait` 补齐后，整片以 `MOMENT_COMMITTED` 收束，`pending_after=null`，没有重复 operation 或 rejected action；Gateway owner exact stop 通过。
+
+这条是未指定具体工具的 controlled live peer pair，满足 P1 的 subject-scoped evidence、不同 expectation、真实不同世界动作和同片 exactly-once 边界；它不向 P4、P5 或完整 Live V5 Acceptance 外推结论。
+
 ### P2 live order-independence pair：ports `18722` / `18723`
 
 两条独立 live Volume 使用相同 Pending Logical Moment，分别以 Human-first 与 Agent-first 顺序 staging；两边最终 semantic projection 相等：
@@ -309,7 +319,7 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
 | P0 Subject Proof | **PASS（strict live audit + ablation）** | 两条独立 live Volume（ports `18668`、`18778`）各自覆盖同一 Wu Lifetime 的 `AGENT → HUMAN → AGENT → HUMAN`；`18778` 进一步记录 Human 新消息驱动的显式 plan、fresh Session、后续 Hermes Wake、同 Profile 及最终 Human，并逐项复核 tick/Profile/plan/commitments/revisits ablation 不变，同时保留 Host 对不可用工具的 rejected outcome。 |
-| P1 Multi-Subject Proof | **PARTIAL（directed live candidate）** | port `18727` 已有两个真实 Profiles 针对同一 `fu-prince` 的不同 evidence hash、belief assessment、plan/action，并通过 atomic Moment；仍缺独立 controller/peer exactly-once 对照与非定向行为边界。 |
+| P1 Multi-Subject Proof | **PASS（subject-scoped undirected live pair）** | port `18792` 在同一 tick/frozen Moment 由两个不同私有过去驱动真实 Hermes：Han 调查 `fu-prince`，Ma 将其江北支持变为可见；两条 Wake 各 exactly one operation，分别经过 `INTENT_COMMITTED → INVESTIGATION_STARTED` 与 `INTENT_COMMITTED → OPERATION_STARTED`，最后 atomic `MOMENT_COMMITTED`，Gateway exact stop 通过。 |
 | P2 Temporal Proof | **PASS（live temporal + order pair）** | port `18715` 完成 A sends → B pre-arrival decision → delivery → B fresh-session reconsideration，且到达前 Perspective 不含正文；ports `18722/18723` 完成 Human-first/Agent-first semantic equality、无 pending moment 和精确 teardown。 |
 | P3 Learning Causality | **PASS（controlled live paired）** | ports `18752/18753` 与 `18754/18755` 从同一 tick 10 基线 clone，真实 Hermes fresh Session 在同一 tick 11 消息上分别检索 memory 并 `communicate` committed，或 memory 为空并 `investigate` rejected；Moment 两边均 atomic commit。 |
 | P4 Game Proof | **PARTIAL（directed + undirected continuous candidates）** | port `18718` 提供 14 Wake/9 Moment 的 directed tool chain；port `18740/18741` 提供 14 Wake（13 Agent）/12 Moment 的无定向连续样本，但 communicate 占主导，未完成 successful Investigation/Agreement、唯一收敛、model-error tension 对照或 World/Knot 修正。 |
@@ -338,7 +348,7 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 ## 8. 当前 blockers 与下一步
 
-1. 完成仍未关闭的 P1、P4 instrumented gates，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录；P0 strict live audit 与 P2 live temporal/order gate 已通过，P3 controlled live paired gate 已通过；P1 仍需独立 peer exactly-once/非定向对照，P4 仍需成功世界行动/收敛与 model-error tension 对照。
+1. 完成仍未关闭的 P4 instrumented gate，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录；P0 strict live audit、P1 subject-scoped peer pair、P2 live temporal/order gate 与 P3 controlled live paired gate 已通过；P4 仍需成功世界行动/收敛与 model-error tension 对照。
 2. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
 3. 将 fixture Archive/Ending 浏览器证据与真实 live Volume/API 状态分开保留；port `18734/18735` 已补上同一 live 产品 slice 的 World/Follow/Desk/Leave、Archive/Ending、最终 seal 和 cleanup，但这仍不能替代 P0–P5 proof gates。
 

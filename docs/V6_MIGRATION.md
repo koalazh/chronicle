@@ -103,6 +103,17 @@ Agreement 的 `effective_tick` 是回应抵达的 global tick，而非提交 tic
 
 定向证据位于 `tests/test_v6_content_world.py`，并与 `tests/test_v6_agency_conservation.py`、既有 Volume offer/Attention 测试一起复跑。它证明 deterministic source/fixture boundary，不证明 provider、browser 或 real Hermes。
 
+## Phase 9 harness ablation boundary
+
+| Experiment | Result | Decision |
+| --- | --- | --- |
+| `0..1` action vs multiple blind-staged actions | Host/schema 在无 prompt 帮助的直接调用中拒绝第二个 action，且没有 staged operation | 保留 `0..1`；它是 atomic cognitive boundary，未观察到可授权放宽的 coherence / spam 证据 |
+| verbose prompt reduction | promptless malformed two-action proposal 仍 fail-closed；真实 Provider 的成功率、重试率、协议错误分布尚未采样 | 保留现有低级协议提示，直到有隔离 real Hermes ablation；不把 fixture 拒绝当成模型行为 PASS |
+| authored maneuvers | 去掉 `prepare_force` 后需删除冲突引用才能让 Pack 通过，且 `enter-shanhai-pass` 仍无可达 `READY` 生产路径 | 保留 source-defined maneuver；不把它重写成通用平衡代价 |
+| fixed pressure | tick 5 pressure 的来源与确定性 effect 已验证；没有 strong-agent / Provider trajectory 实验 | 保留 `eastern-transit-window-narrows`，不宣称禁用后自然策略结果 |
+
+Phase 9 的“未运行”是证据边界，不是静默跳过：Prompt 与 autonomous fixed-pressure ablation 需要隔离 real Hermes Provider，留待 Phase 12；在此之前不能据此删掉 protocol 或 content scaffold。永久 invariants（frozen Perspective、private Knowledge、Host authority、atomicity、idempotency、causal chain、message latency、restart safety、cleanup）不参与消融。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

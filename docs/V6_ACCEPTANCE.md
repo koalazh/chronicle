@@ -116,6 +116,18 @@ Phase 7 evidence is deterministic fixture / Pack evidence. It does not prove rea
 
 Phase 8 does not claim browser, Hermes Provider or real Hermes business-chain completion.
 
+## Phase 9 Harness Ablation
+
+| Experiment | Status | Evidence / boundary |
+| --- | --- | --- |
+| one-action | PASS | Promptless direct `stage_deliberation` with two blind-staged actions is rejected before any operation; retain `0..1` |
+| authored maneuver | PASS | Removing `prepare_force` from a validated development Pack leaves `enter-shanhai-pass` without a source-defined path to `READY`; retain the maneuver |
+| verbose prompt | BOUNDED | Host/schema rejection is prompt-independent; no real Provider sample exists for a shortened prompt, so current protocol hints remain |
+| fixed pressure | BOUNDED | Source/Pack effect is verified; no strong-agent trajectory comparison with pressure disabled was run |
+| Regression | PASS | `tests/test_v6_harness_ablation.py` 2 passed; full deterministic suite, Ruff and compileall pass |
+
+Phase 9 proves only the bounded scaffold decisions above. The two `BOUNDED` rows require isolated real Hermes business evidence before any deletion.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

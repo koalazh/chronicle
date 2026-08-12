@@ -112,6 +112,17 @@ Offer / Agreement transport 现在复用同一个 Volume global clock 与既有 
 
 证据：`tests/test_v6_content_world.py` 覆盖远程 Offer / response 的路由延迟、Agreement 生效 tick、结构化 `OFFER_CHANGED` 触发与山海关压力/整备来源边界；Phase 7 agency tests、Volume offer、Attention 与完整回归均通过。该阶段仍是 deterministic fixture / source evidence，不替代 browser 或 real Hermes business chain。
 
+## Phase 9 Harness Ablation
+
+四项 ablation 按“先实验、后决定是否删除”执行：
+
+- one-action：在不提供任何 prompt 帮助的直接 Host 调用中提交两个 blind-staged `world_actions`，staging 以 `at most one action` 拒绝，Wake 没有 operation 写入；保留 `0..1`。
+- verbose prompt：promptless malformed proposal 同样由 `stage_deliberation` / Host schema 拒绝，说明低级 action 数量约束不应依赖模型记忆。真实 Hermes Provider 的“缩短 prompt 后自然成功率/重试率”实验尚未执行，因此保留 `wake_id`、tool target、offer schema 和 stop-after-tool 提示，不把静态 prompt 证据写成 live 结果。
+- authored maneuvers：删除 `prepare_force` 的开发副本必须同步删除所有 conflict 引用；即便如此，`enter-shanhai-pass` 仍要求自有 force 为 `READY`，而没有任何剩余 source-defined operation 能生成该状态。该 maneuver 是 load-bearing 场景边界，不是 generic balance cost，保留。
+- fixed pressure：Pack/pressure source test 保留 tick 5 `EXOGENOUS` pressure；没有 Provider/strong-agent 的情况下未宣称“禁用 pressure 后自主策略更好”的游戏结果，避免把静态状态差异冒充 trajectory ablation。
+
+定向 ablation tests：`tests/test_v6_harness_ablation.py` 2 passed。上述结果只授权保留或删除 harness scaffold 的最小判断；未授权删除任何 frozen Perspective、private Knowledge、Host authority、atomicity、idempotency、causal parent、message latency 或 restart invariant。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -135,7 +146,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 6 Product Continuous Agency | COMPLETE | bounded `/continue`、Human voluntary reconsideration 与 Life Desk V6 投影已实现；定向 fixture/product checks 通过，live Hermes / browser acceptance 留在后续 gate |
 | 7 Agency Conservation | COMPLETE | Source/Pack ownership audit 与越权/因果链测试通过；未发现需要生产语义修复的问题，因此不新增 architecture layer |
 | 8 Content / World Correctness | COMPLETE | Remote Offer/Agreement obey route-delivery causality; Shanhai fixed operation/pressure and Nanjing source bounds have regression evidence |
-| 9 Harness Ablation | NOT_STARTED | |
+| 9 Harness Ablation | COMPLETE | One-action and authored-maneuver ablations are source/Host bounded; prompt and autonomous fixed-pressure Provider experiments remain explicitly unrun |
 | 10 V6 Game Tests | NOT_STARTED | |
 | 11 Archive / UX | NOT_STARTED | |
 | 12 Real Hermes live acceptance | NOT_STARTED | |
@@ -148,7 +159,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 
 ## Experiments
 
-- 尚未执行 V6 ablation；Phase 0 只记录 baseline。
+- Phase 9 已执行 Host one-action 与 authored-maneuver ablation；Prompt shortening 与 autonomous fixed-pressure trajectory ablation因当前无真实 Provider 证据而明确未运行，未据此删除保护或 content scaffold。
 
 ## Accepted decisions
 

@@ -417,3 +417,90 @@ def test_gateway_controller_does_not_stop_a_reused_pid(
         controller._stop_verified(owner)
 
     assert terminated == []
+
+
+def test_gateway_controller_normalizes_owned_state_after_stop(app_config, tmp_path, monkeypatch):
+    config = replace(
+        app_config,
+        runtime_dir=tmp_path / ".chronicle-state",
+        hermes_home=tmp_path / "home-state",
+    )
+    config.hermes_home.mkdir(parents=True)
+    controller = GatewayController(config)
+    controller.owner_path.parent.mkdir(parents=True)
+    owner = {
+        "version": 1,
+        "root": str(config.root.resolve()),
+        "hermes_home": str(config.hermes_home.resolve()),
+        "run_id": "run-owned",
+        "runtime_epoch": "epoch-owned",
+        "pid": 7126,
+        "process_start_marker": "started-17",
+    }
+    controller.owner_path.write_text(json.dumps(owner), encoding="utf-8")
+    (config.hermes_home / "gateway_state.json").write_text(
+        json.dumps(
+            {
+                "kind": "hermes-gateway",
+                "hermes_home": str(config.hermes_home.resolve()),
+                "pid": 7126,
+                "gateway_state": "running",
+                "active_agents": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    alive = iter((True, False, False, False))
+    monkeypatch.setattr(controller, "_process_alive", lambda _pid: next(alive))
+    monkeypatch.setattr(controller, "_process_start_marker", lambda _pid: "started-17")
+    monkeypatch.setattr(controller, "_terminate", lambda _pid: None)
+
+    controller._stop_verified(owner)
+
+    state = json.loads((config.hermes_home / "gateway_state.json").read_text(encoding="utf-8"))
+    assert state["gateway_state"] == "exited"
+    assert state["active_agents"] == 0
+    assert state["exit_reason"] == "chronicle_cleanup"
+
+
+def test_gateway_controller_normalizes_state_when_child_already_exited(
+    app_config, tmp_path, monkeypatch
+):
+    config = replace(
+        app_config,
+        runtime_dir=tmp_path / ".chronicle-state-exited",
+        hermes_home=tmp_path / "home-state-exited",
+    )
+    config.hermes_home.mkdir(parents=True)
+    controller = GatewayController(config)
+    controller.owner_path.parent.mkdir(parents=True)
+    owner = {
+        "version": 1,
+        "root": str(config.root.resolve()),
+        "hermes_home": str(config.hermes_home.resolve()),
+        "run_id": "run-owned",
+        "runtime_epoch": "epoch-owned",
+        "pid": 7127,
+        "process_start_marker": "started-17",
+    }
+    controller.owner_path.write_text(json.dumps(owner), encoding="utf-8")
+    (config.hermes_home / "gateway_state.json").write_text(
+        json.dumps(
+            {
+                "kind": "hermes-gateway",
+                "hermes_home": str(config.hermes_home.resolve()),
+                "pid": 7127,
+                "gateway_state": "running",
+                "active_agents": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(controller, "_process_alive", lambda _pid: False)
+
+    controller._stop_verified(owner)
+
+    state = json.loads((config.hermes_home / "gateway_state.json").read_text(encoding="utf-8"))
+    assert state["gateway_state"] == "exited"
+    assert state["active_agents"] == 0
+    assert state["exit_reason"] == "chronicle_cleanup"

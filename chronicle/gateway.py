@@ -258,6 +258,7 @@ class GatewayController:
         pid = int(owner["pid"])
         if not self._process_alive(pid):
             self.owner_path.unlink(missing_ok=True)
+            self._mark_owned_gateway_state_exited(pid)
             return
         if owner.get("process_start_marker") != self._process_start_marker(pid):
             raise GatewayRuntimeError("runtime_owner_unknown")
@@ -275,6 +276,39 @@ class GatewayController:
         if self._process_alive(pid):
             raise GatewayRuntimeError("runtime_gateway_stop_failed")
         self.owner_path.unlink(missing_ok=True)
+        self._mark_owned_gateway_state_exited(pid)
+
+    def _mark_owned_gateway_state_exited(self, pid: int) -> None:
+        """Normalize Hermes' owned state file after the exact child has stopped."""
+
+        path = self.config.hermes_home / "gateway_state.json"
+        if not path.exists():
+            return
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(state, dict):
+            return
+        if (
+            state.get("kind") != "hermes-gateway"
+            or state.get("hermes_home")
+            != str(self.config.hermes_home.resolve())
+            or int(state.get("pid", 0) or 0) != pid
+        ):
+            return
+        state["gateway_state"] = "exited"
+        state["active_agents"] = 0
+        state["exit_reason"] = "chronicle_cleanup"
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(state, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
 
     def _read_owner(self) -> dict[str, Any] | None:
         return self._read_json(self.owner_path)

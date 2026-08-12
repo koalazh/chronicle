@@ -74,6 +74,19 @@ def test_frontend_keeps_a_small_mutation_lock_and_boot_error_state():
         assert required in source
 
 
+def test_frontend_does_not_expose_internal_backend_errors():
+    source = (ROOT / "web" / "api.js").read_text(encoding="utf-8")
+
+    for required in (
+        "userFacingErrorMessage",
+        "there are no due Subject Wakes to freeze",
+        "当前这一刻没有需要你处理的下一步。",
+        "当前这一刻还没有可以落笔的下一步。",
+        "请求没有完成，请稍后再试。",
+    ):
+        assert required in source
+
+
 def test_frontend_routes_only_formal_v5_pages():
     router = (ROOT / "web" / "router.js").read_text(encoding="utf-8")
 

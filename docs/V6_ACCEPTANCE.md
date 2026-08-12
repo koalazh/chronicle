@@ -92,6 +92,17 @@ Phase 5 deterministic evidence does not prove Provider behavior, continuous `/co
 
 上述 PASS 只覆盖 deterministic fixture / product surface；尚未证明 Provider 行为、P6/P7/P8/P9 完整 trajectory、browser 多视口或 live Hermes business chain。
 
+## Phase 7 Agency Conservation
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| Subject / Institution / Claimant separation | PASS | Pack contract test confirms each Nanjing operation actor set, owned assets, claimant entities and no claimant Lifetime/Profile |
+| cross-subject refusal | PASS | Ma attempting `formalize_fu_regency` is rejected at staging with `operation_authority_denied`; no institution state mutation |
+| effect ownership / causal chain | PASS | `make_fu_backing_visible` completion and entity effect retain `seat_id=ma-shiying`, with effect parent equal to `OPERATION_COMPLETED` |
+| source-first scope | PASS | No generic agency layer, extra Agent, or unsupported mechanism added; existing Pack descriptions remain the authority |
+
+Phase 7 evidence is deterministic fixture / Pack evidence. It does not prove real Hermes trajectories or replace the Phase 8 content audit.
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

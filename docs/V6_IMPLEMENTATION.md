@@ -98,6 +98,12 @@ Life Desk 保留原页面和兼容字段，并新增用户语义投影：`curren
 
 定向证据：`tests/test_v6_continuous_agency.py` 覆盖连续推进到 Human Attention、当前 tick voluntary reconsideration（无 `TIME_ADVANCED`）与 Life Desk 五段投影；product shell、frontend copy 和 syntax checks 仍通过。该证据是 fixture / deterministic product evidence，不构成 real Hermes、browser 多视口或真人验收证明。
 
+## Phase 7 Agency Conservation
+
+本阶段先做 World transition ownership audit，没有因为“看起来更完整”新增通用 agency layer。现有 Pack 已明确区分：主体自有或受托可见资产、Institutional procedure、Claimant entity 与 deterministic Resolution。`make_fu_backing_visible` 只由马士英作用于其拥有的 `jiangbei-military-backing` 抽象；`arrange_*_entry` 是有来源边界的有限程序动作，不创建福王/潞王 Persistent Lifetime；制度承认和公开文书只由韩赞周在明确 prerequisites / endorsement Agreement 满足后提交。
+
+新增 `tests/test_v6_agency_conservation.py` 固定三条可复核边界：南京 operation actor 与 claimant/institution 分离、马士英越权提交制度承认在 staging 时被 `operation_authority_denied` 拒绝且不改变制度状态、主体拥有的行动效果保留 actor `seat_id` 与 completion causal parent。由于当前源码已满足审计结果，本阶段没有引入 generic Political DSL、额外 Agent 或无来源机制。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -119,7 +125,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 4 Context Compiler | COMPLETE | Frozen Perspective 增加 reality-first 六段；contrary background fact 保留，旧 V5 bounded context 与 privacy 边界保持 |
 | 5 Deliberation Protocol | COMPLETE | `commit_deliberation` 支持 HOLD/REVISE、证据门槛、typed dependency update、0..1 action 与 restart-safe atomic commit |
 | 6 Product Continuous Agency | COMPLETE | bounded `/continue`、Human voluntary reconsideration 与 Life Desk V6 投影已实现；定向 fixture/product checks 通过，live Hermes / browser acceptance 留在后续 gate |
-| 7 Agency Conservation | NOT_STARTED | |
+| 7 Agency Conservation | COMPLETE | Source/Pack ownership audit 与越权/因果链测试通过；未发现需要生产语义修复的问题，因此不新增 architecture layer |
 | 8 Content / World Correctness | NOT_STARTED | |
 | 9 Harness Ablation | NOT_STARTED | |
 | 10 V6 Game Tests | NOT_STARTED | |

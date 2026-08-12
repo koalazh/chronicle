@@ -87,6 +87,12 @@ affordances
 
 Life Desk 的新增投影来自同一个 actor-scoped `LifetimeContextBuilder`，不新建页面或平行状态：此前 Course、deliberation 后的 Knowledge、reopen 的真实事实、binding reality 和 uncertainty。内部 `reason_code`、Wake、Profile、Hermes、MCP 等字段不进入产品投影。
 
+## Phase 7 ownership audit boundary
+
+Agency audit 的分类结果保持在现有 Pack / Host contract 内：`SUBJECT` 只能通过自己的 authority 与 owned/delegated target 发起 action；`AGREEMENT` 由双方可见的结构化承诺建立并以其事件作为后续 action 的前置；`INSTITUTION` 只在来源支持的 procedure operation 中变化；`DETERMINISTIC_WORLD` / `RESOLUTION` 继续由 Host / resolver 改写。南京候选仍是 Claimant entity，不因 entry operation 变成可被 Host 代演的 Persistent Lifetime；山海关的 movement / pass 仍由 actor authority、route 和 agreement 约束。
+
+Phase 7 没有发现需要补一层 generic agency system 的真实缺口。越权尝试必须在 staging 前拒绝，合法 operation 的 state effect 必须保留 actor seat 与 causal parent；这些边界由 `tests/test_v6_agency_conservation.py` 固定。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

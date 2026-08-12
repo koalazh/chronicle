@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from chronicle import world_mcp
 from chronicle.host import ChronicleHost
 from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
 from chronicle.world import token_hash
+
+
+def test_update_plan_mcp_schema_allows_evidence_event_ids():
+    annotation = inspect.signature(world_mcp.update_plan).parameters["belief_updates"].annotation
+
+    assert "Any" in str(annotation)
 
 
 def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config):

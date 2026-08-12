@@ -175,7 +175,7 @@ def update_plan(
     steps: list[str],
     idempotency_key: str,
     rationale: str = "",
-    belief_updates: list[dict[str, str] | str] | None = None,
+    belief_updates: list[dict[str, Any] | str] | None = None,
     rationale_source: str = "",
     belief_source: str = "",
     reconsider_when: list[str] | None = None,

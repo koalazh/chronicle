@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup、P0 正向候选与 fresh-session/title 修复、Archive/Ending 浏览器 proof；P1–P5 与完整 live V5 业务链仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup、P0 正向候选与 fresh-session/title 修复、Archive/Ending 浏览器 proof、Volume 世界工具进入 Pending Logical Moment；P1–P5 与完整 live V5 业务链仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -142,6 +142,17 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 | final live Volume seal / cleanup | PASS；独立 live Volume 在 tick 10、`n013` 已应用、3 个 Crisis 已 settlement 且无 pending/in-transit Wake 后写入 `VOLUME_SEALED`；bindings 全部 `REVOKED`、6 个 owned Profile 目录清空、Gateway owner 清除 |
 
 这证明 Hermes 基础运行资源和一条真实 V5 Agent Wake 在隔离目录可工作，并实际经过 V5 MCP staging 与原子 Logical Moment commit。它仍没有证明 Human↔Hermes continuity、跨 Subject 行为差异、Learning、完整 message/settlement braid 或 Volume Ending。
+
+### Volume world-tool bridge：investigate
+
+在独立临时 Volume、SQLite、Hermes Home 和 loopback port `18717` 上，以当前 `d2cbeac` 运行真实 Hermes 工具调用验证：
+
+- tick 1 的吴三桂 Wake 冻结到一个 Pending Logical Moment；同一 Lifetime Profile 创建 fresh Session；
+- 真实 Hermes 只调用一次 Profile 专属 `chronicle-world` MCP 的 `investigate`，参数为关口态势、`shanhai-pass`、`courier_report`；数据库记录 `tool_name=investigate`、`status=PROPOSED`、`definition_id=shanhai-pass-report`、预计 tick `3`；
+- 为同一 slice 的其它 due Wakes 提交显式 `wait` 后，Host 产生 `INTENT_COMMITTED` → `INVESTIGATION_STARTED` → `MOMENT_COMMITTED`，没有绕过 Pending Moment 直接写 Crisis 状态；
+- 只记录响应 hash `22f9fb673d22ca5c`、Session ID 和脱敏事件字段；Gateway owner 在 finally 中定向停止，端口复核无残留监听。
+
+该运行证明 Volume 世界工具已穿过真实 Hermes → Profile MCP → Host staging → atomic Moment commit 的边界；它仍只是工具链/单 Wake evidence，不是 P1/P3 live paired proof、P4 连续 trajectory 或完整 live V5 acceptance。
 
 ### P0 positive candidate：same Profile / fresh Session
 

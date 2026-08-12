@@ -44,6 +44,25 @@ def _behavior_fingerprint(event: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(event.get(key) for key in _BEHAVIOR_KEYS)
 
 
+def _valid_public_evidence(event: dict[str, Any]) -> bool:
+    evidence = event.get("public_evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return False
+    event_tick = event.get("tick")
+    if not isinstance(event_tick, int):
+        return False
+    for item in evidence:
+        if not isinstance(item, dict):
+            return False
+        if not isinstance(item.get("id"), str) or not item["id"]:
+            return False
+        if not isinstance(item.get("kind"), str) or not item["kind"]:
+            return False
+        if not isinstance(item.get("tick"), int) or item["tick"] > event_tick:
+            return False
+    return True
+
+
 def evaluate(payload: dict[str, Any]) -> dict[str, Any]:
     trace = payload.get("trace")
     if not isinstance(trace, list) or not trace:
@@ -52,16 +71,19 @@ def evaluate(payload: dict[str, Any]) -> dict[str, Any]:
         return {"verdict": "NEEDS_WORK", "reason": "hidden_controller_label_exposed"}
     if any(not isinstance(event, dict) for event in trace):
         return {"verdict": "NEEDS_WORK", "reason": "trace_events_must_be_objects"}
+    if any(
+        not isinstance(event.get("tick"), int)
+        or not isinstance(event.get("subject"), str)
+        or not event.get("subject")
+        for event in trace
+    ):
+        return {"verdict": "NEEDS_WORK", "reason": "public_trace_shape_invalid"}
 
     unexplained: list[dict[str, Any]] = []
     for index, (previous, current) in enumerate(zip(trace, trace[1:], strict=False), start=1):
         if _behavior_fingerprint(previous) == _behavior_fingerprint(current):
             continue
-        has_public_cause = bool(
-            current.get("cause")
-            or current.get("public_evidence")
-            or current.get("deterministic_transition")
-        )
+        has_public_cause = _valid_public_evidence(current)
         if not has_public_cause:
             unexplained.append(
                 {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 from dataclasses import replace
@@ -14,6 +15,11 @@ BOUNDARY_EVALUATOR = (
     / "scripts"
     / "v5_controller_boundary_evaluator.py"
 )
+PUBLIC_TRACE_EXPORTER = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "v5_export_public_trace.py"
+)
 
 
 def _blind_evaluate(trace: list[dict[str, object]]) -> tuple[int, dict[str, object]]:
@@ -25,6 +31,44 @@ def _blind_evaluate(trace: list[dict[str, object]]) -> tuple[int, dict[str, obje
         check=False,
     )
     return completed.returncode, json.loads(completed.stdout)
+
+
+def test_public_trace_exporter_only_emits_public_event_fields(tmp_path):
+    database = tmp_path / "public-trace.db"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE worldline_events (
+            sequence INTEGER PRIMARY KEY,
+            id TEXT NOT NULL,
+            worldline_id TEXT NOT NULL,
+            tick INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+        INSERT INTO worldline_events VALUES
+        (1, 'public-1', 'volume-1', 2, 'MESSAGE_DELIVERED',
+         '{"recipient":"shi-kefa","message_id":"message-1","content":"public"}'),
+        (2, 'private-1', 'volume-1', 2, 'INTENT_COMMITTED',
+         '{"seat":"shi-kefa","source":"human","intent":{"type":"wait"}}');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    completed = subprocess.run(
+        [sys.executable, str(PUBLIC_TRACE_EXPORTER), str(database), "volume-1"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert len(payload["trace"]) == 1
+    assert payload["trace"][0]["action"] == "MESSAGE_DELIVERED"
+    assert "content" not in payload["trace"][0]
+    assert "human" not in completed.stdout.lower()
 
 
 def _two_subject_pending_moment(app_config, suffix: str):
@@ -192,14 +236,18 @@ def test_controller_boundary_uses_blind_external_evaluator(app_config):
             "subject": dorgon["seat"],
             "action": "wait",
             "public_state": "same_pending_trigger",
-            "cause": "same_pending_trigger",
+            "public_evidence": [
+                {"id": "trigger-1", "kind": "public-trigger", "tick": 1}
+            ],
         },
         {
             "tick": 1,
             "subject": dorgon["seat"],
             "action": "wait",
             "public_state": "same_pending_trigger",
-            "cause": "same_pending_trigger",
+            "public_evidence": [
+                {"id": "trigger-1", "kind": "public-trigger", "tick": 1}
+            ],
         },
     ]
     return_code, result = _blind_evaluate(public_trace)
@@ -216,3 +264,18 @@ def test_controller_boundary_uses_blind_external_evaluator(app_config):
     assert bad_code == 1
     assert bad_result["verdict"] == "NEEDS_WORK"
     assert bad_result["reason"] if "reason" in bad_result else bad_result["unexplained_discontinuities"]
+
+    malformed_code, malformed_result = _blind_evaluate(
+        [
+            {"tick": 1, "subject": "dorgon", "action": "wait"},
+            {
+                "tick": 1,
+                "subject": "dorgon",
+                "action": "message",
+                "public_evidence": "unverified",
+            },
+        ]
+    )
+    assert malformed_code == 1
+    assert malformed_result["verdict"] == "NEEDS_WORK"
+    assert malformed_result["unexplained_discontinuities"]

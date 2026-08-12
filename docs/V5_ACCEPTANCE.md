@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup、P0 正向候选与 fresh-session/title 修复、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment；P1–P5 与完整 live V5 业务链仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup、P0 正向候选与 fresh-session/title 修复、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录，以及离席后 Agent 接管 Pending Moment 的产品修复；P1–P5 与完整 live V5 业务链仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -118,6 +118,18 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 - 四种尺寸均捕获 Archive/Ending 截图；Ending 检查时 11 个按钮均可聚焦、有可访问名称、无 disabled mutation；浏览器 dev logs 为 `[]`。
 
 该证据是 fixture/API 的产品 UI proof，不是真实 live Hermes cognition 或真实 live API acceptance。期间发现 sealed VOLUME 未被 `/api/worldlines` 列出，已以最小路由修复和回归测试提交 `b8f22a4`。
+
+### 真实 live Product Shell / API：port `18734`，Gateway `18735`
+
+2026-08-12 在另一组隔离 SQLite、Hermes Home、runtime owner 和 loopback ports 上，以产品默认 `live=true` 走了真实浏览器链：
+
+- 首页点击“开始这一卷”真实创建一个 VOLUME，并物化 6 个 Lifetime-scoped Hermes Profiles；浏览器页面只显示 Volume、World、Follow、Life Desk 等普通用户文案，没有 Agent/Profile/Session/Memory 内部术语；
+- `Follow → Inhabit` 进入吴三桂的真实 Life Desk；tick 1 的真实 Human Wake 通过空白 wait 提交 `INTENT_COMMITTED → MOMENT_COMMITTED`，随后 Leave；
+- 离席后真实 Hermes Profiles 在同一 Volume 继续：Dorgon tick 3、Wu tick 5、Dorgon tick 7、Wu tick 9 形成 fresh Session 与延迟消息；tick 9 historical Field 应用，tick 10 三个南方 Lifetime 收到跨 Knot 公开军情并分别选择 investigate / wait / operate，其中权限或可用性拒绝写成 `INTENT_REJECTED`，没有破坏 atomic Moment；
+- 同一 live Worldline `worldline-52d33bd7ff68415c` 在本 slice 记录了 6 个 `MOMENT_FROZEN`、6 个 `MOMENT_COMMITTED`、8 个 `INTENT_COMMITTED`、9 个 `MESSAGE_DISPATCHED`、8 个 `MESSAGE_DELIVERED`，并在 tick 10 仍保持可继续的 ACTIVE Volume；第一 Crisis 在 Profiles 仍存活时 settlement，Worldline 继续保持 ACTIVE；随后两个 Crisis settlement、最后在途消息 delivery 和 boundary wait 将它推进到 tick 19；
+- 新建的 fresh Browser tab 在 tick 10 能读到真实 World 页面；随后同一 live API 真实打开 Archive → Public Replay → 吴三桂 Lifetime Replay，四个 viewport 均无横向 overflow，浏览器 dev logs 为 `[]`。tick 19 的正式 `VOLUME_SEALED` 之后，6 个 bindings 变为 `REVOKED`、owned Profile 目录被清理、Gateway owner 被精确停止。
+
+这条记录证明真实 live API 与用户可见 shell 已接通同一 Volume/Host/MCP 边界；它不把浏览器可见 tick 或一条 off-screen causal chain 误当成 P0–P5 全部通过。原运行资源在本记录完成后按精确 owner/runtime 归属停止并清理。
 
 ## 5. Hermes live evidence
 
@@ -213,18 +225,50 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 随后新增的单一连续 port `18718` sample 记录了同一 Volume 内 `14` 个 Hermes Wake、`9` 个 Moment，以及 Investigation、Operation、Offer、Agreement、delayed Field message 和多种 `logical_intent`。但行动由显式验收指令定向，不能把工具覆盖率直接解释成主体自主偏好；尚未完成无指导行为样本、dominant-action/无尽协商判定、模型错误张力对照和必要的 World/Knot 修正。因此 P4 仍为 PARTIAL，不升级为 PASS。
 
+### P1 directed live candidate：port `18727`
+
+在独立 live Volume 中，两个真实 Lifetime Profile 针对同一个第三方 `fu-prince` 分别提交了真实 `update_plan`：
+
+- 两个 Wake 的 `trigger_event_id` 不同，且各自携带 1 条 actor-visible evidence；
+- 两个 belief assessment hash 不同（`fb6501c43d4e059d` / `7bfe4802aa098eba`），分别形成不同的 expectation；
+- 两个 plan objective/action 不同；每个 Wake 都经过 `INTENT_COMMITTED → PLAN_UPDATED → BELIEF_UPDATED → MOMENT_COMMITTED`，Gateway owner exact stop 通过。
+
+这是同一第三方、不同 evidence/expectation/action 的真实 live directed candidate，但 action 由验收指令定向，尚未完成独立 controller/peer exactly-once 对照；P1 保持 PARTIAL。
+
+### P2 live order-independence pair：ports `18722` / `18723`
+
+两条独立 live Volume 使用相同 Pending Logical Moment，分别以 Human-first 与 Agent-first 顺序 staging；两边最终 semantic projection 相等：
+
+```text
+INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
+```
+
+两边均为 tick 1、无遗留 pending moment、相同 seat/tool 结果，Gateway owner 均精确停止。它补上了 P2 的执行顺序 paired evidence，但仍与 port `18715` 的延迟消息时间序列分开，P2 保持 PARTIAL candidate。
+
+### P3 live memory-ablation negative pair：ports `18720` / `18721`
+
+一条 live Profile 带相关过去、一条移除相关过去；两边的 frozen context 确实不同，但真实 Hermes 两边均未产生可接受的 action，driver 按协议 fail-closed，未偷偷生成默认 wait。Gateway/Profiles 均清理成功。
+
+这证明了 memory 输入差异和失败边界，没有证明 `past experience → evidence-backed expectation → later retrieval → materially different action`；P3 仍为 NOT PROVEN。
+
+### P4 undirected live attempts：ports `18732` / `18733` / `18737`
+
+三次普通执行尝试让真实 Hermes 自主选择世界工具，不指定具体工具。前两次在首个 Wake fail-closed；第三次采用“初始 Human Wu wait/leave、后续 Agent 自主继续”的真实边界，Dorgon 首个 Wake 仍未提交 `logical_intent`。所有运行均没有用默认 wait 填充，并完成精确 Gateway/Profile 清理。
+
+这些是有效的负向协议与稳定性证据，不能被计作 10–20 条自主 trajectory；P4 仍以 port `18718` 的 directed continuous sample 作为 PARTIAL，不升级为 PASS。
+
 ### 隔离边界
 
-以上 harness 使用独立临时 SQLite、Hermes Home 和 loopback 端口（历史真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`；新增连续 live sample 使用 `18718`，Human Wake slice 使用 `18719`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
+以上 harness 使用独立临时 SQLite、Hermes Home、runtime owner 和 loopback 端口（历史真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`；新增连续 live sample 使用 `18718`，Human Wake slice 使用 `18719`，memory pair 使用 `18720/18721`，order pair 使用 `18722/18723`，P1 directed candidate 使用 `18727`，live browser shell 使用 `18734/18735`，undirected attempts 使用 `18732/18733/18737`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 退出后清理。
 
 ## 6. P0–P5 Proof Gates
 
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
 | P0 Subject Proof | **PARTIAL（隔离正向候选）** | port `18668` 真实完成同一 Wu Profile 的 `AGENT → HUMAN → AGENT → HUMAN`；同 Profile、2 个 Session、Human plan、后续 Hermes plan/belief/evidence、Dorgon off-screen message 与最终 Human 均有 committed evidence。仍缺 controller-switch 对照，以及 obligations/plans/revisits 的严格逐项复核，因此不把 P0 正式 gate 标成 PASS。 |
-| P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
-| P2 Temporal Proof | **PARTIAL（live candidate）** | port `18715` 已真实完成延迟消息 tick 1 dispatch、B 在 tick 3 先决策、tick 4 arrival、B 新 Session 回信和 tick 5 Wu re-entry；tick 3 frozen perspective 未包含正文。仍缺 Human/Agent 同 slice 的 live order-independence paired proof。 |
-| P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |
+| P1 Multi-Subject Proof | **PARTIAL（directed live candidate）** | port `18727` 已有两个真实 Profiles 针对同一 `fu-prince` 的不同 evidence hash、belief assessment、plan/action，并通过 atomic Moment；仍缺独立 controller/peer exactly-once 对照与非定向行为边界。 |
+| P2 Temporal Proof | **PARTIAL（temporal candidate + order pair）** | port `18715` 已完成延迟消息时间序列，ports `18722/18723` 已完成 Human-first/Agent-first semantic equality；两类证据仍未在同一完整 acceptance Run 关联，故不标 PASS。 |
+| P3 Learning Causality | **NOT PROVEN（negative live pair）** | ports `18720/18721` 证明 frozen memory context 不同且两边 fail-closed，但没有 materially different live action。 |
 | P4 Game Proof | **PARTIAL（14 条单一连续 Run + 12 条历史样本）** | port `18718` 在一个 Volume 内记录 14 个真实 Hermes Wake/9 个 Moment，并覆盖 Investigation/Operation/Offer/Agreement/Field message；但行动由显式验收指令定向。尚缺无指导行为判定、dominant-action/无尽协商、模型错误张力对照和必要的 World/Knot 修正。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
 
@@ -232,20 +276,20 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 计划要求同一真实 V5 中记录以下项目；当前均未形成完整可关联链：
 
-- 4+ persistent Profiles（port `18718` materialize 6 个并使用其中 5 个完成真实 Wake；跨多次缺席的连续性仍未完整记录）；
+- 4+ persistent Profiles（port `18718` materialize 6 个并使用其中 5 个完成真实 Wake；port `18734/18735` 另在产品浏览器中 materialize 6 个并完成真实 Human→Leave→off-screen chain；跨多次缺席的连续性仍未完整记录）；
 - 初次 Human Life 的 dormant Profile；
 - 0 mandatory ORIENT（已通过单次 live V5 创建与 Wake 证据）；
 - 至少一条真实 `logical_intent` staging → `INTENT_COMMITTED` → `MOMENT_COMMITTED`（已通过单次 live V5 证据）；
 - Human→Hermes handoff、same Profile、fresh Session（P0 隔离正向候选已通过：同一 Wu Profile、2 个 Session）；
 - Human plan 进入后续 Hermes context，并在新 evidence 后形成不同的后续 plan/belief（P0 隔离正向候选已记录）；
 - off-screen Dorgon Agent 产生 `MESSAGE_DISPATCHED`（P0 隔离正向候选已记录）；
-- delayed message、operation/offer crossing through the shared Volume graph、off-screen Agent↔Agent causal chain（port `18718` 已有部分连续证据，尚未形成完整 acceptance chain）；
+- delayed message、operation/offer crossing through the shared Volume graph、off-screen Agent↔Agent causal chain（port `18718` 有 directed continuous coverage，port `18734/18735` 有真实产品 API 的 Agent↔Agent delayed-message chain，尚未形成同一条最终 seal acceptance chain）；
 - evidence-backed past affecting future；
-- Crisis settlement 后 Profiles 仍存活；
+- Crisis settlement 后 Profiles 仍存活（port `18734/18735` 在 tick 10 的第一 Crisis settlement 后仍保持 ACTIVE，随后同一 slice 才在 tick 19 seal）；
 - second Crisis / later Knot continuation；
 - later cross-crisis knowledge arrival；
-- final Volume seal；
-- seal 之后才 revoke/clean owned Profiles（独立 live boundary harness 已通过；仍不等于完整 live cognition chain）。
+- final Volume seal（port `18734/18735` 同一 live slice 在 tick 19 通过 boundary 后完成）；
+- seal 之后才 revoke/clean owned Profiles（port `18734/18735` 记录了 `VOLUME_SEALED` 后 6 bindings revoke、owned Profile cleanup 和 Gateway stop；仍不等于 P0–P5 全部通过）。
 
 当前不能用 preflight、fixture 或旧 V4 live runtime 填充这些空项。
 
@@ -253,6 +297,6 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 1. 在同一临时 live Run 上完成 P1–P4 的 instrumented proof，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录；已有 `18718` 连续工具链与 `18719` Human Wake 补强，但 P0 仍需 controller ablation/严格 obligations-plans-revisits 对照，P1/P2/P3/P4 仍需各自的 paired 或无指导行为 gate。
 2. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
-3. 将已通过的 Archive/Ending fixture 浏览器证据与真实 live Volume/API 状态分开保留；真实 live API 下的最终状态表现仍未证明。
+3. 将 fixture Archive/Ending 浏览器证据与真实 live Volume/API 状态分开保留；port `18734/18735` 已补上同一 live 产品 slice 的 World/Follow/Desk/Leave、Archive/Ending、最终 seal 和 cleanup，但这仍不能替代 P0–P5 proof gates。
 
 在以上 blocker 关闭前，不能把本文件状态改成 `COMPLETE`，也不能把 README、产品发布说明或 commit message 写成“V5 已完成”。

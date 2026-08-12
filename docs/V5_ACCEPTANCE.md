@@ -157,6 +157,18 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 此前在独立临时 Volume 上尝试 P0 候选链时，真实模型连续两次没有提交 `logical_intent`；驱动执行一次同一 fresh Session 的协议修复后仍 fail-closed，未生成隐式 `wait`，随后精确 Gateway stop 通过。该次仍保留为负向运行证据：说明协议边界有效，不覆盖后续已通过的正向候选。
 
+### P1/P2 live candidate：different actions and temporal reconsideration
+
+随后在另一独立临时 Volume、Hermes Home、loopback port `18715` 运行一个带延迟消息的 live slice：
+
+- tick 1：Human Wu 在收到李自成来信后，真实提交向多尔衮发送的 `MESSAGE_DISPATCHED`，delivery tick 为 `4`，随后离席；
+- tick 3：多尔衮先收到 tick 0 的山海关求援信并以新的 Hermes Session 完成 `PLAN_UPDATED`/`BELIEF_UPDATED`；tick 3 的 frozen perspective 不包含 tick 1 延迟消息正文；
+- tick 4：延迟消息抵达，多尔衮才首次看到正文，真实产生另一 Hermes Session，并以一封回信重新行动；tick 4 的 plan/action 相比 tick 3 增加了对补充请求的复核步骤；
+- tick 5：吴三桂再次以 Hermes Session 唤醒，读取多尔衮回信并形成不同的保全所部/维持自主计划与 evidence-backed belief；
+- tick 10：韩赞周、马士英、史可法在同一公开 n013 军情到达后，真实分别形成程序连续、现实军政支持、程序与江北推进三种不同计划；同片中也有主体选择 `wait` 的轨迹。
+
+这为 P2 的 `A sends → B decides before arrival → arrival → B reconsiders` 提供了真实 live 候选，并证明到达前的冻结视角没有泄漏正文；也为 P1 的多主体不同 evidence/expectation/action 提供候选材料。P1 仍未正式通过，因为“同一第三方”的逐项证据映射与 exactly-once peer expectation 对照尚未独立完成；P2 仍未正式通过，因为 Human/Agent 同 slice 的执行顺序成对等价测试尚未在 live 上完成。所有临时 Gateway 均按 owner/runtime epoch 定向停止。
+
 在完成逐 Profile `/v1/models` 与 `/v1/toolsets` warm-up 后，于独立端口 `18651` 重复该候选，结果相同；因此当前证据不支持把失败归因于 Gateway/MCP 冷启动竞态。
 
 ### 隔离边界
@@ -169,7 +181,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 | --- | --- | --- |
 | P0 Subject Proof | **PARTIAL（隔离正向候选）** | port `18668` 真实完成同一 Wu Profile 的 `AGENT → HUMAN → AGENT → HUMAN`；同 Profile、2 个 Session、Human plan、后续 Hermes plan/belief/evidence、Dorgon off-screen message 与最终 Human 均有 committed evidence。仍缺 controller-switch 对照，以及 obligations/plans/revisits 的严格逐项复核，因此不把 P0 正式 gate 标成 PASS。 |
 | P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
-| P2 Temporal Proof | **PARTIAL / NOT COMPLETE** | 单 Wake live 与 deterministic message transit/delivery 已有证据；尚无真实 `A sends → B decides before arrival → arrival → B reconsiders`，也尚无 Human/Agent 同 slice 的 live order-independence proof。 |
+| P2 Temporal Proof | **PARTIAL（live candidate）** | port `18715` 已真实完成延迟消息 tick 1 dispatch、B 在 tick 3 先决策、tick 4 arrival、B 新 Session 回信和 tick 5 Wu re-entry；tick 3 frozen perspective 未包含正文。仍缺 Human/Agent 同 slice 的 live order-independence paired proof。 |
 | P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |
 | P4 Game Proof | **NOT RUN** | 尚无一个 Knot 的 10–20 条 live Hermes trajectory，也没有 Investigation/Wait/Agreement/tension 观察记录。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |

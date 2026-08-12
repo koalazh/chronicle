@@ -21,7 +21,7 @@ def test_volume_pack_owns_lifetimes_shared_world_and_crisis_participants():
         "han-zanzhou",
     }
     assert len(pack.world.locations) == 15
-    assert len(pack.world.routes) == 11
+    assert len(pack.world.routes) == 16
     assert pack.world.resolve_location("beijing") == "capital"
 
     assert pack.pack("before-shanhaiguan").participant_ids == [

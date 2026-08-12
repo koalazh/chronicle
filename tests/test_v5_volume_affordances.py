@@ -121,6 +121,15 @@ def test_volume_operation_offer_and_revisit_survive_commit(app_config):
     ]
     assert offer["status"] == "accepted"
     assert state["offers"][0]["status"] == "PROPOSED"
+    assert runtime.next_tick(worldline_id) == runtime.worldline(worldline_id)["worldline"]["current_tick"] + 1
+    advanced_offer = runtime.advance_one(worldline_id)
+    assert advanced_offer["tick"] == 4
+    offer_wakes = [
+        wake
+        for wake in runtime.db.subject_wakes(worldline_id, tick=4)
+        if wake["wake_type"] == "OFFER_CHANGE"
+    ]
+    assert len(offer_wakes) == 1
 
     revisit_runtime, revisit_worldline_id, revisit_wu = _runtime(
         app_config, "world-stateful-tools-revisit"

@@ -2473,7 +2473,10 @@ class VolumeRuntime:
                     "id": f"{worldline_id}:wake:{trigger_event_id}:{actor_id}:{wake_type}",
                     "actor_id": actor_id,
                     "wake_type": wake_type,
-                    "tick": tick,
+                    # Offer/Agreement changes are committed after the current
+                    # actor slice.  A same-tick Wake would not be picked up by
+                    # the global clock once this Moment is cleared.
+                    "tick": tick + 1,
                     "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
                     "source": "volume-offer",
                     "trigger_event_id": trigger_event_id,

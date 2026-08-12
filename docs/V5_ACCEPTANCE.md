@@ -169,6 +169,12 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 这为 P2 的 `A sends → B decides before arrival → arrival → B reconsiders` 提供了真实 live 候选，并证明到达前的冻结视角没有泄漏正文；也为 P1 的多主体不同 evidence/expectation/action 提供候选材料。P1 仍未正式通过，因为“同一第三方”的逐项证据映射与 exactly-once peer expectation 对照尚未独立完成；P2 仍未正式通过，因为 Human/Agent 同 slice 的执行顺序成对等价测试尚未在 live 上完成。所有临时 Gateway 均按 owner/runtime epoch 定向停止。
 
+### P4 live sample：before-shanhaiguan Knot
+
+把 `18668`、`18713`、`18714`、`18715`、`18716` 五个相互隔离的 live Volume 运行按同一 `before-shanhaiguan` Knot 汇总，得到 12 个 Hermes Wake trajectory（另有 2 个 Human trajectory）：`update_plan` 9 次、`message` 3 次、`wait` 0 次。该样本没有出现 Investigation/Agreement 工具路径，也没有看到模型自动收敛到唯一答案；它是小样本行为观察，不是 benchmark，也不证明 tension 已脱离模型错误。
+
+该记录把 P4 从 `NOT RUN` 推进为 partial candidate，但样本来自多个独立 Volume 而不是一条连续 10–20 trajectory run，且尚未完成预先定义的 dominant-action/World-Knot 修正判定，因此不把 P4 gate 标成 PASS。
+
 在完成逐 Profile `/v1/models` 与 `/v1/toolsets` warm-up 后，于独立端口 `18651` 重复该候选，结果相同；因此当前证据不支持把失败归因于 Gateway/MCP 冷启动竞态。
 
 ### 隔离边界
@@ -183,7 +189,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 | P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
 | P2 Temporal Proof | **PARTIAL（live candidate）** | port `18715` 已真实完成延迟消息 tick 1 dispatch、B 在 tick 3 先决策、tick 4 arrival、B 新 Session 回信和 tick 5 Wu re-entry；tick 3 frozen perspective 未包含正文。仍缺 Human/Agent 同 slice 的 live order-independence paired proof。 |
 | P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |
-| P4 Game Proof | **NOT RUN** | 尚无一个 Knot 的 10–20 条 live Hermes trajectory，也没有 Investigation/Wait/Agreement/tension 观察记录。 |
+| P4 Game Proof | **PARTIAL（12 条跨隔离 Run 样本）** | 同一 `before-shanhaiguan` Knot 汇总 12 个 Hermes Wake trajectory：`update_plan` 9、`message` 3、`wait` 0；未出现 Investigation/Agreement。尚缺单一连续 Run、预先定义的行为判定和必要的 World/Knot 修正。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
 
 ## 7. Live V5 acceptance checklist

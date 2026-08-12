@@ -84,7 +84,7 @@ fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message 
 - 项目工作树、项目数据库和默认 Hermes Home：未作为目标；
 - V5 Wake：真实 Profile 通过 `logical_intent` MCP staging 一个意图，随后产生 `MOMENT_COMMITTED`；Gateway teardown 在定向校验 owner/PID 起始标识后 clean PASS。
 
-这是一条真实 V5 最小业务链证据，不是完整 V5 live acceptance。后续隔离运行已补充 P0 正向候选与 P2 延迟消息候选：同一 Wu Profile 的 fresh Session handoff、A 先发消息/B 先决策/消息抵达后重新行动，以及 tick 10 多主体不同计划；但它们仍不能替代 P1/P3/P4/P5 的完整 proof。
+这是一条真实 V5 最小业务链证据，不是完整 V5 live acceptance。后续隔离运行已补充 P0 正向候选、P2 延迟消息候选和同一 Knot 的 12 条 Hermes Wake 小样本：同一 Wu Profile 的 fresh Session handoff、A 先发消息/B 先决策/消息抵达后重新行动、tick 10 多主体不同计划，以及 `update_plan`/`message` 行为分布；但它们仍不能替代 P1/P3/P4/P5 的完整 proof。
 
 ## 6. Volume 运行生命周期
 

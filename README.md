@@ -21,7 +21,7 @@ Phase 0–11 已按 V5 计划完成并分别提交；当前仓库已经有 V5 Vo
 - Source Pack、Scenario Pack、Volume Pack、Python/JS 静态检查和确定性测试通过；
 - 隔离临时目录中，Hermes v0.20.0 可以 materialize 6 个 Lifetime Profile，并通过私有 Gateway、Profile 路由、fresh Session 和真实 V5 `logical_intent` Wake 提交到原子 Logical Moment；
 - 当前已验证一条真实 V5 Agent Wake 和 product router 的 live continue，但尚未完成跨 Human/Hermes、跨 Subject、学习、长期 Knot 和产品试玩证明；
-- P0–P5 行为性验收、新 Archive/Ending 浏览器流程和 1440/1280/768/390 响应式证据尚未通过，因此不宣称 Definition of Done。
+- P0–P5 行为性验收仍未全部通过；Archive/Ending 已有独立 fixture 浏览器流程和 1440/1280/768/390 响应式证据，但真实 live API 状态与完整 live V5 因果链仍未证明，因此不宣称 Definition of Done。
 
 ## 用户看到什么
 

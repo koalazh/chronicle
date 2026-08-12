@@ -117,4 +117,4 @@ Chronicle 是可交互的历史文书，不是策略游戏 HUD、地图编辑器
 - Archive/Ending 在手机仍可读，public/lifetime replay 层次不混淆；
 - 不出现 Agent/Profile/Session/Memory 技术术语、crisis dashboard、meter 或 AI thinking animation。
 
-本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；Phase 11 新增的 Archive/Ending 和四种 viewport 尚未在本轮形成浏览器证据，见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+本仓库已有 Phase 10 的隔离浏览器流程证据，覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；2026-08-12 在独立 fixture 上补充了 Phase 11 Archive/Ending 的 sealed/unsealed 交互及 1440/1280/768/390 四种 viewport、no-overflow、focusable accessible buttons 和 dev logs 检查。它仍不替代真实 live API 状态验证，详细边界见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。

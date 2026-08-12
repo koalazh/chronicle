@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup 与 P0 负向重试证据；P0–P5/浏览器 proof 仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、live seal/cleanup、P0 正向候选与 fresh-session/title 修复、Archive/Ending 浏览器 proof；P1–P5 与完整 live V5 业务链仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -106,17 +106,18 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 当次 console errors 为 `[]`，页面保持纸本文书视觉。该证据只覆盖 Phase 10 flow 和当时的 viewport；它不覆盖 Phase 11 新增 Archive/Ending，也不覆盖四种响应式宽度。
 
-### 尚未通过：Phase 11 / responsive
+### 已通过：Phase 11 Archive / Ending fixture 浏览器链路
 
-以下仍是 `NOT PROVEN`：
+2026-08-12 在独立临时 SQLite、Hermes Home 和 loopback server `127.0.0.1:18712` 上，以当前代码（含 `b8f22a4`）重新加载页面并验证：
 
-- Archive list → Public Replay → selected Lifetime Replay 的真实浏览器交互；
-- Volume Ending 的 sealed/unsealed 两态浏览器交互；
-- 1440、1280、768、390 四种 viewport 的 no-overflow；
-- 新页面的 keyboard/accessibility/busy mutation 检查；
-- 新页面在真实 live API 下的状态表现。
+- unsealed fixture：Archive 列表为空，Ending 显示“这一卷仍未走到边界。”；
+- sealed fixture：tick `10`、3 个 Crisis 已 settlement、`n013` bridge 已落地、无 pending/in-transit work，Archive 列出 `jiashen / SEALED`；
+- `打开回看` 打开 Public Replay；明确点击吴三桂的 `回看这段人生` 后才出现 `吴三桂 · 后知事实` 的 Lifetime Replay；
+- sealed Ending 显示“这一卷已经成为过去。”，同时包含 Public Replay 与 Lifetime Replay；
+- 1440、1280、768、390 四个 viewport 均满足 `document.scrollWidth == document.clientWidth` 与 `body.scrollWidth == document.clientWidth`（桌面端差异仅来自垂直滚动条）；
+- 四种尺寸均捕获 Archive/Ending 截图；Ending 检查时 11 个按钮均可聚焦、有可访问名称、无 disabled mutation；浏览器 dev logs 为 `[]`。
 
-截图、静态 HTML 和 JS syntax 都不能替代这些证据。
+该证据是 fixture/API 的产品 UI proof，不是真实 live Hermes cognition 或真实 live API acceptance。期间发现 sealed VOLUME 未被 `/api/worldlines` 列出，已以最小路由修复和回归测试提交 `b8f22a4`。
 
 ## 5. Hermes live evidence
 
@@ -142,7 +143,19 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 这证明 Hermes 基础运行资源和一条真实 V5 Agent Wake 在隔离目录可工作，并实际经过 V5 MCP staging 与原子 Logical Moment commit。它仍没有证明 Human↔Hermes continuity、跨 Subject 行为差异、Learning、完整 message/settlement braid 或 Volume Ending。
 
-随后在独立临时 Volume 上尝试 P0 候选链（同一 Wu Sangui Profile 的 `AGENT → HUMAN → AGENT → HUMAN`）。真实模型连续两次没有提交 `logical_intent`；驱动执行一次同一 fresh Session 的协议修复后仍 fail-closed，未生成隐式 `wait`，随后精确 Gateway stop 通过。该次是负向运行证据：说明协议边界有效，但不构成 P0 通过。
+### P0 positive candidate：same Profile / fresh Session
+
+在修复 Wake session title 上限和 `logical_intent` 顶层参数契约后，于独立临时 Volume、Hermes Home、loopback port `18668` 运行同一 Wu Sangui Lifetime 的 `AGENT → HUMAN → AGENT → HUMAN`：
+
+- tick 1：Wu 的 Hermes Wake 真实提交 `INTENT_COMMITTED`、`PLAN_UPDATED`、`BELIEF_UPDATED`、`MOMENT_COMMITTED`；
+- tick 2：Wu 切到 Human，提交带明确目标与步骤的 plan（先核对新到消息，再决定是否调整关口承诺）；
+- tick 3：Dorgon 作为 off-screen Agent 继续运行，真实产生 `MESSAGE_DISPATCHED`；
+- tick 4：Wu 回到 Hermes，仍是同一 Profile、但创建了新的 fresh Session，产生新的 `PLAN_UPDATED`、`BELIEF_UPDATED`、`MOMENT_COMMITTED`，并引用了新到 evidence；最终 controller 回到 Human；
+- 同一 Wu Profile 的 session count 为 `2`，全程 4 个 committed moments；Human plan 在后续 Hermes Wake 中仍可见，后续 plan 已改变为处理 Dorgon 来信的回应策略。
+
+该次是 P0 Subject Proof 的隔离正向候选证据，证明了同一 Lifetime 的 controller handoff、Profile 稳定、Session 可更换、Human 历史进入后续 Hermes 行动，以及 off-screen message 结果。它仍不等于 P1–P5 或完整 Live V5 Acceptance；`obligations/plans/revisits` 的全量复核和同一 Volume 内 P1–P4 braid 仍待完成。临时 runtime 在结束后精确停止并清理。
+
+此前在独立临时 Volume 上尝试 P0 候选链时，真实模型连续两次没有提交 `logical_intent`；驱动执行一次同一 fresh Session 的协议修复后仍 fail-closed，未生成隐式 `wait`，随后精确 Gateway stop 通过。该次仍保留为负向运行证据：说明协议边界有效，不覆盖后续已通过的正向候选。
 
 在完成逐 Profile `/v1/models` 与 `/v1/toolsets` warm-up 后，于独立端口 `18651` 重复该候选，结果相同；因此当前证据不支持把失败归因于 Gateway/MCP 冷启动竞态。
 
@@ -154,7 +167,7 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 | Gate | 当前状态 | 证据与缺口 |
 | --- | --- | --- |
-| P0 Subject Proof | **NOT PROVEN** | 同一 Lifetime 的 P0 候选运行因真实模型未提交 `logical_intent` 而 fail-closed；单 Wake 已证明 same Profile 可创建 fresh Session 并提交意图，但尚未证明完整 `Hermes → Human → Hermes → Human`、handoff 后 obligations/plans/revisits 与新 evidence 的连续行为。 |
+| P0 Subject Proof | **PARTIAL（隔离正向候选）** | port `18668` 真实完成同一 Wu Profile 的 `AGENT → HUMAN → AGENT → HUMAN`；同 Profile、2 个 Session、Human plan、后续 Hermes plan/belief/evidence、Dorgon off-screen message 与最终 Human 均有 committed evidence。仍缺 controller-switch 对照，以及 obligations/plans/revisits 的严格逐项复核，因此不把 P0 正式 gate 标成 PASS。 |
 | P1 Multi-Subject Proof | **NOT PROVEN** | 尚无两个真实 Profiles 对同一第三方持有不同 evidence/expectation 并实际做出不同 action 的同一 Run 证据。 |
 | P2 Temporal Proof | **PARTIAL / NOT COMPLETE** | 单 Wake live 与 deterministic message transit/delivery 已有证据；尚无真实 `A sends → B decides before arrival → arrival → B reconsiders`，也尚无 Human/Agent 同 slice 的 live order-independence proof。 |
 | P3 Learning Causality | **NOT PROVEN** | 尚无 evidence-backed expectation → later retrieval → materially different action 的 live paired memory-ablation test。 |
@@ -169,7 +182,9 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 - 初次 Human Life 的 dormant Profile；
 - 0 mandatory ORIENT（已通过单次 live V5 创建与 Wake 证据）；
 - 至少一条真实 `logical_intent` staging → `INTENT_COMMITTED` → `MOMENT_COMMITTED`（已通过单次 live V5 证据）；
-- Human→Hermes handoff、same Profile、fresh Session；
+- Human→Hermes handoff、same Profile、fresh Session（P0 隔离正向候选已通过：同一 Wu Profile、2 个 Session）；
+- Human plan 进入后续 Hermes context，并在新 evidence 后形成不同的后续 plan/belief（P0 隔离正向候选已记录）；
+- off-screen Dorgon Agent 产生 `MESSAGE_DISPATCHED`（P0 隔离正向候选已记录）；
 - delayed message、crossing action、off-screen Agent↔Agent causal chain；
 - evidence-backed past affecting future；
 - Crisis settlement 后 Profiles 仍存活；
@@ -182,8 +197,8 @@ homepage → World（3 个 knots）→ Follow Wu → Inhabit Desk
 
 ## 8. 当前 blockers 与下一步
 
-1. 在同一临时 live Run 上完成 P0–P4 的 instrumented proof，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录。
+1. 在同一临时 live Run 上完成 P1–P4 的 instrumented proof，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录；P0 仍需补齐严格的 obligations/plans/revisits 对照复核。
 2. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
-3. 对 Phase 11 Archive/Ending 补做 1440/1280/768/390 浏览器检查，记录 console、overflow、privacy、busy mutation 和 keyboard 状态。
+3. 将已通过的 Archive/Ending fixture 浏览器证据与真实 live Volume/API 状态分开保留；真实 live API 下的最终状态表现仍未证明。
 
 在以上 blocker 关闭前，不能把本文件状态改成 `COMPLETE`，也不能把 README、产品发布说明或 commit message 写成“V5 已完成”。

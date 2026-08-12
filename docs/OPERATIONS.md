@@ -130,7 +130,7 @@ uv run chronicle doctor
 - textarea 在 rerender 前被捕获，busy mutation 不能 double-submit；
 - 页面不出现 Agent/Profile/Session/Memory、crisis dashboard、meter 或 AI thinking animation。
 
-Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave；本轮没有把 Phase 11 Archive/Ending 和四种 viewport 重新浏览器化，因此这部分保持未验证。
+Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave。2026-08-12 又在独立 fixture SQLite 上复核了 Phase 11 Archive/Ending：unsealed/sealed 两态、Archive → Public Replay → 明确选择 Lifetime Replay，以及 1440/1280/768/390 四种 viewport；检查记录了 no-overflow、按钮可聚焦/有可访问名称和空 dev logs。该证据仍是 fixture/API 的 UI proof，不替代真实 live API 下的最终状态表现，完整 P0–P5 仍未通过，详见 [V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
 
 ## 9. 证据归档
 

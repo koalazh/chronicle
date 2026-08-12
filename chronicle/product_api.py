@@ -681,7 +681,13 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     async def worldlines() -> dict[str, Any]:
         active = active_host()
         if active.db.active_volume_worldline() is None:
-            return {"worldlines": await asyncio.to_thread(active.worldline_runtime.sealed)}
+            legacy_worldlines = await asyncio.to_thread(active.worldline_runtime.sealed)
+            volume_worldlines = [
+                public_worldline(active.db.worldline(row["id"]) or row)
+                for row in active.db.worldlines(status="SEALED")
+                if row["kind"] == WorldlineKind.VOLUME.value
+            ]
+            return {"worldlines": [*legacy_worldlines, *volume_worldlines]}
         return {
             "worldlines": [
                 public_worldline(row)

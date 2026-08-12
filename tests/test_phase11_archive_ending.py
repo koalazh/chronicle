@@ -170,6 +170,13 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     _drain_to_boundary(runtime, worldline_id)
     runtime.seal(worldline_id)
 
+    listed = client.get("/api/worldlines")
+    assert listed.status_code == 200
+    assert any(
+        item["id"] == worldline_id and item["kind"] == "VOLUME"
+        for item in listed.json()["worldlines"]
+    )
+
     archive = client.get(
         f"/api/worldlines/{worldline_id}/archive",
         params={"lifetime_id": "shi-kefa"},

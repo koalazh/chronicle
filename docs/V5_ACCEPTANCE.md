@@ -2,7 +2,7 @@
 
 > 记录日期：2026-08-12
 > 分支：`dev_v5`
-> 状态：**NOT COMPLETE — P4、P5 与完整 live V5 业务链尚未通过**
+> 状态：**NOT COMPLETE — P5 与完整 live V5 业务链尚未通过**
 
 本文是 V5 的唯一当前验收记录。它只记录已经执行、可以复核、没有泄漏 Secret 的证据；`PASS` 只对对应证据层有效，不向上推导为整卷产品完成。
 
@@ -46,7 +46,7 @@ Phase 0–11 均已在 `dev_v5` 分别提交；Phase 12 的入口文档已由 `f
 | 9 | `ba6c530` | Volume Product API boundary |
 | 10 | `3b3365d` | V5 product shell |
 | 11 | `1ed13d5` | Archive / Volume Ending |
-| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` + `0d742fc` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录、主体级 affordance 合同和离席后 Agent 接管 Pending Moment 的产品修复；P4、P5 与完整 live V5 业务链仍未完成 |
+| 12 | `f52ddf9` + `b287ee6` + `a569344` + `c2b19a9` + `8c1241e` + `2c99332` + `b8f22a4` + `d2cbeac` + `c47edf4` + `52b687b` + `dc26345` + `b51a075` + `235927e` + `7cc1a25` + `1280457` + `1db1a38` + `d3a31a8` + `d5aa8d4` + `0d742fc` + `451f237` | V5 source-of-truth docs、Hermes `logical_intent` Wake bridge、协议 fail-closed/repair、P0 controller/continuity 证据、Archive/Ending 浏览器 proof、Volume 世界工具与共享北方 transport 进入 Pending Logical Moment、Offer/Agreement wake 时序修复、MCP evidence schema 修复、对抗性边界测试、连续 live 记录、主体级 affordance 合同、离席后 Agent 接管 Pending Moment、exact Wake 路由和同一 Wake 单次 action guard；P5 与完整 live V5 业务链仍未完成 |
 
 Phase 0–11 的 commit scope、测试和边界记录同步在 task-loop `TASK.md`/`HANDOFF.md` 中；它们不替代本文件的 live proof。
 
@@ -310,9 +310,19 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 这是目前最接近 P4 gate 的无定向连续样本，但仍不能 PASS：13 个 Agent Wake 中 9 个是 communicate，未出现成功 Investigation/Agreement，也没有形成预先定义的唯一收敛、无尽协商或 World/Knot 修正与 model-error tension 对照。因此 P4 保持 PARTIAL。
 
+### P4 strict one-Knot live trajectory：Gateway port `18813`
+
+在 `451f237` 的 exact Wake 路由和 one-action guard 之后，使用独立 live Volume、独立 SQLite/Hermes Home，只激活一个 `before-shanhaiguan` Knot；direct VolumeRuntime harness 不向模型指定工具，目标为约 10–20 条小样本 trajectory。脱敏审计为：worldline `worldline-176d43c95ee942cd`，21 个真实 Hermes Wake、21 个 fresh Session、15 个 atomic Moment，全部 Wake `COMPLETED`，每个 Wake 恰好 1 个 operation（最大值为 1），没有失败 Wake。
+
+- 工具分布为 `communicate=10`、`investigate=3`、`logical_intent(wait/update_plan)=4`、`operate=2`、`manage_offer=2`；因此 Investigation 与 Wait 都不是 dominant，communicate 是该 Knot 的观察性 dominant 行为，未通过加提示把 Agent 强行改成预设比例。
+- 其中一次错误的 `investigate` target 使用了 definition id，Host 写入 `INTENT_REJECTED(code=investigation_unavailable)`；后续合法 target 的 Investigation 成功完成。这保留了模型错误与 World 能力边界的可见区分，没有把错误猜成成功。
+- Agreement 没有无限谈判：产生 1 个 `OFFER_PROPOSED`、1 个 `OFFER_ACCEPTED` 和 1 个 `AGREEMENT_CREATED`；resolver 在通行窗口收紧后给出唯一的 `WINDOW_EXPIRED_DEFERRED`，`ambiguity_used=false`。该结局由外部时间压力和 Projection facts 决定，不依赖模型报错；随后以同一 resolver 结果完成 Crisis settlement，未把产品 Ending 混同为 Crisis settlement。
+
+该单 Knot 轨迹补齐了 P4 所需的真实 Investigation/Agreement、finite negotiation、unique Host resolution、model-error fail-closed 和 exact one-operation 观察边界；没有发现需要通过降低 Agent 能力来修复的 World/Knot 缺陷，因此 P4 gate 升为 PASS。它仍不替代 P5 或同一最终 Volume seal acceptance chain。
+
 ### 隔离边界
 
-以上 harness 使用独立临时 SQLite、Hermes Home、runtime owner 和 loopback 端口（历史真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`；新增连续 live sample 使用 `18718`，Human Wake slice 使用 `18719`，memory pair 使用 `18720/18721`，order pair 使用 `18722/18723`，P1 directed candidate 使用 `18727`，undirected attempts 使用 `18732/18733/18737`，P4 undirected continuous sample 使用 `18740/18741`，P3 negative control 使用 `18748/18749` 与 `18750/18751`，P3 controlled positive pair 使用 `18752/18753` 与 `18754/18755`，live browser shell 使用 `18734/18735`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 结束后按精确路径清理。
+以上 harness 使用独立临时 SQLite、Hermes Home、runtime owner 和 loopback 端口（历史真实 Wake 使用 `18647`，product API 使用 `18648`，P0 候选使用 `18649`，seal/cleanup 使用 `18650`；新增连续 live sample 使用 `18718`，Human Wake slice 使用 `18719`，memory pair 使用 `18720/18721`，order pair 使用 `18722/18723`，P1 directed candidate 使用 `18727`，undirected attempts 使用 `18732/18733/18737`，P4 undirected continuous sample 使用 `18740/18741`，P3 negative control 使用 `18748/18749` 与 `18750/18751`，P3 controlled positive pair 使用 `18752/18753` 与 `18754/18755`，live browser shell 使用 `18734/18735`，guarded live product sample 使用 `18808/18809`，strict one-Knot P4 Gateway 使用 `18813`），没有触碰项目现有 Hermes Home、数据库或其他监听服务；临时目录在 harness 结束后按精确路径清理。
 
 ## 6. P0–P5 Proof Gates
 
@@ -322,14 +332,14 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 | P1 Multi-Subject Proof | **PASS（subject-scoped undirected live pair）** | port `18792` 在同一 tick/frozen Moment 由两个不同私有过去驱动真实 Hermes：Han 调查 `fu-prince`，Ma 将其江北支持变为可见；两条 Wake 各 exactly one operation，分别经过 `INTENT_COMMITTED → INVESTIGATION_STARTED` 与 `INTENT_COMMITTED → OPERATION_STARTED`，最后 atomic `MOMENT_COMMITTED`，Gateway exact stop 通过。 |
 | P2 Temporal Proof | **PASS（live temporal + order pair）** | port `18715` 完成 A sends → B pre-arrival decision → delivery → B fresh-session reconsideration，且到达前 Perspective 不含正文；ports `18722/18723` 完成 Human-first/Agent-first semantic equality、无 pending moment 和精确 teardown。 |
 | P3 Learning Causality | **PASS（controlled live paired）** | ports `18752/18753` 与 `18754/18755` 从同一 tick 10 基线 clone，真实 Hermes fresh Session 在同一 tick 11 消息上分别检索 memory 并 `communicate` committed，或 memory 为空并 `investigate` rejected；Moment 两边均 atomic commit。 |
-| P4 Game Proof | **PARTIAL（directed + undirected continuous candidates）** | port `18718` 提供 14 Wake/9 Moment 的 directed tool chain；port `18740/18741` 提供 14 Wake（13 Agent）/12 Moment 的无定向连续样本，但 communicate 占主导，未完成 successful Investigation/Agreement、唯一收敛、model-error tension 对照或 World/Knot 修正。 |
+| P4 Game Proof | **PASS（strict one-Knot live trajectory）** | Gateway port `18813` 的单一 `before-shanhaiguan` Knot 产生 21 Wake/21 fresh Session/15 atomic Moment，全部完成且每 Wake exactly one operation；覆盖真实 Investigation、Operation、Offer/Agreement、Wait/update_plan、model-error rejected path，Agreement finite，resolver 给出 `ambiguity_used=false` 的唯一 Deferred 结果。 |
 | P5 30-minute Product Proof | **NOT RUN** | 尚无真实用户试玩和独立 evaluator 对“他们在我离开后仍有下一步”的记录。 |
 
 ## 7. Live V5 acceptance checklist
 
 计划要求同一真实 V5 中记录以下项目；当前均未形成完整可关联链：
 
-- 4+ persistent Profiles（port `18718` materialize 6 个并使用其中 5 个完成真实 Wake；port `18734/18735` 另在产品浏览器中 materialize 6 个并完成真实 Human→Leave→off-screen chain；跨多次缺席的连续性仍未完整记录）；
+- 4+ persistent Profiles（port `18718` materialize 6 个并使用其中 5 个完成真实 Wake；port `18734/18735` 另在产品浏览器中 materialize 6 个并完成真实 Human→Leave→off-screen chain；`18813` 的单 Knot 轨迹使用 6 个 materialized Profiles，其中 5 个产生真实 Wake）；
 - 初次 Human Life 的 dormant Profile；
 - 0 mandatory ORIENT（已通过单次 live V5 创建与 Wake 证据）；
 - 至少一条真实 `logical_intent` staging → `INTENT_COMMITTED` → `MOMENT_COMMITTED`（已通过单次 live V5 证据）；
@@ -348,8 +358,8 @@ INTENT_COMMITTED, INTENT_COMMITTED, PLAN_UPDATED, MOMENT_COMMITTED
 
 ## 8. 当前 blockers 与下一步
 
-1. 完成仍未关闭的 P4 instrumented gate，并把 evidence IDs、ticks、session/profile 状态和清理结果写入脱敏记录；P0 strict live audit、P1 subject-scoped peer pair、P2 live temporal/order gate 与 P3 controlled live paired gate 已通过；P4 仍需成功世界行动/收敛与 model-error tension 对照。
-2. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
-3. 将 fixture Archive/Ending 浏览器证据与真实 live Volume/API 状态分开保留；port `18734/18735` 已补上同一 live 产品 slice 的 World/Follow/Desk/Leave、Archive/Ending、最终 seal 和 cleanup，但这仍不能替代 P0–P5 proof gates。
+1. 完成 P5 真实试玩和独立 evaluator 记录；不能用开发者主观感受替代。
+2. 将 P0–P4 的证据与同一最终 live Volume 的完整业务链（Human→Leave→off-screen→cross-Knot→settlement→second Knot→Archive→seal→cleanup）关联到一条可复核记录；port `18734/18735` 已分别证明产品链和最终 seal/cleanup，但仍不能替代这条完整关联链。
+3. 将 fixture Archive/Ending 浏览器证据与真实 live Volume/API 状态分开保留。
 
 在以上 blocker 关闭前，不能把本文件状态改成 `COMPLETE`，也不能把 README、产品发布说明或 commit message 写成“V5 已完成”。

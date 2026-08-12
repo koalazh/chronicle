@@ -27,7 +27,7 @@
 
 ## Phase 1 Characterization + seam
 
-本阶段只新增 `tests/test_v6_characterization.py`，没有改变生产运行时语义。它固定当前 V5 的实际边界：
+本阶段只新增 `tests/test_v6_characterization.py`，没有改变生产运行时语义。它固定当时 V5 的实际边界：
 
 - `MESSAGE_DELIVERED` 会写入 recipient Knowledge，并立即产生 `OBSERVATION` Wake；
 - `OPERATION_COMPLETED` 与 `OBSERVATION_OBTAINED` 分别会写入 Knowledge，并产生相应结果 Wake；
@@ -48,6 +48,17 @@
 
 每次首次建立或替换 Course 都仍在同一个 atomic Pending Logical Moment 内写入 `PLAN_UPDATED`，并追加 `DECISION_HORIZON_ESTABLISHED` 或 `DECISION_HORIZON_REVISED`。旧 V5 `plan_json` 不在 read 时被改写，而是在 Context 中投影为可读的 Course。`tests/test_v6_decision_horizon.py` 覆盖单 Course、typed dependency reject、tick / restart / HUMAN↔AGENT controller switch / fresh-session prompt continuity、revision 与 legacy read；定向 5 passed、完整 pytest exit 0（329 tests collected）、Ruff / compileall exit 0。
 
+## Phase 3 Knowledge / Attention separation
+
+新增 `chronicle/subject_attention.py`。`evaluate_attention(lifetime, new_known_events, projection)` 是不读 DB、不调用 LLM、不提交 World action 的 pure deterministic policy，并总是返回 `decision`、`reason_code`、`trigger_event_ids` 与 `matched_dependency_ids`。
+
+- message delivery、operation completion 与 investigation observation 现在先写入 Knowledge，再在同一 tick 归并评估 Attention；`BACKGROUND` 只写 append-only `ATTENTION_EVALUATED` Ledger event，不创建 Wake；
+- `MESSAGE_FROM`、`OBSERVATION_FOR`、`OPERATION_OUTCOME`、`ENTITY_OBSERVED_CHANGE` 和 Host-owned `DEADLINE` 可匹配已存在 typed dependency；其中 deadline 由 `DECISION_DEPENDENCY_DUE` 记录并进入 Knowledge，不是 wall-clock polling；
+- 无 Current Course 的初始事实仍 `REOPEN`，以便建立首个判断；对已有 Course，预期操作完成和无关消息只作为 Background；
+- `REOPEN` 保留 exact Wake identity 与原有来源 wake type，但 Wake 的 causal trigger 变为私有的 `ATTENTION_EVALUATED` event，包含实际进入 Knowledge 的事实 ID，而不是把任意 result 直接升级为 cognition。
+
+Offer / Agreement 的事实 transport 仍是 Phase 8 的专门改动；本阶段未把现有 `tick+1` offer scaffold 伪装成 transport semantics。`tests/test_v6_attention.py` 覆盖无关已知消息、typed sender match、预期操作完成、deadline 与 pure policy；完整 pytest exit 0（334 tests collected），Ruff、compileall 和三项 content validator 均 exit 0。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -65,7 +76,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 0 Baseline | COMPLETE | V6 文档、实际 V5 baseline 与 staged scope review 已完成；本 commit 只包含此 Phase |
 | 1 Characterization + seam | COMPLETE | V5 wake、Current Plan、MCP 单写入与 `/continue` 单推进已由 6 项特征测试固定；未作生产语义变更 |
 | 2 Decision Horizon | COMPLETE | `plan[0]` 原位升级为唯一 Course、typed dependencies、established/last-deliberated Ledger 边界与 V5 read compatibility 已验证 |
-| 3 Knowledge / Attention | NOT_STARTED | |
+| 3 Knowledge / Attention | COMPLETE | Knowledge admission 与 deterministic BACKGROUND/REOPEN 已分离；无关消息与预期操作不再直接创建 Wake |
 | 4 Context Compiler | NOT_STARTED | |
 | 5 Deliberation Protocol | NOT_STARTED | |
 | 6 Product Continuous Agency | NOT_STARTED | |

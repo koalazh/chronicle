@@ -25,6 +25,7 @@ from .decision_horizon import (
     normalize_open_dependencies,
 )
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
+from .subject_attention import AttentionDecision, evaluate_attention
 from .subject_continuity import LifetimeContextBuilder
 from .volume_boundary import VolumeBoundaryPolicy
 from .world import token_hash
@@ -1086,6 +1087,16 @@ class VolumeRuntime:
             for wake in self.db.subject_wakes(worldline_id)
             if wake["status"] in {"QUEUED", "WAITING_HUMAN"} and int(wake["tick"]) > current
         )
+        for lifetime in self.db.worldline_lifetimes(worldline_id):
+            course = current_course_from_plan(list(lifetime.get("plan", [])), fallback_tick=current)
+            if course is None or course.get("status") != "IN_FORCE":
+                continue
+            candidates.extend(
+                int(dependency["due_tick"])
+                for dependency in course.get("open_dependencies", [])
+                if dependency.get("type") == "DEADLINE"
+                and int(dependency["due_tick"]) > current
+            )
         return min(candidates) if candidates else None
 
     def _next_tick(self, worldline_id: str) -> int | None:
@@ -1132,6 +1143,7 @@ class VolumeRuntime:
         applied_pressures: list[dict[str, Any]] = []
         lifetime_updates: dict[str, dict[str, Any]] = {}
         wake_creates: list[dict[str, Any]] = []
+        attention_admissions: dict[str, list[dict[str, Any]]] = {}
 
         def append_knowledge(actor_id: str, item: dict[str, Any]) -> dict[str, Any] | None:
             lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
@@ -1148,6 +1160,62 @@ class VolumeRuntime:
                 "knowledge_json": json.dumps(knowledge, ensure_ascii=False, sort_keys=True),
             }
             return lifetime
+
+        def admit_knowledge(
+            actor_id: str, item: dict[str, Any], attention_event: dict[str, Any]
+        ) -> dict[str, Any] | None:
+            lifetime = append_knowledge(actor_id, item)
+            if lifetime is not None:
+                attention_admissions.setdefault(actor_id, []).append(attention_event)
+            return lifetime
+
+        for lifetime in self.db.worldline_lifetimes(worldline_id):
+            course = current_course_from_plan(list(lifetime.get("plan", [])), fallback_tick=current)
+            if course is None or course.get("status") != "IN_FORCE":
+                continue
+            for dependency in course.get("open_dependencies", []):
+                if (
+                    dependency.get("type") != "DEADLINE"
+                    or int(dependency.get("due_tick", -1)) != target
+                ):
+                    continue
+                due = self._event(
+                    worldline_id,
+                    target,
+                    "DECISION_DEPENDENCY_DUE",
+                    {
+                        "seat": lifetime["seat"],
+                        "dependency_id": dependency["id"],
+                        "dependency_type": "DEADLINE",
+                        "due_tick": target,
+                    },
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[advanced["id"]],
+                    event_id=(
+                        f"{worldline_id}:course:{lifetime['seat']}:dependency:"
+                        f"{dependency['id']}:due:{target}"
+                    ),
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(due)
+                admit_knowledge(
+                    lifetime["seat"],
+                    {
+                        "kind": "decision_dependency",
+                        "event_id": due["id"],
+                        "dependency_id": dependency["id"],
+                        "dependency_type": "DEADLINE",
+                        "due_tick": target,
+                    },
+                    {
+                        "event_id": due["id"],
+                        "event_type": "DECISION_DEPENDENCY_DUE",
+                        "wake_type": "REVISIT_DUE",
+                        "wake_id": f"{worldline_id}:wake:{due['id']}:{lifetime['seat']}",
+                        "due_tick": target,
+                    },
+                )
 
         for field_event in projection.get("field_events", []):
             if field_event.get("status") != "PENDING" or int(field_event["tick"]) != target:
@@ -1257,18 +1325,17 @@ class VolumeRuntime:
                 "source": message.get("source", ""),
                 "assertion_ids": list(message.get("assertion_ids", [])),
             }
-            append_knowledge(message["recipient"], knowledge_item)
-            wake_creates.append(
+            admit_knowledge(
+                message["recipient"],
+                knowledge_item,
                 {
-                    "id": f"{worldline_id}:wake:{message['id']}",
-                    "actor_id": message["recipient"],
+                    "event_id": delivered["id"],
+                    "event_type": "MESSAGE_DELIVERED",
                     "wake_type": "OBSERVATION",
-                    "tick": target,
-                    "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
-                    "source": "volume-message",
-                    "trigger_event_id": delivered["id"],
-                    "result": {"message_id": message["id"]},
-                }
+                    "wake_id": f"{worldline_id}:wake:{message['id']}",
+                    "actor_id": message["sender"],
+                    "message_id": message["id"],
+                },
             )
 
         for crisis_id in sorted(projection.get("crisis_instances", {})):
@@ -1336,7 +1403,7 @@ class VolumeRuntime:
                 if movement_target:
                     projection["positions"][item["actor_id"]] = movement_target
                 for actor_id in visible:
-                    lifetime = append_knowledge(
+                    lifetime = admit_knowledge(
                         actor_id,
                         {
                             "kind": "observation",
@@ -1346,21 +1413,18 @@ class VolumeRuntime:
                             "provenance": "branch_derived",
                             "crisis_id": crisis_id,
                         },
+                        {
+                            "event_id": completed["id"],
+                            "event_type": "OPERATION_COMPLETED",
+                            "wake_type": "OPERATION_RESULT",
+                            "wake_id": f"{worldline_id}:wake:{completed['id']}:{actor_id}",
+                            "actor_id": item["actor_id"],
+                            "operation_id": item["id"],
+                            "entity_ids": sorted(item.get("result_state", {})),
+                        },
                     )
                     if lifetime is None:
                         continue
-                    wake_creates.append(
-                        {
-                            "id": f"{worldline_id}:wake:{completed['id']}:{actor_id}",
-                            "actor_id": actor_id,
-                            "wake_type": "OPERATION_RESULT",
-                            "tick": target,
-                            "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
-                            "source": "volume-operation",
-                            "trigger_event_id": completed["id"],
-                            "result": {"operation_id": item["id"]},
-                        }
-                    )
             for item in crisis.get("investigations", []):
                 if item.get("status") != "IN_PROGRESS" or int(item.get("expected_result_tick", -1)) != target:
                     continue
@@ -1408,7 +1472,7 @@ class VolumeRuntime:
                 observation["event_id"] = observed["id"]
                 events.extend([completed, observed])
                 for actor_id in visible:
-                    lifetime = append_knowledge(
+                    lifetime = admit_knowledge(
                         actor_id,
                         {
                             "kind": "observation",
@@ -1422,21 +1486,17 @@ class VolumeRuntime:
                             "investigation_id": item["id"],
                             "crisis_id": crisis_id,
                         },
+                        {
+                            "event_id": observed["id"],
+                            "event_type": "OBSERVATION_OBTAINED",
+                            "wake_type": "INVESTIGATION_RESULT",
+                            "wake_id": f"{worldline_id}:wake:{observed['id']}:{actor_id}",
+                            "actor_id": item["actor_id"],
+                            "investigation_id": item["id"],
+                        },
                     )
                     if lifetime is None:
                         continue
-                    wake_creates.append(
-                        {
-                            "id": f"{worldline_id}:wake:{observed['id']}:{actor_id}",
-                            "actor_id": actor_id,
-                            "wake_type": "INVESTIGATION_RESULT",
-                            "tick": target,
-                            "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
-                            "source": "volume-investigation",
-                            "trigger_event_id": observed["id"],
-                            "result": {"investigation_id": item["id"]},
-                        }
-                    )
             for offer in crisis.get("offers", []):
                 if offer.get("status") != OfferStatus.PROPOSED.value or offer.get("expires_tick") is None:
                     continue
@@ -1495,6 +1555,60 @@ class VolumeRuntime:
                 applied_pressures.append(pressure)
 
         projection["tick"] = target
+        for actor_id in sorted(attention_admissions):
+            lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
+            if lifetime is None:
+                continue
+            admissions = attention_admissions[actor_id]
+            attention = evaluate_attention(lifetime, admissions, projection)
+            attention_event = self._event(
+                worldline_id,
+                target,
+                "ATTENTION_EVALUATED",
+                {
+                    "seat": lifetime["seat"],
+                    "new_known_event_ids": list(
+                        dict.fromkeys(
+                            str(admission.get("event_id", ""))
+                            for admission in admissions
+                            if str(admission.get("event_id", ""))
+                        )
+                    ),
+                    **attention.as_dict(),
+                },
+                seat_id=lifetime["seat"],
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=list(attention.trigger_event_ids),
+                event_id=(
+                    f"{worldline_id}:attention:{target}:{lifetime['seat']}:"
+                    f"{stable_hash(attention.as_dict())[:12]}"
+                ),
+                runtime_epoch=row["runtime_epoch"],
+            )
+            events.append(attention_event)
+            if attention.decision != AttentionDecision.REOPEN:
+                continue
+            wake_types = {
+                str(admission.get("wake_type", "ATTENTION")) for admission in admissions
+            }
+            wake_type = wake_types.pop() if len(wake_types) == 1 else "ATTENTION"
+            wake_id = (
+                str(admissions[0].get("wake_id", ""))
+                if len(admissions) == 1
+                else ""
+            ) or f"{worldline_id}:wake:{attention_event['id']}:{lifetime['seat']}"
+            wake_creates.append(
+                {
+                    "id": wake_id,
+                    "actor_id": lifetime["seat"],
+                    "wake_type": wake_type,
+                    "tick": target,
+                    "status": "WAITING_HUMAN" if lifetime["controller"] == "HUMAN" else "QUEUED",
+                    "source": "v6-attention",
+                    "trigger_event_id": attention_event["id"],
+                    "result": {"attention": attention.as_dict()},
+                }
+            )
         projection["last_event_id"] = events[-1]["id"]
         self.db.commit_volume_moment(
             worldline_id,

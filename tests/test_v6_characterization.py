@@ -29,7 +29,7 @@ def _runtime(app_config, suffix: str):
     return config, runtime, worldline_id, wu, frozen
 
 
-def test_v5_message_delivery_admits_knowledge_and_queues_observation(app_config):
+def test_message_delivery_admits_knowledge_and_reopens_without_a_current_course(app_config):
     _config, runtime, worldline_id, wu, _frozen = _runtime(app_config, "message-admission")
 
     delivered = next(
@@ -44,12 +44,19 @@ def test_v5_message_delivery_admits_knowledge_and_queues_observation(app_config)
         and item.get("message_id") == delivered["payload"]["message_id"]
         for item in wu["knowledge"]
     )
+    attention = next(
+        event
+        for event in runtime.db.worldline_events(worldline_id)
+        if event["event_type"] == "ATTENTION_EVALUATED"
+        and event["payload"]["new_known_event_ids"] == [delivered["id"]]
+    )
     assert [
         wake
         for wake in wakes
         if wake["actor_id"] == "wu-sangui"
         and wake["wake_type"] == "OBSERVATION"
-        and wake["trigger_event_id"] == delivered["id"]
+        and wake["trigger_event_id"] == attention["id"]
+        and wake["result"]["attention"]["reason_code"] == "NO_CURRENT_COURSE"
     ]
 
 
@@ -78,7 +85,7 @@ def test_v5_message_delivery_admits_knowledge_and_queues_observation(app_config)
         ),
     ],
 )
-def test_v5_completion_admits_knowledge_and_queues_result_wake(
+def test_completion_admits_knowledge_and_reopens_without_a_current_course(
     app_config, tool_name, arguments, admission_event_type, wake_type
 ):
     _config, runtime, worldline_id, wu, _frozen = _runtime(app_config, tool_name)
@@ -103,12 +110,19 @@ def test_v5_completion_admits_knowledge_and_queues_result_wake(
         isinstance(item, dict) and item.get("event_id") == admitted["id"]
         for item in updated_wu["knowledge"]
     )
+    attention = next(
+        event
+        for event in advanced["events"]
+        if event["event_type"] == "ATTENTION_EVALUATED"
+        and event["payload"]["new_known_event_ids"] == [admitted["id"]]
+    )
     assert [
         wake
         for wake in runtime.db.subject_wakes(worldline_id, tick=advanced["tick"])
         if wake["actor_id"] == "wu-sangui"
         and wake["wake_type"] == wake_type
-        and wake["trigger_event_id"] == admitted["id"]
+        and wake["trigger_event_id"] == attention["id"]
+        and wake["result"]["attention"]["reason_code"] == "NO_CURRENT_COURSE"
     ]
 
 

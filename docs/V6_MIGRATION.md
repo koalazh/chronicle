@@ -38,6 +38,19 @@ V6 不增加物理 Horizon table，也不递增 SQLite schema version；`worldli
 
 `open_dependencies` 只允许实际 Volume 已有的消息、调查、操作、offer/agreement、实体变化与 deadline 事实 ID/tick；没有 free-form predicate、nested DSL、LLM relevance 或自动行动。依赖只会在 Phase 3 作为重新思考资格，绝不直接提交世界动作。
 
+## Phase 3 attention boundary
+
+`knowledge_json` 仍是事实 admission 的唯一持久位置；Attention 没有新表，也不写 Course。每个有新事实的 Lifetime 在同一 global tick 只有一次 `ATTENTION_EVALUATED` Ledger record：
+
+| Admission | No matching Course condition | Matching condition |
+| --- | --- | --- |
+| delivered message | `BACKGROUND`，事实留在 Knowledge | `MESSAGE_FROM` → `REOPEN` |
+| operation completion | 预期结果 `BACKGROUND`，事实留在 Knowledge | `OPERATION_OUTCOME` / observed entity change → `REOPEN` |
+| investigation observation | `BACKGROUND`，事实留在 Knowledge | `OBSERVATION_FOR` → `REOPEN` |
+| Course deadline | 无此分支 | Host 记录 `DECISION_DEPENDENCY_DUE`，admit 后 `REOPEN` |
+
+首次进入 Knowledge 而尚无 Course 的 Lifetime 以 `NO_CURRENT_COURSE` 重开，以建立第一个判断。`REOPEN` 仅授权新的 Deliberation；它不自动发送消息、接受 Offer、执行操作或替任何 Subject 作选择。Offer / Agreement notification 要等 Phase 8 接入真实 transport 后再进入这张表。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

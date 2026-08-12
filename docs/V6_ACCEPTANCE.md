@@ -42,6 +42,19 @@ Phase 1 不主张 Continuous Agency、Attention、bounded agency 或 real Hermes
 
 这是 deterministic fixture / mocked fresh-session payload 证据，尚未证明 Attention、continuous product flow 或 real Hermes business chain。
 
+## Phase 3 Knowledge / Attention separation
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| Deterministic policy | PASS | `subject_attention.evaluate_attention` 是 pure logic，输出 decision / reason / trigger IDs / matched dependency IDs；没有 DB、LLM 或 World write |
+| Irrelevant known fact | PASS | 无关来信进入 Wu Knowledge，追加 `ATTENTION_EVALUATED(BACKGROUND)`，不创建 Wake |
+| Typed dependency match | PASS | `MESSAGE_FROM(dorgon)` 与真正送达的 Dorgon message 产生一条 `REOPEN` Wake，且保留 matched dependency ID |
+| Expected own completion | PASS | `prepare_force` completion 进入 Knowledge，但没有 Course dependency 时是 `BACKGROUND`，不重复叫回主体 |
+| Host-owned deadline | PASS | Course `DEADLINE` 参与 next-tick、写 `DECISION_DEPENDENCY_DUE`、进入 Knowledge 后才 `REOPEN`；不依赖 wall-clock polling |
+| Regression | PASS | `tests/test_v6_attention.py` 5 passed；完整 pytest exit 0（334 tests collected）、Ruff / compileall 与 Source / Scenario / Crisis validators exit 0 |
+
+Phase 3 尚未把 Offer / Agreement 的现有 V5 `tick+1` scaffold 当作真实 remote transport；该边界留给 Phase 8。上述不是 continuous `/continue`、browser 或 real Hermes business evidence。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

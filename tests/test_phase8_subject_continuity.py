@@ -90,6 +90,36 @@ def test_lifetime_context_is_bounded_and_actor_scoped(app_config):
     assert all(item["message_id"].startswith("old-") for item in bounded["recent_knowledge"])
 
 
+def test_lifetime_context_exposes_subject_scoped_affordances(app_config):
+    config = replace(
+        app_config,
+        database_path=app_config.database_path.with_name("chronicle-context-affordances.db"),
+        runtime_dir=app_config.runtime_dir / "context-affordances",
+        hermes_home=app_config.hermes_home / "context-affordances",
+    )
+    host = ChronicleHost(config)
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    runtime.activate_crisis(worldline_id, "nanjing-succession")
+
+    context = runtime.lifetime_context(worldline_id, "ma-shiying")
+    nanjing = next(
+        item for item in context["active_crisis_context"] if item["crisis_id"] == "nanjing-succession"
+    )
+    scoped = nanjing["subject_affordances"]
+
+    assert "military-backing-report" not in {
+        item["id"] for item in scoped["investigations"]
+    }
+    assert "claimant-position-report" in {
+        item["id"] for item in scoped["investigations"]
+    }
+    backing = next(
+        item for item in scoped["operations"] if item["id"] == "make_fu_backing_visible"
+    )
+    assert backing["targets"][0]["options"][0]["id"] == "jiangbei-military-backing"
+
+
 def test_human_interpretation_does_not_infer_reason_or_belief():
     decision = InterpretedDecision(
         summary="已决定。",

@@ -20,10 +20,12 @@ def test_update_plan_mcp_schema_allows_evidence_event_ids():
 
 
 def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config):
-    message = HermesVolumeActorDriver(app_config, object())._messages(
+    messages = HermesVolumeActorDriver(app_config, object())._messages(
         {"id": "wake-1", "wake_type": "OBSERVATION", "worldline_id": "worldline-1", "actor_id": "wu-sangui"},
         {"moment_id": "moment-1"},
-    )[1]
+    )
+    message = messages[1]
+    system_message = messages[0]
     payload = json.loads(message["content"])
 
     assert payload["logical_intent_tool_call"] == {
@@ -34,6 +36,8 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
         },
     }
     assert "顶层 intent 和 idempotency_key" in payload["tool_call_rule"]
+    assert "subject_affordances" in system_message["content"]
+    assert "targets 的 options 的实体 id" in system_message["content"]
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):

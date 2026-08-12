@@ -236,6 +236,17 @@ class LifetimeContextBuilder:
                 continue
             pack = self.pack.pack(crisis_id)
             overlay = pack.actor_by_id.get(seat)
+            scoped_projection = copy.deepcopy(state)
+            scoped_projection["positions"] = copy.deepcopy(projection.get("positions", {}))
+            subject_affordances = {
+                "operations": pack.operation_affordances(
+                    seat, scoped_projection, tick
+                ),
+                "investigations": pack.investigation_affordances(
+                    seat, scoped_projection, tick
+                ),
+                "offer_terms": pack.offer_term_affordances(seat),
+            }
             contexts.append(
                 {
                     "crisis_id": crisis_id,
@@ -255,6 +266,7 @@ class LifetimeContextBuilder:
                     "active_offers": self._subject_items(state.get("offers", []), seat),
                     "active_agreements": self._subject_items(state.get("agreements", []), seat),
                     "available_affordances": copy.deepcopy(state.get("available_affordances", {})),
+                    "subject_affordances": subject_affordances,
                 }
             )
         return contexts

@@ -88,6 +88,16 @@ evidence-backed belief_updates
 
 World action 在 stage 时通过现有 Host / pack affordance 预校验，最多一个；任何 shape、权限、证据、typed dependency 或 action 错误都不会写入 staged operation。commit 时 proposal、Course、belief、action 和 `MOMENT_COMMITTED` 仍在一个 atomic DB moment 中收束，action 的 causal parent 是 `DELIBERATION_COMMITTED`。`tests/test_v6_deliberation.py` 覆盖 HOLD 零行动、REVISE + message、无证据拒绝、多个 action 原子拒绝及 restart/idempotent replay；定向 5 passed，完整回归在提交前复跑。
 
+## Phase 6 Product Continuous Agency
+
+`/continue` 现在在既有 Host-owned `advance_one` atomic boundary 之上循环：每次只推进一个 Global Tick，处理同 tick 的 Agent Wakes，并在 Human Attention、meaningful knot boundary、Volume structural boundary、无未来触发或安全 cap 出现时返回。当前 cap 为每次 request 最多 12 个 ticks、24 个 Agent deliberation、30 秒 wall time。达到 cap 时返回合法当前状态，不抛业务错误，也不启动后台 daemon。
+
+`/decision` 保留 V5 显式 intent 兼容，同时将自然语言输入编译为 Human `REVISE` Deliberation；已有 Course 的等待输入编译为 `HOLD`。当 Human 当前没有 Attention 时，首次提交会在当前 tick 建立一次 Human-only voluntary reconsideration boundary；它不推进 World Time、不调用 Hermes。同一 tick 的重复 voluntary boundary 被拒绝，避免认知入口形成无限循环。
+
+Life Desk 保留原页面和兼容字段，并新增用户语义投影：`current_course`、`since_last_deliberation`、`why_now`、`binding_reality` 与 `reconsideration`。前端没有新增 Planner / Decision Center / Agent Dashboard 页面，也不渲染 V6 内部协议名。
+
+定向证据：`tests/test_v6_continuous_agency.py` 覆盖连续推进到 Human Attention、当前 tick voluntary reconsideration（无 `TIME_ADVANCED`）与 Life Desk 五段投影；product shell、frontend copy 和 syntax checks 仍通过。该证据是 fixture / deterministic product evidence，不构成 real Hermes、browser 多视口或真人验收证明。
+
 ## V6 thesis
 
 V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成的判断跨时间继续有效。一个 Lifetime 的 Current Course 只有在 actor-known 的现实真正改变其基础时，才经 deterministic Attention 打开新的 Deliberation；信息进入 Knowledge 本身不等于重新计算。
@@ -108,7 +118,7 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 | 3 Knowledge / Attention | COMPLETE | Knowledge admission 与 deterministic BACKGROUND/REOPEN 已分离；无关消息与预期操作不再直接创建 Wake |
 | 4 Context Compiler | COMPLETE | Frozen Perspective 增加 reality-first 六段；contrary background fact 保留，旧 V5 bounded context 与 privacy 边界保持 |
 | 5 Deliberation Protocol | COMPLETE | `commit_deliberation` 支持 HOLD/REVISE、证据门槛、typed dependency update、0..1 action 与 restart-safe atomic commit |
-| 6 Product Continuous Agency | NOT_STARTED | |
+| 6 Product Continuous Agency | COMPLETE | bounded `/continue`、Human voluntary reconsideration 与 Life Desk V6 投影已实现；定向 fixture/product checks 通过，live Hermes / browser acceptance 留在后续 gate |
 | 7 Agency Conservation | NOT_STARTED | |
 | 8 Content / World Correctness | NOT_STARTED | |
 | 9 Harness Ablation | NOT_STARTED | |

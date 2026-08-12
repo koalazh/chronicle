@@ -79,6 +79,14 @@ affordances
 
 `belief_updates` remain evidence-backed and private. Existing V5 logical intent and direct World-tool paths remain readable for compatibility, but the V6 live prompt advertises one complete `commit_deliberation`; a model cannot obtain an action by probing multiple rejected proposals in one frozen moment. Restart finds the same one staged `commit_deliberation` operation and retries it idempotently.
 
+## Phase 6 continuous product boundary
+
+`/continue` 只循环已有的 `advance_one`，不把时间推进交给前端、不创建后台 daemon，也不让 Agent 绕过 Pending Logical Moment。每个 request 先处理已有 Human Attention，再处理同 tick Agent Wakes；随后按 Volume boundary、tick / Agent / wall-clock cap、Global Tick、due Wake 与 meaningful knot boundary 的顺序停止或继续。cap 返回当前合法状态，下一次 request 继续。
+
+`/decision` 的自然语言输入是 Human-owned `REVISE`；已有 Course 的空白输入是 `HOLD`。没有 Human Attention 时，Host 在当前 tick 只为当前 inhabited Lifetime 建立一次 voluntary boundary；它不产生 `TIME_ADVANCED`，不调用 Hermes，也不改变其他 Subject 的待处理 Wake。V5 `wait`、`update_plan`、`message` intent 仍保留兼容路径。
+
+Life Desk 的新增投影来自同一个 actor-scoped `LifetimeContextBuilder`，不新建页面或平行状态：此前 Course、deliberation 后的 Knowledge、reopen 的真实事实、binding reality 和 uncertainty。内部 `reason_code`、Wake、Profile、Hermes、MCP 等字段不进入产品投影。
+
 ## 数据迁移策略
 
 - 优先将已有 `plan[0]` 升级为唯一 Current Course，而不是新建 Horizon 表。

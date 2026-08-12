@@ -1810,6 +1810,64 @@ class VolumeRuntime:
             "idempotent": False,
         }
 
+    def open_voluntary_reconsideration(
+        self, worldline_id: str, lifetime_id: str
+    ) -> dict[str, Any]:
+        """Open one Human-only reconsideration boundary without advancing World time."""
+
+        row = self._active_worldline(worldline_id)
+        lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
+        if lifetime is None:
+            raise VolumeRuntimeError(f"Lifetime not found: {lifetime_id}")
+        if lifetime["controller"] != "HUMAN":
+            raise VolumeRuntimeConflict(
+                f"{lifetime['seat']} is not the currently inhabited Lifetime"
+            )
+        tick = int(row["current_tick"])
+        projection = self._snapshot_projection(worldline_id, tick)
+        if projection.get("pending_moment"):
+            return {
+                "worldline": row,
+                "pending_moment": projection["pending_moment"],
+                "idempotent": True,
+            }
+
+        due_wakes = [
+            wake
+            for wake in self.db.subject_wakes(worldline_id, tick=tick)
+            if wake["status"] in {"QUEUED", "WAITING_HUMAN", "RUNNING", "STAGED"}
+        ]
+        if due_wakes:
+            raise VolumeRuntimeConflict("当前时刻已有一项需要处理的现实变化")
+
+        wake_id = f"{worldline_id}:voluntary:{tick}:{lifetime['seat']}"
+        existing = self.db.crisis_wake(wake_id)
+        if existing is not None:
+            if existing["status"] == "COMPLETED":
+                raise VolumeRuntimeConflict("这一刻已经重新判断过")
+            if existing["status"] not in {"QUEUED", "WAITING_HUMAN", "STAGED"}:
+                raise VolumeRuntimeConflict("主动重新判断的边界不可恢复")
+        else:
+            self.db.create_subject_wake(
+                {
+                    "id": wake_id,
+                    "worldline_id": worldline_id,
+                    "actor_id": lifetime["seat"],
+                    "wake_type": "VOLUNTARY_RECONSIDERATION",
+                    "tick": tick,
+                    "status": "WAITING_HUMAN",
+                    "source": "v6-voluntary",
+                    "trigger_event_id": "",
+                    "result": {"reason": "voluntary_reconsideration"},
+                }
+            )
+        frozen = self.freeze_pending_moment(worldline_id)
+        return {
+            "worldline": frozen["worldline"],
+            "pending_moment": frozen["pending_moment"],
+            "idempotent": existing is not None,
+        }
+
     def stage_intent(
         self,
         worldline_id: str,

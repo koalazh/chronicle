@@ -80,6 +80,18 @@ Phase 4 仍只是冻结 context 编译证据；尚未证明 HOLD / REVISE、cont
 
 Phase 5 deterministic evidence does not prove Provider behavior, continuous `/continue`, P6–P9, browser, human acceptance or isolated real Hermes business evidence.
 
+## Phase 6 Product Continuous Agency
+
+| Check | Status | Evidence / boundary |
+| --- | --- | --- |
+| bounded `/continue` | PASS | `tests/test_v6_continuous_agency.py` 验证一次 request 可跨多个 Global Tick，遇到 Human Attention 返回；fixture 仍保留每个 `advance_one` 的 atomic boundary |
+| safety cap | PASS | product router 设定 12 ticks / 24 Agent deliberations / 30 秒 wall time；达到 cap 返回 `continue_status=safety_cap`，不抛业务错误、不启后台 daemon |
+| voluntary reconsideration | PASS | 同一当前 tick 建立 Human-only boundary；定向测试确认 current tick 不变，且没有新增 `TIME_ADVANCED` |
+| Life Desk semantics | PASS | `current_course`、`since_last_deliberation`、`why_now`、`binding_reality`、`reconsideration` 与旧字段并存；frontend copy / syntax checks 通过 |
+| Regression | PASS | Phase 6 定向 product API、desk projection、frontend copy tests 通过；完整回归、validators、browser 与 real Hermes 在后续阶段复跑 |
+
+上述 PASS 只覆盖 deterministic fixture / product surface；尚未证明 Provider 行为、P6/P7/P8/P9 完整 trajectory、browser 多视口或 live Hermes business chain。
+
 ## V6 Proof Gates
 
 | Gate | Required claim | Status | Evidence |

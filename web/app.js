@@ -187,6 +187,8 @@ function deskPage() {
   if (!state.desk) return chrome(`<div class="empty-page inline"><p class="kicker">Life Desk</p><h1>还没有接过一段人生。</h1><button class="secondary" data-page="world">回到世界</button></div>`, { compact: true });
   const desk = state.desk.desk || {};
   const life = state.desk.lifetime || {};
+  const whyNow = desk.why_now || {};
+  const reconsideration = desk.reconsideration || {};
   return chrome(`
     <section class="run-header">
       <div><p class="kicker">Life Desk · ${text(life.location?.display_name || "位置未明")}</p><h1>${text(life.display_name)}</h1><p>你暂时拥有的是这段人生的下一步，不是这个人的全部。</p></div>
@@ -194,17 +196,18 @@ function deskPage() {
     </section>
     <section class="desk-layout v5-desk">
       <div class="desk-main">
-        <div class="desk-surface"><div class="section-heading"><span>抵达</span><h2>刚刚来到书案的东西</h2></div>${listMarkup(desk.arrivals, "desk-list")}</div>
-        <div class="known-strip"><span>你已经知道</span>${listMarkup(desk.known, "desk-list")}</div>
-        <div class="known-strip"><span>仍然不确定</span>${listMarkup(desk.uncertainty, "desk-list")}</div>
-        <div class="desk-surface"><div class="section-heading"><span>未完</span><h2>仍在身上的事情</h2></div>${listMarkup(desk.active_obligations, "desk-list")}</div>
+        <div class="desk-surface"><div class="section-heading"><span>此前</span><h2>你准备这样办</h2></div>${listMarkup(desk.current_course || desk.current_plan, "desk-list")}</div>
+        <div class="desk-surface"><div class="section-heading"><span>自那以后</span><h2>真正进入你所知的变化</h2></div>${listMarkup(desk.since_last_deliberation || desk.arrivals, "desk-list")}</div>
+        ${whyNow.open ? `<div class="known-strip"><span>为什么现在重新问你</span><p>${text(whyNow.text || "现实改变了此前判断的基础。")}</p>${listMarkup(whyNow.facts, "desk-list")}</div>` : ""}
+        <div class="desk-surface"><div class="section-heading"><span>不能忽略</span><h2>已经不能当作没发生的事</h2></div>${listMarkup(desk.binding_reality || desk.active_obligations, "desk-list")}</div>
+        <div class="known-strip"><span>仍然没有答案</span>${listMarkup(desk.uncertainty, "desk-list")}</div>
       </div>
       <aside class="decision-desk">
         <p class="kicker">下一步</p>
-        <h2>你准备如何继续？</h2>
-        <p>可以留下明确的一步，也可以保持等待。空白提交会被记录为等待，不会替你发明意图。</p>
+        <h2>${text(reconsideration.prompt || "现在还这样办吗？")}</h2>
+        <p>${reconsideration.attention_open ? "现实已经改变了此前判断的基础。" : "此前的判断仍在生效；你也可以主动重新看看。"} 可以留下明确的一步，也可以保持等待。</p>
         <form id="decision-form">
-          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里"></textarea>
+          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断"></textarea>
           <button class="primary wide" type="submit" ${state.busy ? "disabled" : ""}>落下这一笔</button>
         </form>
         <button class="secondary wide" data-action="continue-world" ${state.busy ? "disabled" : ""}>等待世界的下一刻</button>
@@ -330,7 +333,7 @@ async function continueWorld() {
   if (!state.active?.id) return go("volume");
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/continue`, { method: "POST", body: "{}" });
   applyWorldline(result);
-  if (result.pending_moment && state.active.inhabited_lifetime_id) {
+  if (result.pending_moment && result.continue_status === "human_judgment" && state.active.inhabited_lifetime_id) {
     state.notice = "这一刻已经停在你的书案前。";
     go("desk");
     await loadDesk();

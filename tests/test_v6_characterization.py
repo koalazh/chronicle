@@ -182,7 +182,7 @@ def test_v5_volume_mcp_rejects_a_second_write_for_the_same_wake(app_config, monk
         )
 
 
-def test_v5_continue_performs_one_global_advance_per_request(app_config):
+def test_v6_continue_runs_until_a_meaningful_boundary(app_config):
     config = replace(app_config, dev=True)
     with TestClient(create_app(config)) as client:
         created = client.post("/api/worldlines", json={"live": False})
@@ -202,4 +202,10 @@ def test_v5_continue_performs_one_global_advance_per_request(app_config):
             for event in host.db.worldline_events(worldline_id)
         )
         assert continued.json()["advanced"] is True
-        assert after == before + 1
+        assert after > before + 1
+        assert continued.json()["advanced_ticks"] == after - before
+        assert continued.json()["continue_status"] in {
+            "knot_boundary",
+            "safety_cap",
+            "no_future_trigger",
+        }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,13 @@ from .models import WorldlineKind
 from .runtime import WorldlineConflict, WorldlineError
 from .volume_live import HermesVolumeActorDriver
 from .volume_runtime import VolumeRuntimeConflict, VolumeRuntimeError
+
+V6_CONTINUE_MAX_TICKS = 12
+V6_CONTINUE_MAX_AGENT_DELIBERATIONS = 24
+V6_CONTINUE_MAX_WALL_SECONDS = 30.0
+V6_MEANINGFUL_BOUNDARY_EVENTS = frozenset(
+    {"CRISIS_ACTIVATED", "CRISIS_CHECKPOINT_ENTERED", "CRISIS_SETTLED"}
+)
 
 
 class ProductWorldlineRequest(BaseModel):
@@ -621,6 +629,64 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             },
         }
 
+    def desk_course_items(active: ChronicleHost, context: dict[str, Any]) -> list[dict[str, str]]:
+        course = context.get("current_course") or context.get("previous_course")
+        if not isinstance(course, dict):
+            return []
+        summary = str(course.get("course") or course.get("objective") or "").strip()
+        items: list[dict[str, str]] = []
+        if summary:
+            items.append({"text": public_copy(active, summary)})
+        for step in course.get("steps", []):
+            value = str(step).strip()
+            if value and value != summary:
+                items.append({"text": public_copy(active, value)})
+        return items
+
+    def desk_binding_items(active: ChronicleHost, context: dict[str, Any]) -> list[dict[str, str]]:
+        binding = context.get("binding_reality")
+        if not isinstance(binding, dict):
+            return []
+        items: list[dict[str, str]] = []
+        position = binding.get("position")
+        if isinstance(position, dict):
+            display_name = str(position.get("display_name") or "").strip()
+            if display_name:
+                items.append({"text": f"你现在在{display_name}。"})
+        labels = {
+            "active_operations": "仍在进行的行动",
+            "active_investigations": "仍在等待的调查",
+            "active_offers": "仍未落定的条件",
+            "active_agreements": "已经生效的约定",
+            "commitments": "已经承担的承诺",
+            "owned_assets": "仍在手上的资源",
+        }
+        for key, label in labels.items():
+            values = binding.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                description = product_item_text(active, value)
+                if description:
+                    items.append({"text": f"{label}：{description}"})
+        return items
+
+    def desk_why_now(active: ChronicleHost, context: dict[str, Any]) -> dict[str, Any]:
+        why_now = context.get("why_now")
+        if not isinstance(why_now, dict):
+            why_now = {}
+        reopened = str(why_now.get("decision", "")) == "REOPEN"
+        facts = product_items(active, why_now.get("facts", []))
+        return {
+            "open": reopened,
+            "text": (
+                "现实第一次改变了此前判断的基础。"
+                if reopened
+                else "此前的判断仍在生效。"
+            ),
+            "facts": facts,
+        }
+
     def public_desk(active: ChronicleHost, worldline_id: str) -> dict[str, Any]:
         row = volume_row(active, worldline_id)
         lifetime_id = lifetime_seat(active, worldline_id, str(row.get("human_lifetime_id") or ""))
@@ -628,7 +694,23 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             raise HTTPException(status_code=409, detail="请先进入一段人生")
         state = active.volume_runtime.worldline(worldline_id)
         lifetime = next(item for item in state["lifetimes"] if item["seat"] == lifetime_id)
-        context = active.volume_runtime.lifetime_context(worldline_id, lifetime_id)
+        human_attention = pending_for_human(active, worldline_id)
+        attention_wake_id = ""
+        if human_attention:
+            attention_wake_id = next(
+                (
+                    str(wake_id)
+                    for wake_id in human_attention.get("wake_ids", [])
+                    if (
+                        wake := active.db.crisis_wake(str(wake_id))
+                    ) is not None
+                    and str(wake.get("actor_id", "")) == lifetime_id
+                ),
+                "",
+            )
+        context = active.volume_runtime.lifetime_context(
+            worldline_id, lifetime_id, wake_id=attention_wake_id or None
+        )
         return {
             "worldline": public_worldline(row),
             "lifetime": public_lifetime(active, row, state["projection"], lifetime),
@@ -640,6 +722,18 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 "current_plan": product_items(active, context.get("current_plan", [])),
                 "active_obligations": product_items(active, context.get("active_obligations", [])),
                 "role": context.get("role", {}),
+                "current_course": desk_course_items(active, context),
+                "since_last_deliberation": product_items(
+                    active,
+                    (context.get("since_last_deliberation") or {}).get("facts", []),
+                ),
+                "why_now": desk_why_now(active, context),
+                "binding_reality": desk_binding_items(active, context),
+                "reconsideration": {
+                    "available": True,
+                    "attention_open": human_attention is not None,
+                    "prompt": "现在还这样办吗？",
+                },
             },
         }
 
@@ -722,6 +816,117 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         ):
             return pending
         return None
+
+    async def continue_until_boundary(
+        active: ChronicleHost, worldline_id: str
+    ) -> dict[str, Any]:
+        """Advance Host-owned ticks until Human judgment or a bounded stop condition."""
+
+        started = time.monotonic()
+        events: list[dict[str, Any]] = []
+        advanced_ticks = 0
+        agent_deliberations = 0
+        stopped_at = "no_future_trigger"
+
+        while True:
+            row = volume_row(active, worldline_id)
+            state = active.volume_runtime.worldline(worldline_id)
+            pending = state["projection"].get("pending_moment")
+            if pending:
+                if pending_for_human(active, worldline_id) is not None:
+                    stopped_at = "human_judgment"
+                    break
+                pending_wakes = [
+                    active.db.crisis_wake(wake_id)
+                    for wake_id in pending.get("wake_ids", [])
+                ]
+                agent_wakes = [
+                    wake
+                    for wake in pending_wakes
+                    if wake is not None
+                    and str(wake.get("actor_id", ""))
+                    != str(row.get("human_lifetime_id", ""))
+                ]
+                if agent_deliberations + len(agent_wakes) > V6_CONTINUE_MAX_AGENT_DELIBERATIONS:
+                    stopped_at = "safety_cap"
+                    break
+                events.extend(
+                    await asyncio.to_thread(resolve_agent_wakes, active, worldline_id)
+                )
+                agent_deliberations += len(agent_wakes)
+                continue
+
+            boundary = await asyncio.to_thread(active.volume_runtime.boundary, worldline_id)
+            if boundary["boundary"].get("ready"):
+                stopped_at = "volume_boundary"
+                break
+            if advanced_ticks >= V6_CONTINUE_MAX_TICKS:
+                stopped_at = "safety_cap"
+                break
+            if time.monotonic() - started >= V6_CONTINUE_MAX_WALL_SECONDS:
+                stopped_at = "safety_cap"
+                break
+
+            iteration_start = len(events)
+            result = await asyncio.to_thread(active.volume_runtime.advance_one, worldline_id)
+            events.extend(result.get("events", []))
+            if not result.get("advanced"):
+                stopped_at = "no_future_trigger"
+                break
+            advanced_ticks += 1
+
+            wakes = due_wakes(active, worldline_id)
+            if wakes:
+                frozen = await asyncio.to_thread(
+                    active.volume_runtime.freeze_pending_moment, worldline_id
+                )
+                frozen_event = next(
+                    (
+                        event
+                        for event in reversed(active.db.worldline_events(worldline_id))
+                        if event["event_type"] == "MOMENT_FROZEN"
+                        and event.get("payload", {}).get("moment_id") == frozen["moment_id"]
+                    ),
+                    None,
+                )
+                if frozen_event is not None:
+                    events.append(frozen_event)
+                if pending_for_human(active, worldline_id) is not None:
+                    stopped_at = "human_judgment"
+                    break
+                pending_wakes = [
+                    active.db.crisis_wake(wake_id)
+                    for wake_id in frozen["pending_moment"].get("wake_ids", [])
+                ]
+                agent_wakes = [wake for wake in pending_wakes if wake is not None]
+                if agent_deliberations + len(agent_wakes) > V6_CONTINUE_MAX_AGENT_DELIBERATIONS:
+                    stopped_at = "safety_cap"
+                    break
+                events.extend(
+                    await asyncio.to_thread(resolve_agent_wakes, active, worldline_id)
+                )
+                agent_deliberations += len(agent_wakes)
+                if pending_for_human(active, worldline_id) is not None:
+                    stopped_at = "human_judgment"
+                    break
+
+            if any(
+                str(event.get("event_type", "")) in V6_MEANINGFUL_BOUNDARY_EVENTS
+                for event in events[iteration_start:]
+            ):
+                stopped_at = "knot_boundary"
+                break
+
+        state = active.volume_runtime.worldline(worldline_id)
+        return {
+            "worldline": public_worldline(state["worldline"]),
+            "world": public_world(active, worldline_id),
+            "pending_moment": state["projection"].get("pending_moment"),
+            "advanced": advanced_ticks > 0,
+            "advanced_ticks": advanced_ticks,
+            "continue_status": stopped_at,
+            "attention": volume_attention(events),
+        }
 
     @router.post("/worldlines")
     async def create_worldline(request: ProductWorldlineRequest) -> dict[str, Any]:
@@ -877,39 +1082,9 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.post("/worldlines/{worldline_id}/continue")
     async def continue_worldline(worldline_id: str) -> dict[str, Any]:
         active = active_host()
-        row = volume_row(active, worldline_id)
         try:
-            events: list[dict[str, Any]] = []
-            if pending_for_human(active, worldline_id):
-                return {
-                    "worldline": public_worldline(row),
-                    "world": public_world(active, worldline_id),
-                    "pending_moment": active.volume_runtime.worldline(worldline_id)[
-                        "projection"
-                    ].get("pending_moment"),
-                    "attention": volume_attention([]),
-                }
-            state = active.volume_runtime.worldline(worldline_id)
-            if state["projection"].get("pending_moment"):
-                events.extend(await asyncio.to_thread(resolve_agent_wakes, active, worldline_id))
-            result = await asyncio.to_thread(active.volume_runtime.advance_one, worldline_id)
-            events.extend(result.get("events", []))
-            wakes = due_wakes(active, worldline_id)
-            if wakes:
-                frozen = await asyncio.to_thread(
-                    active.volume_runtime.freeze_pending_moment, worldline_id
-                )
-                events.append(frozen)
-                if pending_for_human(active, worldline_id) is None:
-                    events.extend(await asyncio.to_thread(resolve_agent_wakes, active, worldline_id))
-            state = active.volume_runtime.worldline(worldline_id)
-            return {
-                "worldline": public_worldline(state["worldline"]),
-                "world": public_world(active, worldline_id),
-                "pending_moment": state["projection"].get("pending_moment"),
-                "advanced": bool(result.get("advanced")),
-                "attention": volume_attention(events),
-            }
+            volume_row(active, worldline_id)
+            return await continue_until_boundary(active, worldline_id)
         except Exception as exc:
             raise classify_error(exc) from exc
 
@@ -923,27 +1098,93 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 raise VolumeRuntimeConflict("请先进入一段人生")
             state = active.volume_runtime.worldline(worldline_id)
             if not state["projection"].get("pending_moment"):
-                await asyncio.to_thread(active.volume_runtime.freeze_pending_moment, worldline_id)
+                await asyncio.to_thread(
+                    active.volume_runtime.open_voluntary_reconsideration,
+                    worldline_id,
+                    human_id,
+                )
                 state = active.volume_runtime.worldline(worldline_id)
             if pending_for_human(active, worldline_id) is None:
                 raise VolumeRuntimeConflict("当前时刻没有需要你处理的下一步")
-            intent = dict(request.intent)
-            if not intent:
-                if request.text.strip():
-                    intent = {
-                        "type": "update_plan",
-                        "objective": request.text.strip(),
-                        "steps": [request.text.strip()],
-                    }
-                else:
-                    intent = {"type": "wait"}
-            await asyncio.to_thread(
-                active.volume_runtime.stage_intent,
-                worldline_id,
-                human_id,
-                intent,
-                source="human",
+            human_wake = next(
+                (
+                    active.db.crisis_wake(wake_id)
+                    for wake_id in state["projection"]["pending_moment"]["wake_ids"]
+                    if (wake := active.db.crisis_wake(wake_id)) is not None
+                    and str(wake["actor_id"]) == human_id
+                ),
+                None,
             )
+            if human_wake is None:
+                raise VolumeRuntimeConflict("当前时刻没有可以交给你的下一步")
+            intent = dict(request.intent)
+            if request.text.strip():
+                proposal = {
+                    "outcome": "REVISE",
+                    "course": {
+                        "summary": request.text.strip(),
+                        "steps": [request.text.strip()],
+                    },
+                    "world_actions": [],
+                }
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_deliberation,
+                    worldline_id,
+                    human_id,
+                    proposal,
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
+            elif intent.get("outcome") in {"HOLD", "REVISE"}:
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_deliberation,
+                    worldline_id,
+                    human_id,
+                    intent,
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
+            elif intent.get("type") == "update_plan":
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_intent,
+                    worldline_id,
+                    human_id,
+                    intent,
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
+            elif intent.get("type") == "message":
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_intent,
+                    worldline_id,
+                    human_id,
+                    intent,
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
+            else:
+                lifetime = active.db.worldline_lifetime(worldline_id, human_id)
+                current_course = (
+                    list(lifetime.get("plan", []))[:1] if lifetime is not None else []
+                )
+                if current_course:
+                    await asyncio.to_thread(
+                        active.volume_runtime.stage_deliberation,
+                        worldline_id,
+                        human_id,
+                        {"outcome": "HOLD", "world_actions": []},
+                        source="human",
+                        wake_id=human_wake["id"],
+                    )
+                else:
+                    await asyncio.to_thread(
+                        active.volume_runtime.stage_intent,
+                        worldline_id,
+                        human_id,
+                        {"type": "wait"},
+                        source="human",
+                        wake_id=human_wake["id"],
+                    )
             await asyncio.to_thread(resolve_agent_wakes, active, worldline_id)
             state = active.volume_runtime.worldline(worldline_id)
             if state["projection"].get("pending_moment"):

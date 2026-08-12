@@ -183,6 +183,17 @@ class HermesVolumeActorDriver:
                             "belief_updates": "optional evidence-backed list",
                             "reconsider_when": "optional list",
                         },
+                        "logical_intent_tool_call": {
+                            "name": "logical_intent",
+                            "arguments": {
+                                "intent": {"type": "wait"},
+                                "idempotency_key": f"{wake['id']}:logical-intent",
+                            },
+                        },
+                        "tool_call_rule": (
+                            "logical_intent 的 arguments 必须同时包含顶层 intent 和 idempotency_key；"
+                            "不要把 intent 的字段提升为顶层参数，也不要省略任一字段。"
+                        ),
                     },
                     ensure_ascii=False,
                 ),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,6 +9,23 @@ import pytest
 from chronicle.host import ChronicleHost
 from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
 from chronicle.world import token_hash
+
+
+def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config):
+    message = HermesVolumeActorDriver(app_config, object())._messages(
+        {"id": "wake-1", "wake_type": "OBSERVATION", "worldline_id": "worldline-1", "actor_id": "wu-sangui"},
+        {"moment_id": "moment-1"},
+    )[1]
+    payload = json.loads(message["content"])
+
+    assert payload["logical_intent_tool_call"] == {
+        "name": "logical_intent",
+        "arguments": {
+            "intent": {"type": "wait"},
+            "idempotency_key": "wake-1:logical-intent",
+        },
+    }
+    assert "顶层 intent 和 idempotency_key" in payload["tool_call_rule"]
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):

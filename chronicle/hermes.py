@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,18 +108,28 @@ class HermesClient:
 
     def create_fresh_session(self, profile: str, key: str, wake_id: str) -> str | None:
         session_id = f"chronicle-{wake_id}"
-        try:
-            response = httpx.post(
-                self._url(profile, "/api/sessions"),
-                headers=self._headers(key),
-                json={"id": session_id, "title": f"Chronicle {session_id}"},
-                timeout=15,
-                trust_env=False,
-            )
-            if response.status_code in {200, 201, 409}:
-                return session_id
-        except httpx.HTTPError:
-            return None
+        title = f"Chronicle {session_id}"
+        if len(title) > 100:
+            title = f"Chronicle {session_id[:72]}-{hashlib.sha256(session_id.encode()).hexdigest()[:16]}"
+        for attempt in range(3):
+            try:
+                response = httpx.post(
+                    self._url(profile, "/api/sessions"),
+                    headers=self._headers(key),
+                    json={"id": session_id, "title": title},
+                    timeout=15,
+                    trust_env=False,
+                )
+            except httpx.HTTPError:
+                if attempt == 2:
+                    return None
+            else:
+                if response.status_code in {200, 201, 409}:
+                    return session_id
+                if not 500 <= response.status_code < 600:
+                    return None
+            if attempt < 2:
+                time.sleep(0.25 * (attempt + 1))
         return None
 
     def chat(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -42,6 +43,63 @@ def test_fresh_session_title_is_unique(monkeypatch, app_config):
 
     assert session_id
     assert request["json"] == {"id": session_id, "title": f"Chronicle {session_id}"}
+
+
+def test_fresh_session_title_is_bounded_for_long_wake_id(monkeypatch, app_config):
+    request: dict[str, object] = {}
+    wake_id = "wake:" + ("x" * 120)
+
+    def fake_post(_url, **kwargs):
+        request.update(kwargs)
+        return SimpleNamespace(status_code=201)
+
+    monkeypatch.setattr("chronicle.hermes.httpx.post", fake_post)
+
+    session_id = HermesClient(app_config).create_fresh_session(
+        PROFILE_NAMES["A"], "profile-key", wake_id
+    )
+    payload = request["json"]
+
+    assert session_id == f"chronicle-{wake_id}"
+    assert payload["id"] == session_id
+    assert len(payload["title"]) <= 100
+    assert payload["title"].endswith(hashlib.sha256(session_id.encode()).hexdigest()[:16])
+
+
+def test_fresh_session_retries_transient_gateway_failure(monkeypatch, app_config):
+    responses = iter([SimpleNamespace(status_code=500), SimpleNamespace(status_code=201)])
+    calls = 0
+
+    def fake_post(_url, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return next(responses)
+
+    monkeypatch.setattr("chronicle.hermes.httpx.post", fake_post)
+    monkeypatch.setattr("chronicle.hermes.time.sleep", lambda _delay: None)
+
+    session_id = HermesClient(app_config).create_fresh_session(
+        PROFILE_NAMES["A"], "profile-key", "a-transient-session"
+    )
+
+    assert session_id == "chronicle-a-transient-session"
+    assert calls == 2
+
+
+def test_fresh_session_does_not_retry_client_failure(monkeypatch, app_config):
+    calls = 0
+
+    def fake_post(_url, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(status_code=400)
+
+    monkeypatch.setattr("chronicle.hermes.httpx.post", fake_post)
+
+    assert HermesClient(app_config).create_fresh_session(
+        PROFILE_NAMES["A"], "profile-key", "a-client-failure"
+    ) is None
+    assert calls == 1
 
 
 def test_gateway_probe_does_not_inherit_process_proxy(monkeypatch, app_config):

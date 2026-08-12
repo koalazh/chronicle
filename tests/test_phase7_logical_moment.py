@@ -183,3 +183,40 @@ def test_pending_moment_does_not_partially_commit_before_all_intents(app_config)
     assert committed["idempotent"] is False
     assert retried["idempotent"] is True
     assert _semantic_result(runtime, worldline_id)["has_pending_moment"] is False
+
+
+def test_pending_moment_retries_after_executor_restart_before_commit(app_config, tmp_path):
+    config = replace(
+        app_config,
+        database_path=tmp_path / "base.db",
+        runtime_dir=tmp_path / "runtime",
+        hermes_home=tmp_path / "hermes-home",
+    )
+    runtime, worldline_id, wu, dorgon = _runtime(config, "restart-before-commit")
+    runtime.freeze_pending_moment(worldline_id)
+    runtime.stage_intent(
+        worldline_id,
+        wu["id"],
+        {"type": "update_plan", "objective": "保留选择", "steps": ["等待核验"]},
+        source="human",
+    )
+    runtime.stage_intent(
+        worldline_id,
+        dorgon["id"],
+        {"type": "wait"},
+        source="agent",
+    )
+
+    restarted_config = replace(
+        config,
+        database_path=tmp_path / "chronicle-restart-before-commit.db",
+    )
+    restarted = ChronicleHost(restarted_config).volume_runtime
+    committed = restarted.commit_pending_moment(worldline_id)
+    retried_after_ack_loss = runtime.commit_pending_moment(worldline_id)
+
+    assert committed["idempotent"] is False
+    assert retried_after_ack_loss["idempotent"] is True
+    assert [event["event_type"] for event in restarted.db.worldline_events(worldline_id)].count(
+        "MOMENT_COMMITTED"
+    ) == 1

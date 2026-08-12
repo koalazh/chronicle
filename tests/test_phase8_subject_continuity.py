@@ -360,3 +360,46 @@ def test_memory_ablation_paired_fixture_changes_bounded_future_action(app_config
     assert with_intent["type"] == "message"
     assert without_intent["type"] == "update_plan"
     assert copy.deepcopy(with_intent) != copy.deepcopy(without_intent)
+
+
+def test_single_agent_impostor_cannot_merge_private_lifetime_context(app_config):
+    runtime, worldline_id, wu, dorgon = _runtime(app_config, "impostor-boundary")
+    wu_memory = "吴三桂私下记录：关口承诺必须等行动验证。"
+    dorgon_memory = "多尔衮私下记录：西征路线不能让关内来信决定。"
+    runtime.db.update_worldline_lifetime(
+        worldline_id,
+        wu["seat"],
+        memory_text=wu_memory,
+        memory_hash=content_hash(wu_memory),
+    )
+    runtime.db.update_worldline_lifetime(
+        worldline_id,
+        dorgon["seat"],
+        memory_text=dorgon_memory,
+        memory_hash=content_hash(dorgon_memory),
+    )
+
+    frozen = runtime.freeze_pending_moment(worldline_id)
+    perspectives = {
+        str(runtime.db.crisis_wake(wake_id)["actor_id"]): runtime.db.crisis_wake(wake_id)[
+            "frozen_perspective"
+        ]
+        for wake_id in frozen["pending_moment"]["wake_ids"]
+    }
+
+    wu_perspective = next(
+        perspective
+        for actor_id, perspective in perspectives.items()
+        if actor_id in {wu["id"], wu["seat"]}
+    )
+    dorgon_perspective = next(
+        perspective
+        for actor_id, perspective in perspectives.items()
+        if actor_id in {dorgon["id"], dorgon["seat"]}
+    )
+    wu_context = wu_perspective["context"]
+    dorgon_context = dorgon_perspective["context"]
+    assert wu_memory in wu_context["subjective_memory"]["text"]
+    assert dorgon_memory not in wu_context["subjective_memory"]["text"]
+    assert dorgon_memory in dorgon_context["subjective_memory"]["text"]
+    assert wu_memory not in dorgon_context["subjective_memory"]["text"]

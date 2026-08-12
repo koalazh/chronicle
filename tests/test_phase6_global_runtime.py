@@ -143,3 +143,20 @@ def test_active_crisis_presence_protects_one_unresolved_knot(host):
 
     runtime.settle_crisis(worldline_id, "before-shanhaiguan")
     host.worldline_runtime.inhabit(worldline_id, wu["id"])
+
+
+def test_global_clock_queues_offscreen_wake_without_inventing_agent_intent(host):
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+
+    advanced = runtime.advance_one(worldline_id)
+
+    assert advanced["tick"] == 1
+    wakes = runtime.db.subject_wakes(worldline_id, tick=1)
+    assert [wake["actor_id"] for wake in wakes] == ["wu-sangui"]
+    assert wakes[0]["status"] == "QUEUED"
+    assert not any(
+        event["event_type"] == "INTENT_COMMITTED"
+        for event in runtime.db.worldline_events(worldline_id)
+    )

@@ -190,3 +190,41 @@ def test_live_driver_rejects_unstructured_model_output(app_config, monkeypatch, 
 
     assert host.db.crisis_wake(wake["id"])["status"] == "FAILED"
     assert host.db.crisis_wake_operations(wake["id"]) == []
+
+
+def test_live_driver_fail_closes_malformed_structured_intent(
+    app_config, monkeypatch, tmp_path: Path
+):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    seat = str(wake["actor_id"])
+    profile = f"chronicle-{worldline_id}-{seat}"
+    host.db.update_worldline_lifetime(worldline_id, seat, profile_name=profile)
+    memory = config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def create_fresh_session(self, _profile, _key, _wake_id):
+            return "fresh-session"
+
+        def chat(self, _profile, _key, _messages, session_id, _memory_key):
+            return '{"type":"update_plan"}', session_id
+
+    monkeypatch.setattr("chronicle.volume_live.HermesClient", FakeClient)
+    monkeypatch.setattr("chronicle.volume_live.profile_api_key", lambda *_args: "profile-key")
+
+    with pytest.raises(VolumeActorDriverError, match="invalid structured logical intent"):
+        HermesVolumeActorDriver(config, host.db).run_wake(wake, wake["frozen_perspective"])
+
+    assert host.db.crisis_wake(wake["id"])["status"] == "FAILED"

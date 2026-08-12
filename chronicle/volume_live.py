@@ -121,7 +121,13 @@ class HermesVolumeActorDriver:
                 )
             operation = self._logical_operation(str(wake["id"]), perspective)
         if operation is None:
-            self._stage_fallback(wake, response_text)
+            try:
+                self._stage_fallback(wake, response_text)
+            except Exception as exc:
+                self._fail_wake(wake, actor_id)
+                raise VolumeActorDriverError(
+                    f"live V5 Wake returned an invalid structured logical intent for {actor_id}"
+                ) from exc
             operation = self._logical_operation(str(wake["id"]), perspective)
         if operation is None:
             self._fail_wake(wake, actor_id)

@@ -233,54 +233,63 @@ class ProductProjection:
             self.public_lifetime(row, projection, lifetime)
             for lifetime in state["lifetimes"]
         ]
+        people_by_id = {str(person["id"]): person for person in people}
 
-        knots = []
-        for crisis_id in projection.get("active_crisis_ids", []):
-            instance = projection.get("crisis_instances", {}).get(crisis_id, {})
+        open_questions = []
+        open_statuses = {"ACTIVE", "RESOLUTION_PENDING", "AFTERMATH"}
+        for instance in state["crisis_instances"]:
+            if str(instance.get("status", "")) not in open_statuses:
+                continue
+            crisis_id = str(instance["crisis_id"])
             crisis_pack = pack.pack(crisis_id)
-            knots.append(
+            question_state = projection.get("crisis_instances", {}).get(crisis_id, {})
+            participants = []
+            for participant_id in question_state.get(
+                "participants", crisis_pack.participant_ids
+            ):
+                person = people_by_id.get(str(participant_id))
+                participants.append(
+                    person
+                    or {
+                        "id": str(participant_id),
+                        "display_name": "一位相关人物",
+                        "location": {"id": "", "display_name": "位置未明"},
+                        "available": False,
+                        "availability_reasons": ["这段人生暂时无法进入。"],
+                        "inhabited": False,
+                    }
+                )
+            open_questions.append(
                 {
                     "id": crisis_id,
                     "title": crisis_pack.crisis.title,
                     "subtitle": crisis_pack.crisis.subtitle,
-                    "phase": instance.get("phase", "OPEN"),
-                    "activation_tick": int(instance.get("activation_tick", 0)),
-                    "participants": [
-                        next(
-                            (
-                                {
-                                    "id": person["id"],
-                                    "display_name": person["display_name"],
-                                    "location": person["location"],
-                                }
-                                for person in people
-                                if person["id"] == participant_id
-                            ),
-                            {"id": participant_id, "display_name": "一位相关人物"},
-                        )
-                        for participant_id in instance.get("participants", [])
-                    ],
-                    "surface": self.public_surface(crisis_pack, instance, projection),
+                    "participants": participants,
+                    "surface": self.public_surface(crisis_pack, question_state, projection),
                 }
             )
 
-        facts = []
-        for field_event in projection.get("field_events", []):
-            if field_event.get("status") != "APPLIED":
+        present_reality = []
+        for entity in pack.world.entities:
+            current_state = str(
+                projection.get("entities", {}).get(entity.id, {}).get(
+                    "state", entity.initial_state
+                )
+            )
+            state_label = entity.state_labels.get(current_state)
+            if current_state == entity.initial_state or not state_label:
                 continue
-            facts.append(
+            present_reality.append(
                 {
-                    "id": field_event.get("id", ""),
-                    "tick": int(field_event.get("applied_tick", field_event.get("tick", 0))),
-                    "title": str(field_event.get("title") or "历史现场"),
-                    "content": self.public_copy(
-                        field_event.get("description")
-                        or field_event.get("content")
-                        or field_event.get("summary")
-                        or ""
-                    ),
+                    "id": entity.id,
+                    "title": entity.display_name,
+                    "state": current_state,
+                    "text": self.public_copy(state_label),
                 }
             )
+        current_life_id = self.lifetime_seat(
+            str(row["id"]), str(row.get("human_lifetime_id") or "")
+        )
         return {
             "worldline": self.public_worldline(row),
             "volume": {
@@ -294,19 +303,9 @@ class ProductProjection:
                 {"id": location.id, "display_name": location.display_name}
                 for location in pack.world.locations
             ],
-            "people": people,
-            "public_facts": facts,
-            "active_knots": knots,
-        }
-
-    def public_lifetimes(self, worldline_id: str) -> dict[str, Any]:
-        state = self.volume_state(worldline_id)
-        return {
-            "worldline": self.public_worldline(state["worldline"]),
-            "lifetimes": [
-                self.public_lifetime(state["worldline"], state["projection"], lifetime)
-                for lifetime in state["lifetimes"]
-            ],
+            "open_questions": open_questions,
+            "present_reality": present_reality,
+            "current_life": people_by_id.get(current_life_id) if current_life_id else None,
         }
 
     def public_follow(self, worldline_id: str, lifetime_id: str) -> dict[str, Any]:
@@ -320,13 +319,9 @@ class ProductProjection:
         labels = {
             "CRISIS_ACTIVATED": "一处局势开始收紧",
             "CRISIS_CHECKPOINT_ENTERED": "进入一个未决节点",
-            "FIELD_EVENT_APPLIED": "公共历史向前推进",
             "MESSAGE_DISPATCHED": "发出一项公开声明",
             "MESSAGE_DELIVERED": "收到一项外部消息",
-            "LIFETIME_INHABITED": "有人接过这段人生",
-            "LIFETIME_LEFT": "这段人生暂时交还世界",
             "CRISIS_SETTLED": "一处局势留下结果",
-            "MOMENT_COMMITTED": "一个时刻完成落笔",
         }
         trace = []
         for event in self.active.db.worldline_events(worldline_id):
@@ -337,7 +332,6 @@ class ProductProjection:
             if event_type not in {
                 "CRISIS_ACTIVATED",
                 "CRISIS_CHECKPOINT_ENTERED",
-                "FIELD_EVENT_APPLIED",
                 "CRISIS_SETTLED",
             } and event.get("seat_id") not in {None, lifetime_id}:
                 continue

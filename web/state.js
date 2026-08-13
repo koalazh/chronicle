@@ -4,7 +4,6 @@ export const state = {
   active: null,
   page: "volume",
   world: null,
-  lifetimes: null,
   selectedLifetime: "",
   follow: null,
   desk: null,

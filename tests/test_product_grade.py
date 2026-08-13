@@ -126,7 +126,9 @@ def test_frontend_exposes_the_v6_product_contract():
     index = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
     assert "此刻哪里值得我去活？" in source
-    assert "active_knots" in source
+    assert "open_questions" in source
+    assert "present_reality" in source
+    assert "active_knots" not in source
     assert 'data-action="inhabit"' in source
     assert 'data-action="leave-life"' in source
     assert "AbortController" in source

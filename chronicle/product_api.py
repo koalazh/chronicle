@@ -310,7 +310,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             return {
                 "worldline": view.public_worldline(active.db.worldline(worldline_id) or {}),
                 "world": view.public_world(worldline_id),
-                "lifetimes": view.public_lifetimes(worldline_id),
             }
         except Exception as exc:
             raise classify_error(exc) from exc
@@ -345,15 +344,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         volume_row(active, worldline_id)
         try:
             return projection(active).public_world(worldline_id)
-        except Exception as exc:
-            raise classify_error(exc) from exc
-
-    @router.get("/worldlines/{worldline_id}/lifetimes")
-    async def lifetimes(worldline_id: str) -> dict[str, Any]:
-        active = active_host()
-        volume_row(active, worldline_id)
-        try:
-            return projection(active).public_lifetimes(worldline_id)
         except Exception as exc:
             raise classify_error(exc) from exc
 

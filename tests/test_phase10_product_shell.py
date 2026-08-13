@@ -27,11 +27,15 @@ def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config
     payload = created.json()
     worldline = payload["worldline"]
     assert worldline["kind"] == "VOLUME"
-    assert len(payload["world"]["active_knots"]) == 2
+    assert len(payload["world"]["open_questions"]) == 2
     assert {
-        knot["id"] for knot in payload["world"]["active_knots"]
+        question["id"] for question in payload["world"]["open_questions"]
     } == {"before-shanhaiguan", "nanjing-succession"}
-    assert {item["display_name"] for item in payload["lifetimes"]["lifetimes"]} == {
+    assert {
+        participant["display_name"]
+        for question in payload["world"]["open_questions"]
+        for participant in question["participants"]
+    } == {
         "吴三桂",
         "史可法",
         "多尔衮",
@@ -39,6 +43,10 @@ def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config
         "韩赞周",
         "李自成",
     }
+    assert payload["world"]["present_reality"] == []
+    assert payload["world"]["current_life"] is None
+    assert "lifetimes" not in payload
+    assert not {"active_knots", "people", "public_facts"} & set(payload["world"])
 
     world = client.get(f"/api/worldlines/{worldline['id']}/world")
     assert world.status_code == 200
@@ -50,11 +58,9 @@ def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config
         "profile_name",
         "runtime_epoch",
     }
-    world_fact_text = " ".join(
-        item["content"] for item in world.json()["public_facts"]
-    )
-    assert "c002" not in world_fact_text
-    assert "c003" not in world_fact_text
+    assert world.json()["present_reality"] == []
+    assert not {"active_knots", "people", "public_facts"} & set(world.json())
+    assert client.get(f"/api/worldlines/{worldline['id']}/lifetimes").status_code == 404
 
 
 def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_config):
@@ -75,9 +81,8 @@ def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
         json={"lifetime_id": "wu-sangui"},
     )
     assert inhabited.status_code == 200
-    assert next(
-        item for item in inhabited.json()["world"]["people"] if item["id"] == "wu-sangui"
-    )["inhabited"] is True
+    assert inhabited.json()["world"]["current_life"]["id"] == "wu-sangui"
+    assert inhabited.json()["world"]["current_life"]["inhabited"] is True
     desk = client.get(f"/api/worldlines/{worldline_id}/desk")
     assert desk.status_code == 200
     assert {"arrivals", "known", "uncertainty", "current_plan", "active_obligations"} <= set(

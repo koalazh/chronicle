@@ -132,6 +132,26 @@ function knotMarkup(knot, index) {
   `;
 }
 
+function questionMarkup(question, index) {
+  return `
+    <article class="knot-card">
+      <div class="folio">${String(index + 1).padStart(2, "0")}</div>
+      <div>
+        <p class="kicker">尚未定下</p>
+        <h3>${text(question.title)}</h3>
+        <p>${text(question.subtitle)}</p>
+        ${surfaceMarkup(question)}
+        <div class="people-grid question-people">${(question.participants || []).map(personMarkup).join("")}</div>
+      </div>
+    </article>
+  `;
+}
+
+function realityMarkup(items) {
+  if (!items?.length) return `<p class="empty-copy">眼前还没有新的现实需要记下。</p>`;
+  return `<ul class="folio-list">${items.map((item) => `<li><strong>${text(item.title)}</strong> · ${text(item.text)}</li>`).join("")}</ul>`;
+}
+
 function personMarkup(person) {
   const canEnter = person.available || person.inhabited;
   return `
@@ -157,19 +177,15 @@ function worldPage() {
         <h1>此刻哪里值得我去活？</h1>
         <p>第 ${text(world.tick)} 个时刻 · ${text(world.volume?.subtitle || "崇祯十七年")}</p>
       </div>
-      <div class="run-actions"><span class="day-count">${text(world.active_knots?.length || 0)}<small>处收紧</small></span></div>
+      <div class="run-actions"><span class="day-count">${text(world.open_questions?.length || 0)}<small>件未决</small></span></div>
     </section>
     <section class="world-section">
-      <div class="section-heading"><span>正在变得重要</span><h2>历史的高密度之处</h2></div>
-      <div class="knot-grid">${(world.active_knots || []).map(knotMarkup).join("") || `<p class="empty-copy">此刻没有需要停留的高密度之处。</p>`}</div>
+      <div class="section-heading"><span>现在还没有定下的事</span><h2>谁正在这些问题里</h2></div>
+      <div class="knot-grid">${(world.open_questions || []).map(questionMarkup).join("") || `<p class="empty-copy">眼前没有新的事情需要你介入。</p>`}</div>
     </section>
     <section class="world-section">
-      <div class="section-heading"><span>可见的人</span><h2>几段仍有下一步的人生</h2></div>
-      <div class="people-grid">${(world.people || []).map(personMarkup).join("")}</div>
-    </section>
-    <section class="world-section public-facts">
-      <div class="section-heading"><span>公共事实</span><h2>已经进入世界的东西</h2></div>
-      ${listMarkup(world.public_facts)}
+      <div class="section-heading"><span>已经成为现实</span><h2>世界留下了什么</h2></div>
+      ${realityMarkup(world.present_reality)}
     </section>
     <div class="continue-bar">
       <div><span>世界还在向前</span><small>下一次推进只落在已有的真实触发上。</small></div>
@@ -295,12 +311,7 @@ function render() {
 
 async function loadWorld() {
   if (!state.active?.id || state.active.kind !== "VOLUME") return;
-  const [world, lifetimes] = await Promise.all([
-    api(`/api/worldlines/${encodeURIComponent(state.active.id)}/world`),
-    api(`/api/worldlines/${encodeURIComponent(state.active.id)}/lifetimes`),
-  ]);
-  state.world = world;
-  state.lifetimes = lifetimes;
+  state.world = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/world`);
 }
 
 async function loadFollow() {
@@ -339,7 +350,6 @@ async function refreshActive() {
 function applyWorldline(result) {
   state.active = result.worldline || result.active || state.active;
   state.world = result.world || state.world;
-  if (result.lifetimes) state.lifetimes = result.lifetimes;
 }
 
 async function startVolume() {

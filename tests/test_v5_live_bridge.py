@@ -23,8 +23,14 @@ def test_update_plan_mcp_schema_allows_evidence_event_ids():
 
 def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config):
     messages = HermesVolumeActorDriver(app_config, object())._messages(
-        {"id": "wake-1", "wake_type": "OBSERVATION", "worldline_id": "worldline-1", "actor_id": "wu-sangui"},
-        {"moment_id": "moment-1"},
+        {
+            "id": "wake-1",
+            "wake_type": "OBSERVATION",
+            "worldline_id": "worldline-1",
+            "actor_id": "wu-sangui",
+            "trigger_event_id": "event-1",
+        },
+        {"moment_id": "moment-1", "context": {"current_course": {"course": "保持关口秩序"}}},
     )
     message = messages[1]
     system_message = messages[0]
@@ -57,6 +63,26 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
     }
     assert "wake_id" in system_message["content"]
     assert "立即结束本次回答" in system_message["content"]
+
+
+def test_live_wake_prompt_demonstrates_revise_without_a_current_course(app_config):
+    messages = HermesVolumeActorDriver(app_config, object())._messages(
+        {
+            "id": "wake-2",
+            "wake_type": "CHECKPOINT_DECISION",
+            "worldline_id": "worldline-1",
+            "actor_id": "wu-sangui",
+            "trigger_event_id": "event-2",
+        },
+        {"moment_id": "moment-2", "context": {"current_course": None}},
+    )
+    payload = json.loads(messages[1]["content"])
+    assert payload["commit_deliberation_tool_call"]["arguments"]["outcome"] == "REVISE"
+    assert payload["commit_deliberation_tool_call"]["arguments"]["course"] == {
+        "summary": "先记录当前冻结触发，再依据后续可见证据决定下一步。",
+        "steps": ["记录当前冻结触发"],
+        "evidence_event_ids": ["event-2"],
+    }
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):

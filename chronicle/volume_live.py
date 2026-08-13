@@ -156,6 +156,27 @@ class HermesVolumeActorDriver:
     def _messages(
         self, wake: dict[str, Any], perspective: dict[str, Any]
     ) -> list[dict[str, str]]:
+        context = perspective.get("context", {})
+        current_course = context.get("current_course") if isinstance(context, dict) else None
+        has_current_course = isinstance(current_course, dict) and bool(current_course)
+        trigger_event_id = str(wake.get("trigger_event_id", ""))
+        deliberation_example = {
+            "outcome": "HOLD" if has_current_course else "REVISE",
+            "course": (
+                {}
+                if has_current_course
+                else {
+                    "summary": "先记录当前冻结触发，再依据后续可见证据决定下一步。",
+                    "steps": ["记录当前冻结触发"],
+                    "evidence_event_ids": [trigger_event_id] if trigger_event_id else [],
+                }
+            ),
+            "open_dependencies": [],
+            "belief_updates": [],
+            "world_actions": [],
+            "idempotency_key": f"{wake['id']}:deliberation",
+            "wake_id": str(wake["id"]),
+        }
         return [
             {
                 "role": "system",
@@ -232,15 +253,7 @@ class HermesVolumeActorDriver:
                         },
                         "commit_deliberation_tool_call": {
                             "name": "commit_deliberation",
-                            "arguments": {
-                                "outcome": "HOLD",
-                                "course": {},
-                                "open_dependencies": [],
-                                "belief_updates": [],
-                                "world_actions": [],
-                                "idempotency_key": f"{wake['id']}:deliberation",
-                                "wake_id": str(wake["id"]),
-                            },
+                            "arguments": deliberation_example,
                         },
                         "logical_intent_examples": [
                             {

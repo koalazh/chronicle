@@ -28,6 +28,12 @@ PROFILE_NAMES = {
 ACTOR_DISTRIBUTION = "hermes/chronicle-actor"
 
 
+def _python_executable() -> str:
+    """Use one stable interpreter identity across Profile write/reconcile seams."""
+
+    return str(Path(sys.executable).resolve())
+
+
 @dataclass(frozen=True)
 class HermesProbeResult:
     available: bool
@@ -434,7 +440,7 @@ def _sync_profile_config(
         ]
         values["mcp_servers"] = {
             world_server_name: {
-                "command": str(Path(sys.executable).absolute()),
+                "command": _python_executable(),
                 "args": ["-m", "chronicle.world_mcp"],
                 "env": {
                     "CHRONICLE_DATABASE_URL": "${CHRONICLE_DATABASE_URL}",
@@ -855,7 +861,7 @@ def _sync_gateway_lifetime_mcp(
         root_env[token_key] = str(record["world_token"])
         root_env[database_key] = f"sqlite:///{config.database_path}"
         servers[server_name] = {
-            "command": str(Path(sys.executable).absolute()),
+            "command": _python_executable(),
             "args": ["-m", "chronicle.world_mcp"],
             "env": {
                 "CHRONICLE_DATABASE_URL": f"${{{database_key}}}",
@@ -1106,7 +1112,7 @@ def _verify_lifetime_runtime_configuration(
         raise RuntimeError("current Volume Gateway MCP allowlist is incomplete")
     root_env = _read_env_file(config.hermes_home / ".env")
     database_url = f"sqlite:///{config.database_path}"
-    expected_command = str(Path(sys.executable).absolute())
+    expected_command = _python_executable()
     for record in records.values():
         profile = str(record["profile"])
         server_name = str(record["world_server_name"])
@@ -1294,7 +1300,7 @@ def _verify_crisis_runtime_configuration(
         raise RuntimeError("current crisis Gateway MCP allowlist is incomplete")
     root_env = _read_env_file(config.hermes_home / ".env")
     database_url = f"sqlite:///{config.database_path}"
-    expected_command = str(Path(sys.executable).absolute())
+    expected_command = _python_executable()
     for record in records.values():
         profile = str(record["profile"])
         server_name = str(record["world_server_name"])
@@ -1373,7 +1379,7 @@ def _sync_gateway_crisis_mcp(
         root_env[token_key] = str(record["world_token"])
         root_env[database_key] = f"sqlite:///{config.database_path}"
         servers[server_name] = {
-            "command": str(Path(sys.executable).absolute()),
+            "command": _python_executable(),
             "args": ["-m", "chronicle.world_mcp"],
             "env": {
                 "CHRONICLE_DATABASE_URL": f"${{{database_key}}}",

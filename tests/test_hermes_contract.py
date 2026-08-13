@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import yaml
 
 from chronicle.db import content_hash
 from chronicle.hermes import (
+    _python_executable,
     _write_gateway_env,
     actor_protocol_prompt,
     cleanup_crisis_runtime,
@@ -76,6 +78,16 @@ def test_private_gateway_uses_the_configured_base_url_port(app_config):
     )
     assert values["API_SERVER_HOST"] == "127.0.0.1"
     assert values["API_SERVER_PORT"] == "18642"
+
+
+def test_mcp_commands_use_canonical_interpreter_path(monkeypatch, tmp_path):
+    target = tmp_path / "python-real"
+    target.touch()
+    alias = tmp_path / "python-alias"
+    alias.symlink_to(target)
+    monkeypatch.setattr(sys, "executable", str(alias))
+
+    assert _python_executable() == str(target)
 
 
 @pytest.mark.asyncio

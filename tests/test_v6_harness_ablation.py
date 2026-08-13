@@ -53,7 +53,9 @@ def test_one_action_ablation_keeps_host_boundary_without_prompt_help(app_config)
             wake_id=wake_id,
         )
 
-    assert runtime.db.crisis_wake_operations(wake_id) == []
+    operations = runtime.db.crisis_wake_operations(wake_id)
+    assert len(operations) == 1
+    assert operations[0]["result"]["status"] == "rejected"
     assert runtime.worldline(worldline_id)["worldline"]["current_tick"] == 1
 
 

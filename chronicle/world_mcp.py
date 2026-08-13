@@ -350,6 +350,16 @@ def commit_deliberation(
             "code": type(exc).__name__,
             "message": str(exc)[:400],
         }
+    if staged.get("rejected") or staged["operation"].get("result", {}).get("status") == "rejected":
+        result = staged["operation"].get("result", {})
+        return {
+            "status": "rejected",
+            "code": result.get("code", "deliberation_rejected"),
+            "message": result.get("message", "Deliberation proposal was already rejected"),
+            "moment_id": staged["moment_id"],
+            "operation_id": staged["operation"]["id"],
+            "idempotent": bool(staged["idempotent"]),
+        }
     return {
         "status": "accepted",
         "moment_id": staged["moment_id"],

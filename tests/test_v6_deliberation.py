@@ -195,8 +195,11 @@ def test_agent_revise_without_evidence_is_rejected_before_staging(app_config):
         )
 
     wake = runtime.db.crisis_wake(wake_id)
-    assert wake is not None and wake["status"] == "QUEUED"
-    assert runtime.db.crisis_wake_operations(wake_id) == []
+    assert wake is not None and wake["status"] == "STAGED"
+    operations = runtime.db.crisis_wake_operations(wake_id)
+    assert len(operations) == 1
+    assert operations[0]["result"]["status"] == "rejected"
+    assert operations[0]["payload"]["proposal_hash"]
 
 
 def test_deliberation_rejects_multiple_world_actions_atomically(app_config):
@@ -234,7 +237,84 @@ def test_deliberation_rejects_multiple_world_actions_atomically(app_config):
             idempotency_key="v6-multi-action",
             wake_id=wake_id,
         )
-    assert runtime.db.crisis_wake_operations(wake_id) == []
+    operations = runtime.db.crisis_wake_operations(wake_id)
+    assert len(operations) == 1
+    assert operations[0]["result"]["status"] == "rejected"
+
+
+def test_agent_rejected_deliberation_is_idempotent_and_consumes_the_wake(app_config):
+    config, runtime, worldline_id, wu = _runtime(app_config, "reject-once")
+    _establish_course(runtime, worldline_id, wu)
+    runtime.db.create_subject_wake(
+        {
+            "id": f"{worldline_id}:v6-reject-once",
+            "worldline_id": worldline_id,
+            "actor_id": wu["seat"],
+            "wake_type": "OBSERVATION",
+            "tick": 1,
+            "status": "QUEUED",
+            "source": "v6-deliberation-test",
+            "trigger_event_id": "",
+        }
+    )
+    frozen = runtime.freeze_pending_moment(worldline_id)
+    wake_id = next(
+        item for item in frozen["pending_moment"]["wake_ids"] if item.endswith(":v6-reject-once")
+    )
+    invalid = {
+        "outcome": "HOLD",
+        "world_actions": [
+            {"tool": "schedule_revisit", "arguments": {"after_days": 1, "reason": "甲"}},
+            {"tool": "schedule_revisit", "arguments": {"after_days": 2, "reason": "乙"}},
+        ],
+    }
+
+    with pytest.raises(VolumeRuntimeError, match="at most one action"):
+        runtime.stage_deliberation(
+            worldline_id,
+            wu["id"],
+            invalid,
+            source="agent",
+            idempotency_key="v6-reject-once",
+            wake_id=wake_id,
+        )
+    first = runtime.db.crisis_wake_operations(wake_id)[0]
+    exact_retry = runtime.stage_deliberation(
+        worldline_id,
+        wu["id"],
+        invalid,
+        source="agent",
+        idempotency_key="v6-reject-once",
+        wake_id=wake_id,
+    )
+    assert exact_retry["idempotent"] is True
+    assert exact_retry["rejected"] is True
+    assert exact_retry["operation"]["id"] == first["id"]
+    with pytest.raises(VolumeRuntimeConflict, match="one Deliberation proposal"):
+        runtime.stage_deliberation(
+            worldline_id,
+            wu["id"],
+            {"outcome": "HOLD", "world_actions": []},
+            source="agent",
+            idempotency_key="v6-reject-once-different",
+            wake_id=wake_id,
+        )
+
+    restarted = ChronicleHost(config).volume_runtime
+    with pytest.raises(VolumeRuntimeConflict, match="one Deliberation proposal"):
+        restarted.stage_deliberation(
+            worldline_id,
+            wu["id"],
+            {"outcome": "HOLD", "world_actions": []},
+            source="agent",
+            idempotency_key="v6-reject-once-after-restart",
+            wake_id=wake_id,
+        )
+    committed = restarted.commit_pending_moment(worldline_id)
+    event_types = [event["event_type"] for event in committed["events"]]
+    assert "INTENT_REJECTED" in event_types
+    assert "DELIBERATION_COMMITTED" not in event_types
+    assert restarted.db.crisis_wake(wake_id)["status"] == "COMPLETED"
 
 
 def test_staged_deliberation_survives_restart_and_replays_once(app_config):

@@ -2033,12 +2033,6 @@ class VolumeRuntime:
         wake_id: str = "",
     ) -> dict[str, Any]:
         """Stage one complete V6 Deliberation proposal without World mutation."""
-
-        try:
-            normalized = normalize_deliberation(proposal)
-        except DeliberationError as exc:
-            raise VolumeRuntimeError(str(exc)) from exc
-
         row = self._active_worldline(worldline_id)
         tick = int(row["current_tick"])
         projection = self._snapshot_projection(worldline_id, tick)
@@ -2072,9 +2066,58 @@ class VolumeRuntime:
         if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "RUNNING", "STAGED"}:
             raise VolumeRuntimeConflict(f"Wake is not stageable: {wake['status']}")
 
+        key = idempotency_key or stable_hash(
+            {"moment_id": pending["id"], "seat": seat, "proposal": proposal}
+        )
+        existing_operations = self.db.crisis_wake_operations(wake["id"])
+        existing = next(
+            (
+                operation
+                for operation in existing_operations
+                if operation["idempotency_key"] == key
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing["tool_name"] != "commit_deliberation":
+                raise VolumeRuntimeConflict("this Wake already has one staged action")
+            existing_proposal = existing["payload"].get("proposal", {})
+            return {
+                "moment_id": pending["id"],
+                "lifetime_id": lifetime["id"],
+                "seat": seat,
+                "source": actual_source,
+                "outcome": str(existing_proposal.get("outcome", "")),
+                "operation": existing,
+                "idempotent": True,
+                "rejected": existing["result"].get("status") == "rejected",
+            }
+        if existing_operations:
+            raise VolumeRuntimeConflict("this Wake already has one Deliberation proposal")
+
+        try:
+            normalized = normalize_deliberation(proposal)
+        except DeliberationError as exc:
+            error = VolumeRuntimeError(str(exc))
+            if actual_source == "agent":
+                self._record_rejected_deliberation_attempt(
+                    pending,
+                    wake,
+                    lifetime,
+                    proposal,
+                    key,
+                    error,
+                )
+            raise error from exc
+
         current_course = current_course_from_plan(list(lifetime.get("plan", [])), fallback_tick=tick)
         if normalized.outcome == "HOLD" and current_course is None:
-            raise VolumeRuntimeError("HOLD requires an existing Current Course")
+            error = VolumeRuntimeError("HOLD requires an existing Current Course")
+            if actual_source == "agent":
+                self._record_rejected_deliberation_attempt(
+                    pending, wake, lifetime, proposal, key, error
+                )
+            raise error
 
         course = normalized.course
         if normalized.outcome == "HOLD":
@@ -2102,32 +2145,44 @@ class VolumeRuntime:
                 if current_course is None and wake.get("trigger_event_id"):
                     evidence_event_ids = [str(wake["trigger_event_id"])]
                 else:
-                    raise VolumeRuntimeConflict(
+                    error = VolumeRuntimeConflict(
                         "Agent REVISE requires actor-visible evidence_event_ids"
                     )
+                    if actual_source == "agent":
+                        self._record_rejected_deliberation_attempt(
+                            pending, wake, lifetime, proposal, key, error
+                        )
+                    raise error
             dependencies = normalized.open_dependencies
             rationale = str(course.get("rationale", "")).strip()
             rationale_source = normalized.rationale_source or str(
                 course.get("rationale_source", "")
             ).strip()
 
-        course_intent = self._normalize_plan_intent(
-            worldline_id,
-            lifetime,
-            wake,
-            {
-                "type": "update_plan",
-                "objective": objective,
-                "steps": steps,
-                "rationale": rationale,
-                "rationale_source": rationale_source,
-                "belief_source": normalized.belief_source,
-                "belief_updates": normalized.belief_updates,
-                "evidence_event_ids": evidence_event_ids,
-                "open_dependencies": dependencies,
-            },
-            source=actual_source,
-        )
+        try:
+            course_intent = self._normalize_plan_intent(
+                worldline_id,
+                lifetime,
+                wake,
+                {
+                    "type": "update_plan",
+                    "objective": objective,
+                    "steps": steps,
+                    "rationale": rationale,
+                    "rationale_source": rationale_source,
+                    "belief_source": normalized.belief_source,
+                    "belief_updates": normalized.belief_updates,
+                    "evidence_event_ids": evidence_event_ids,
+                    "open_dependencies": dependencies,
+                },
+                source=actual_source,
+            )
+        except (VolumeRuntimeError, VolumeRuntimeConflict) as exc:
+            if actual_source == "agent":
+                self._record_rejected_deliberation_attempt(
+                    pending, wake, lifetime, proposal, key, exc
+                )
+            raise
 
         action_projection = self._action_projection(projection)
         staged_action: dict[str, Any] | None = None
@@ -2136,36 +2191,43 @@ class VolumeRuntime:
             action_tool = action["tool"]
             arguments = action["arguments"]
             active_packs = self._active_packs_for_actor(worldline_id, seat, projection)
-            if action_tool not in DELIBERATION_WORLD_TOOLS:
-                raise VolumeRuntimeError(f"unsupported Deliberation world action: {action_tool}")
-            if action_tool not in set(lifetime.get("authority", [])):
-                raise VolumeRuntimeConflict(
-                    f"Deliberation world action is outside {seat} authority: {action_tool}"
-                )
-            if action_tool == "communicate":
-                action_payload, action_result = self._prepare_volume_communication(
-                    worldline_id, lifetime, arguments, action_projection, tick
-                )
-            elif action_tool == "schedule_revisit":
-                action_payload, action_result = self._prepare_volume_revisit(
-                    lifetime, arguments, tick
-                )
-            elif action_tool == "investigate":
-                action_payload, action_result = self._prepare_volume_investigation(
-                    lifetime, arguments, active_packs, action_projection, tick
-                )
-            elif action_tool == "operate":
-                action_payload, action_result = self._prepare_volume_operation(
-                    lifetime, arguments, active_packs, action_projection, tick
-                )
-            else:
-                action_payload, action_result = self._prepare_volume_offer(
-                    lifetime, arguments, active_packs, action_projection, tick
-                )
-            if action_result.get("status") != "accepted":
-                raise VolumeRuntimeConflict(
-                    f"Deliberation world action is invalid: {action_result.get('code', 'rejected')}"
-                )
+            try:
+                if action_tool not in DELIBERATION_WORLD_TOOLS:
+                    raise VolumeRuntimeError(f"unsupported Deliberation world action: {action_tool}")
+                if action_tool not in set(lifetime.get("authority", [])):
+                    raise VolumeRuntimeConflict(
+                        f"Deliberation world action is outside {seat} authority: {action_tool}"
+                    )
+                if action_tool == "communicate":
+                    action_payload, action_result = self._prepare_volume_communication(
+                        worldline_id, lifetime, arguments, action_projection, tick
+                    )
+                elif action_tool == "schedule_revisit":
+                    action_payload, action_result = self._prepare_volume_revisit(
+                        lifetime, arguments, tick
+                    )
+                elif action_tool == "investigate":
+                    action_payload, action_result = self._prepare_volume_investigation(
+                        lifetime, arguments, active_packs, action_projection, tick
+                    )
+                elif action_tool == "operate":
+                    action_payload, action_result = self._prepare_volume_operation(
+                        lifetime, arguments, active_packs, action_projection, tick
+                    )
+                else:
+                    action_payload, action_result = self._prepare_volume_offer(
+                        lifetime, arguments, active_packs, action_projection, tick
+                    )
+                if action_result.get("status") != "accepted":
+                    raise VolumeRuntimeConflict(
+                        f"Deliberation world action is invalid: {action_result.get('code', 'rejected')}"
+                    )
+            except (VolumeRuntimeError, VolumeRuntimeConflict) as exc:
+                if actual_source == "agent":
+                    self._record_rejected_deliberation_attempt(
+                        pending, wake, lifetime, proposal, key, exc
+                    )
+                raise
             staged_action = {
                 "tool": action_tool,
                 "payload": action_payload,
@@ -2183,18 +2245,7 @@ class VolumeRuntime:
             "course_intent": course_intent,
             "world_action": staged_action,
         }
-        key = idempotency_key or stable_hash(
-            {"moment_id": pending["id"], "seat": seat, "proposal": stored_proposal}
-        )
-        existing = next(
-            (
-                operation
-                for operation in self.db.crisis_wake_operations(wake["id"])
-                if operation["idempotency_key"] == key
-            ),
-            None,
-        )
-        operation = existing or self.db.add_crisis_wake_operation(
+        operation = self.db.add_crisis_wake_operation(
             {
                 "wake_id": wake["id"],
                 "tool_name": "commit_deliberation",
@@ -2219,8 +2270,59 @@ class VolumeRuntime:
             "source": actual_source,
             "outcome": normalized.outcome,
             "operation": operation,
-            "idempotent": existing is not None,
+            "idempotent": False,
+            "rejected": False,
         }
+
+    def _record_rejected_deliberation_attempt(
+        self,
+        pending: dict[str, Any],
+        wake: dict[str, Any],
+        lifetime: dict[str, Any],
+        proposal: Any,
+        idempotency_key: str,
+        error: VolumeRuntimeError,
+    ) -> dict[str, Any]:
+        """Consume one Agent proposal slot without persisting provider input."""
+
+        existing = next(
+            (
+                operation
+                for operation in self.db.crisis_wake_operations(wake["id"])
+                if operation["idempotency_key"] == idempotency_key
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        try:
+            proposal_hash = stable_hash(proposal)
+        except (TypeError, ValueError):
+            proposal_hash = stable_hash({"repr": repr(proposal)})
+        operation = self.db.add_crisis_wake_operation(
+            {
+                "wake_id": wake["id"],
+                "tool_name": "commit_deliberation",
+                "payload": {
+                    "moment_id": pending["id"],
+                    "lifetime_id": lifetime["id"],
+                    "seat": lifetime["seat"],
+                    "source": "agent",
+                    "proposal_hash": proposal_hash,
+                },
+                "result": {
+                    "status": "rejected",
+                    "moment_id": pending["id"],
+                    "code": type(error).__name__,
+                    "message": str(error)[:240],
+                },
+                "status": "PROPOSED",
+                "idempotency_key": idempotency_key,
+            }
+        )
+        if wake["status"] != "STAGED":
+            self.db.update_crisis_wake(wake["id"], status="STAGED")
+        return operation
 
     def stage_actor_tool(
         self,

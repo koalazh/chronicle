@@ -167,7 +167,8 @@ class HermesVolumeActorDriver:
                     "选定并调用一个工具后必须立即结束本次回答；工具返回后绝对不要再次调用任何工具，"
                     "不要补充、检查、修正或再调用其他世界工具。"
                     "outcome 只能是 HOLD 或 REVISE；world_actions 最多一个。"
-                    "没有足够依据改变行动时，使用 HOLD 且提交空 world_actions。"
+                    "只有 frozen_perspective.context.current_course 非空时才允许 HOLD；如果当前没有 Course，"
+                    "必须使用 REVISE，并提供有冻结证据支持的 course.summary、steps 与 evidence_event_ids。"
                     "active_crisis_context 中的 subject_affordances 是按当前主体和当前状态筛选的真实选项；"
                     "工具参数必须对应其中的 id、target 或 method，不要从通用 available_affordances 猜测不可用目标。"
                     "operate 的 targets 必须使用 subject_affordances.operations 中 targets 的 options 的实体 id，"
@@ -176,7 +177,10 @@ class HermesVolumeActorDriver:
                     "[{type, subject: 实体 id, value}]，不要加入 party_ids，也不要把 subject 写成对象。"
                     "每次直接调用 chronicle-world 工具都必须带 wake_id，且逐字等于本次用户 payload 顶层的 wake_id；"
                     "wake_id 是内部 Wake 边界，不是 UI 字段，不得省略、改写或猜测。"
-                    "REVISE 必须在 course.evidence_event_ids 引用冻结视角中可见的 event_id；没有证据时保持 HOLD。"
+                    "REVISE 必须逐字复制 frozen_perspective 中可见的 event_id，禁止使用 c001 等猜测或场景编号；"
+                    "没有任何可见证据时才保持 HOLD（且前提是已有 Course）。"
+                    "open_dependencies 的 type 只能是 DEADLINE、MESSAGE_FROM、OBSERVATION_FOR、"
+                    "OPERATION_OUTCOME、OFFER_CHANGE、AGREEMENT_CHANGE 或 ENTITY_OBSERVED_CHANGE；禁止使用 OFFER。"
                     "belief_updates 的每一项必须使用 subject、assessment、confidence、evidence_event_ids 四个字段；"
                     "禁止使用 belief、text 或其他别名，且 evidence_event_ids 只能引用冻结视角中可见的 event_id。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
@@ -209,7 +213,13 @@ class HermesVolumeActorDriver:
                                 "steps": "optional list",
                                 "evidence_event_ids": "required for Agent REVISE",
                             },
-                            "open_dependencies": "typed list",
+                            "open_dependencies": [
+                                {
+                                    "id": "唯一依赖名",
+                                    "type": "DEADLINE|MESSAGE_FROM|OBSERVATION_FOR|OPERATION_OUTCOME|OFFER_CHANGE|AGREEMENT_CHANGE|ENTITY_OBSERVED_CHANGE",
+                                    "对应字段": "按 type 使用 due_tick、actor_id、investigation_id、operation_id、offer_id、agreement_id 或 entity_id",
+                                }
+                            ],
                             "belief_updates": [
                                 {
                                     "subject": "事实或判断对象",

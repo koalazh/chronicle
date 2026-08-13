@@ -44,6 +44,11 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
     assert "terms 必须是" in system_message["content"]
     assert "subject、assessment、confidence、evidence_event_ids" in system_message["content"]
     assert "禁止使用 belief、text 或其他别名" in system_message["content"]
+    assert "只有 frozen_perspective.context.current_course 非空时才允许 HOLD" in system_message[
+        "content"
+    ]
+    assert "禁止使用 OFFER" in system_message["content"]
+    assert "禁止使用 c001 等猜测或场景编号" in system_message["content"]
     assert payload["deliberation_schema"]["belief_updates"][0] == {
         "subject": "事实或判断对象",
         "assessment": "基于当前证据的判断",

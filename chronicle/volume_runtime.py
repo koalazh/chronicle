@@ -29,7 +29,7 @@ from .deliberation import (
     DeliberationError,
     normalize_deliberation,
 )
-from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
+from .models import Controller, CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
 from .resolution import get_resolution_contract
 from .subject_attention import AttentionDecision, evaluate_attention
 from .subject_continuity import LifetimeContextBuilder
@@ -41,11 +41,11 @@ if TYPE_CHECKING:
 
 
 class VolumeRuntimeError(ValueError):
-    """A user-visible error at the V5 Volume runtime boundary."""
+    """A user-visible error at the V6 Volume runtime boundary."""
 
 
 class VolumeRuntimeConflict(VolumeRuntimeError):
-    """A V5 Volume operation conflicts with the current global state."""
+    """A V6 Volume operation conflicts with the current global state."""
 
 
 VOLUME_WORLD_TOOLS = frozenset(
@@ -61,7 +61,7 @@ VOLUME_WORLD_TOOLS = frozenset(
 
 
 class VolumeRuntime:
-    """Deterministic V5 runtime for one shared Volume Worldline."""
+    """Deterministic V6 runtime for one shared Volume Worldline."""
 
     def __init__(self, host: ChronicleHost):
         self.host = host
@@ -73,7 +73,7 @@ class VolumeRuntime:
         return self.pack.volume.id
 
     def create(self, *, runtime_mode: str = "fixture") -> dict[str, Any]:
-        """Create the one V5 Volume Worldline and its persistent Lifetime rows."""
+        """Create the one V6 Volume Worldline and its persistent Lifetime rows."""
 
         if runtime_mode not in {"fixture", "live"}:
             raise VolumeRuntimeError("runtime_mode must be fixture or live")
@@ -97,7 +97,7 @@ class VolumeRuntime:
                 "runtime_mode": runtime_mode,
                 "base_projection": initial_projection,
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             event_id=f"{worldline_id}:created",
             runtime_epoch=runtime_epoch,
         )
@@ -112,7 +112,7 @@ class VolumeRuntime:
                 "shared_entity_ids": [entity.id for entity in self.pack.world.entities],
                 "institutional_state": dict(self.pack.world.institutional_state),
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[created["id"]],
             event_id=f"{worldline_id}:world-initialized",
             runtime_epoch=runtime_epoch,
@@ -158,7 +158,7 @@ class VolumeRuntime:
                         "runtime_epoch": runtime_epoch,
                         "runtime_mode": runtime_mode,
                     },
-                    "parent_canon_lifetime": f"{self.volume_id}:{lifetime_id}",
+                    "genesis_parent_id": f"{self.volume_id}:{lifetime_id}",
                     "genesis_hash": stable_hash(genesis),
                     "memory_text": "",
                     "memory_hash": content_hash(""),
@@ -188,7 +188,7 @@ class VolumeRuntime:
                         ),
                     },
                     seat_id=lifetime_id,
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[initialized["id"]],
                     event_id=f"{worldline_id}:lifetime:{lifetime_id}:genesis",
                     runtime_epoch=runtime_epoch,
@@ -225,7 +225,7 @@ class VolumeRuntime:
                         "participants": list(reference.participants or pack.participant_ids),
                         "local_horizon": reference.local_horizon,
                     },
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[initialized["id"]],
                     event_id=f"{worldline_id}:envelope:{reference.id}:registered",
                     runtime_epoch=runtime_epoch,
@@ -301,7 +301,7 @@ class VolumeRuntime:
                             "runtime_epoch": runtime_epoch,
                             "profile_name": lifetime["profile_name"],
                             "ownership_marker": metadata["ownership_marker"],
-                            "distribution_version": "chronicle-actor-v5",
+                            "distribution_version": "chronicle-actor-v6",
                             "token_hash": token_hash(world_token) if world_token else "",
                         }
                     )
@@ -347,16 +347,16 @@ class VolumeRuntime:
                 if item.get("kind") == WorldlineKind.VOLUME.value
             ]
             if len(active_volumes) != 1 or active_volumes[0]["id"] != worldline_id:
-                raise VolumeRuntimeError("V5 Volume Worldline owner is not unique")
+                raise VolumeRuntimeError("V6 Volume Worldline owner is not unique")
             lifetimes = self.db.worldline_lifetimes(worldline_id)
             expected_lifetimes = set(self.pack.lifetimes)
             if {str(item["seat"]) for item in lifetimes} != expected_lifetimes:
-                raise VolumeRuntimeError("V5 Lifetime binding set is incomplete")
+                raise VolumeRuntimeError("V6 Lifetime binding set is incomplete")
             bindings = self.db.agent_bindings(worldline_id)
             if {str(item["role"]) for item in bindings} != expected_lifetimes:
-                raise VolumeRuntimeError("V5 agent binding set is incomplete")
+                raise VolumeRuntimeError("V6 agent binding set is incomplete")
             if any(str(item.get("status")) != "ACTIVE" for item in bindings):
-                raise VolumeRuntimeError("V5 agent binding is not active")
+                raise VolumeRuntimeError("V6 agent binding is not active")
             profile_records = hermes.load_lifetime_profile_records(
                 self.host.config,
                 worldline_id,
@@ -374,14 +374,14 @@ class VolumeRuntime:
                 lifetime = self.db.worldline_lifetime(worldline_id, seat)
                 record = records_by_seat.get(seat)
                 if lifetime is None or record is None:
-                    raise VolumeRuntimeError(f"V5 binding is missing for {seat}")
+                    raise VolumeRuntimeError(f"V6 binding is missing for {seat}")
                 if (
                     str(binding["profile_identity"]) != str(record["profile"])
                     or str(lifetime.get("profile_name")) != str(record["profile"])
                     or str(binding["ownership_marker"]) != str(record["ownership_marker"])
                     or str(binding["token_hash"]) != token_hash(str(record["world_token"]))
                 ):
-                    raise VolumeRuntimeError(f"V5 binding identity is inconsistent for {seat}")
+                    raise VolumeRuntimeError(f"V6 binding identity is inconsistent for {seat}")
             self._validate_pending_reconcile(worldline_id)
             GatewayController(self.host.config).ensure(
                 worldline_id, str(row["runtime_epoch"])
@@ -392,7 +392,7 @@ class VolumeRuntime:
             )
             if isinstance(exc, VolumeRuntimeError):
                 raise
-            raise VolumeRuntimeError(f"V5 Volume reconcile failed: {exc}") from exc
+            raise VolumeRuntimeError(f"V6 Volume reconcile failed: {exc}") from exc
         return self.db.set_volume_runtime_state(worldline_id, "READY")
 
     def _validate_pending_reconcile(self, worldline_id: str) -> None:
@@ -428,7 +428,7 @@ class VolumeRuntime:
                 raise VolumeRuntimeError("staged Wake is not attached to a Pending Logical Moment")
 
     def ensure_live_runtime(self, worldline_id: str) -> dict[str, Any]:
-        """Ensure the exact V5 Volume Gateway is ready before live cognition."""
+        """Ensure the exact V6 Volume Gateway is ready before live cognition."""
         row = self.db.worldline(worldline_id)
         if row is None or row["kind"] != WorldlineKind.VOLUME.value:
             raise VolumeRuntimeError("VOLUME Worldline not found")
@@ -449,6 +449,49 @@ class VolumeRuntime:
             "crisis_instances": self.db.crisis_instances(worldline_id),
             "projection": snapshot["projection"],
         }
+
+    def inhabit(self, worldline_id: str, lifetime_id: str) -> dict[str, Any]:
+        """Hand one V6 Lifetime to the human controller without advancing time."""
+
+        if not lifetime_id.strip():
+            raise VolumeRuntimeError("Lifetime id is required")
+        self._active_worldline(worldline_id)
+        target = self.db.worldline_lifetime_by_id(worldline_id, lifetime_id)
+        if target is None:
+            target = self.db.worldline_lifetime(worldline_id, lifetime_id)
+        if target is None:
+            raise VolumeRuntimeError("Lifetime not found")
+        self._assert_presence_allowed(worldline_id, str(target["seat"]))
+        result = self._transition_controller(
+            worldline_id,
+            str(target["id"]),
+            Controller.HUMAN.value,
+            event_type="LIFETIME_INHABITED",
+            reason="inhabit",
+        )
+        return self._controller_response(result)
+
+    def leave(self, worldline_id: str) -> dict[str, Any]:
+        """Return the current V6 Lifetime to agent control without advancing time."""
+
+        row = self._active_worldline(worldline_id)
+        lifetime_id = str(row.get("human_lifetime_id") or "")
+        if not lifetime_id:
+            return {
+                "worldline": self._public_worldline(row),
+                "lifetime": None,
+                "event": None,
+                "handoff_wake_ids": [],
+                "idempotent": True,
+            }
+        result = self._transition_controller(
+            worldline_id,
+            lifetime_id,
+            Controller.AGENT.value,
+            event_type="LIFETIME_LEFT",
+            reason="leave",
+        )
+        return self._controller_response(result)
 
     def boundary(self, worldline_id: str) -> dict[str, Any]:
         """Evaluate the Volume boundary without turning it into an auto-ending tick."""
@@ -488,6 +531,10 @@ class VolumeRuntime:
         row = self.db.worldline(worldline_id)
         if row is None or row["kind"] != WorldlineKind.VOLUME.value:
             raise VolumeRuntimeError("VOLUME Worldline not found")
+        if row.get("runtime_mode") == "live" and row.get("runtime_phase") == "FAILED":
+            raise VolumeRuntimeConflict(
+                "Live Volume runtime is unavailable; reconcile it before continuing"
+            )
         if row["status"] == WorldlineStatus.SEALED.value:
             self._cleanup_profiles_after_seal(row)
             event = next(
@@ -527,7 +574,7 @@ class VolumeRuntime:
                 "boundary": boundary,
                 "reason": reason,
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=parent_ids,
             event_id=f"{worldline_id}:sealed",
             runtime_epoch=row["runtime_epoch"],
@@ -579,7 +626,7 @@ class VolumeRuntime:
             self.db.set_volume_runtime_state(
                 str(row["id"]), "CLEANUP_PENDING", error_code=error_code
             )
-            raise VolumeRuntimeError(f"V5 Volume cleanup failed: {error_code}") from exc
+            raise VolumeRuntimeError(f"V6 Volume cleanup failed: {error_code}") from exc
 
     def lifetime_context(
         self, worldline_id: str, lifetime_id: str, *, wake_id: str | None = None
@@ -772,7 +819,7 @@ class VolumeRuntime:
             tick,
             "CRISIS_SUPPRESSED",
             {"crisis_id": crisis_id, "reason": reason},
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             runtime_epoch=row["runtime_epoch"],
         )
         projection["last_event_id"] = event["id"]
@@ -854,7 +901,7 @@ class VolumeRuntime:
                 "phase": "OPEN",
                 "participants": list(pack.participant_ids),
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             event_id=f"{instance_id}:activated:{tick}",
             runtime_epoch=row["runtime_epoch"],
         )
@@ -1038,7 +1085,7 @@ class VolumeRuntime:
             "MESSAGE_DISPATCHED",
             message,
             seat_id=sender,
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             runtime_epoch=row["runtime_epoch"],
         )
         message["dispatch_event_id"] = event["id"]
@@ -1162,7 +1209,7 @@ class VolumeRuntime:
             target,
             "TIME_ADVANCED",
             {"from_tick": current, "to_tick": target, "clock": "volume_global"},
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=parent_ids,
             runtime_epoch=row["runtime_epoch"],
         )
@@ -1220,7 +1267,7 @@ class VolumeRuntime:
                         "due_tick": target,
                     },
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[advanced["id"]],
                     event_id=(
                         f"{worldline_id}:course:{lifetime['seat']}:dependency:"
@@ -1338,7 +1385,7 @@ class VolumeRuntime:
                     "agreement_id": str(message.get("agreement_id", "")),
                 },
                 seat_id=message["recipient"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[advanced["id"], message.get("dispatch_event_id", "")],
                 runtime_epoch=row["runtime_epoch"],
             )
@@ -1425,7 +1472,7 @@ class VolumeRuntime:
                     "OPERATION_COMPLETED",
                     {"operation": item, "visibility": visible},
                     seat_id=item["actor_id"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[item["start_event_id"]],
                     runtime_epoch=row["runtime_epoch"],
                 )
@@ -1454,7 +1501,7 @@ class VolumeRuntime:
                                 "visibility": visible,
                             },
                             seat_id=item["actor_id"],
-                            provenance=Provenance.BRANCH_DERIVED.value,
+                            provenance=Provenance.VOLUME_DERIVED.value,
                             causal_parent_ids=[completed["id"]],
                             runtime_epoch=row["runtime_epoch"],
                         )
@@ -1470,7 +1517,7 @@ class VolumeRuntime:
                             "event_id": completed["id"],
                             "observation": f"{definition.display_name}已经完成。",
                             "received_tick": target,
-                            "provenance": "branch_derived",
+                            "provenance": "volume_derived",
                             "crisis_id": crisis_id,
                         },
                         {
@@ -1503,7 +1550,7 @@ class VolumeRuntime:
                     "INVESTIGATION_COMPLETED",
                     {"investigation": item, "visibility": visible},
                     seat_id=item["actor_id"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[item["start_event_id"]],
                     runtime_epoch=row["runtime_epoch"],
                 )
@@ -1569,7 +1616,7 @@ class VolumeRuntime:
                     "OFFER_EXPIRED",
                     {"offer": offer, "visibility": [offer["issuer"], offer["recipient"]]},
                     seat_id=offer["issuer"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[offer.get("proposal_event_id", "")],
                     runtime_epoch=row["runtime_epoch"],
                 )
@@ -1682,7 +1729,7 @@ class VolumeRuntime:
                     **attention.as_dict(),
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=list(attention.trigger_event_ids),
                 event_id=(
                     f"{worldline_id}:attention:{target}:{lifetime['seat']}:"
@@ -1816,7 +1863,7 @@ class VolumeRuntime:
                 "reason": reason,
                 "outcome": outcome_data,
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             runtime_epoch=row["runtime_epoch"],
         )
         projection["last_event_id"] = event["id"]
@@ -1907,7 +1954,7 @@ class VolumeRuntime:
             tick,
             "MOMENT_FROZEN",
             {"moment_id": moment_id, "tick": tick, "wake_ids": wake_ids},
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             event_id=f"{moment_id}:frozen",
             runtime_epoch=row["runtime_epoch"],
         )
@@ -2049,7 +2096,7 @@ class VolumeRuntime:
             "message",
             "update_plan",
         }:
-            raise VolumeRuntimeError("V5 supports wait, message, and update_plan intents")
+            raise VolumeRuntimeError("V6 supports wait, message, and update_plan intents")
         intent = dict(intent)
         intent.setdefault("type", "wait")
         if intent["type"] == "update_plan":
@@ -2422,7 +2469,7 @@ class VolumeRuntime:
         idempotency_key: str = "",
         wake_id: str = "",
     ) -> dict[str, Any]:
-        """Stage one of the existing World tools in the V5 logical moment.
+        """Stage one of the existing World tools in the V6 logical moment.
 
         The Volume keeps the old crisis affordances, but their writes are still
         staged against the same frozen moment as Human and Agent plans.
@@ -2430,7 +2477,7 @@ class VolumeRuntime:
 
         tool_name = str(tool_name).strip()
         if tool_name not in VOLUME_WORLD_TOOLS:
-            raise VolumeRuntimeError(f"unsupported V5 World tool: {tool_name}")
+            raise VolumeRuntimeError(f"unsupported V6 World tool: {tool_name}")
         row = self._active_worldline(worldline_id)
         tick = int(row["current_tick"])
         projection = self._snapshot_projection(worldline_id, tick)
@@ -3031,7 +3078,7 @@ class VolumeRuntime:
                     "belief_keys": list(intent.get("belief_keys", [])),
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=causal_parent_ids,
                 event_id=(
                     f"{pending['id']}:intent:{lifetime['seat']}:{stable_hash({'wake_id': wake['id'], 'intent': intent})[:12]}"
@@ -3054,7 +3101,7 @@ class VolumeRuntime:
                         "code": operation["result"].get("code", "rejected"),
                     },
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[intent_event["id"]],
                     runtime_epoch=row["runtime_epoch"],
                 )
@@ -3102,7 +3149,7 @@ class VolumeRuntime:
                         "plan": plan,
                     },
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[intent_event["id"]],
                     event_id=f"{intent_event['id']}:plan",
                     runtime_epoch=row["runtime_epoch"],
@@ -3129,7 +3176,7 @@ class VolumeRuntime:
                         ),
                     },
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[plan_event["id"]],
                     event_id=horizon_event_id,
                     runtime_epoch=row["runtime_epoch"],
@@ -3162,7 +3209,7 @@ class VolumeRuntime:
                             "evidence_event_ids": list(update["evidence_event_ids"]),
                         },
                         seat_id=lifetime["seat"],
-                        provenance=Provenance.BRANCH_DERIVED.value,
+                        provenance=Provenance.VOLUME_DERIVED.value,
                         causal_parent_ids=[plan_event["id"]],
                         event_id=f"{plan_event['id']}:belief:{stable_hash(update)[:12]}",
                         runtime_epoch=row["runtime_epoch"],
@@ -3189,7 +3236,7 @@ class VolumeRuntime:
                     "MESSAGE_DISPATCHED",
                     message,
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[intent_event["id"]],
                     event_id=f"{pending['id']}:message:{lifetime['seat']}:{stable_hash(intent)[:12]}",
                     runtime_epoch=row["runtime_epoch"],
@@ -3218,7 +3265,7 @@ class VolumeRuntime:
                     "REVISIT_SCHEDULED",
                     {"moment_id": pending["id"], "wake_id": wake["id"], "revisit": revisit},
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[intent_event["id"]],
                     runtime_epoch=row["runtime_epoch"],
                 )
@@ -3354,7 +3401,7 @@ class VolumeRuntime:
                         "unexpected_consequence": True,
                     },
                     seat_id=lifetime["seat"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[events[-1]["id"]],
                     event_id=f"{events[-1]['id']}:unexpected-consequence",
                     runtime_epoch=row["runtime_epoch"],
@@ -3403,7 +3450,7 @@ class VolumeRuntime:
                 "tick": tick,
                 "intent_event_ids": committed_intent_ids,
             },
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=committed_intent_ids,
             event_id=f"{pending['id']}:committed",
             runtime_epoch=row["runtime_epoch"],
@@ -3467,7 +3514,7 @@ class VolumeRuntime:
                 "world_action_count": 1 if operation["payload"].get("world_action") else 0,
             },
             seat_id=lifetime["seat"],
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[intent_event["id"], *evidence_event_ids],
             event_id=f"{intent_event['id']}:deliberation",
             runtime_epoch=runtime_epoch,
@@ -3496,7 +3543,7 @@ class VolumeRuntime:
                     "course": plan,
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[deliberation_event["id"]],
                 event_id=f"{deliberation_event['id']}:decision-horizon",
                 runtime_epoch=runtime_epoch,
@@ -3524,7 +3571,7 @@ class VolumeRuntime:
                     "plan": plan,
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[deliberation_event["id"]],
                 event_id=f"{deliberation_event['id']}:plan",
                 runtime_epoch=runtime_epoch,
@@ -3546,7 +3593,7 @@ class VolumeRuntime:
                     ),
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[plan_event["id"]],
                 event_id=horizon_event_id,
                 runtime_epoch=runtime_epoch,
@@ -3580,7 +3627,7 @@ class VolumeRuntime:
                     "evidence_event_ids": list(update["evidence_event_ids"]),
                 },
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[
                     horizon_event["id"],
                     *[str(item) for item in update["evidence_event_ids"]],
@@ -3656,7 +3703,7 @@ class VolumeRuntime:
                 "MESSAGE_DISPATCHED",
                 message,
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[causal_parent_id],
                 event_id=f"{causal_parent_id}:message:{stable_hash(message)[:12]}",
                 runtime_epoch=runtime_epoch,
@@ -3687,7 +3734,7 @@ class VolumeRuntime:
                 "REVISIT_SCHEDULED",
                 {"wake_id": wake["id"], "revisit": revisit},
                 seat_id=lifetime["seat"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[causal_parent_id],
                 runtime_epoch=runtime_epoch,
             )
@@ -3787,7 +3834,7 @@ class VolumeRuntime:
                 "code": code,
             },
             seat_id=lifetime["seat"],
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[intent_event["id"]],
             runtime_epoch=runtime_epoch,
         )
@@ -3845,7 +3892,7 @@ class VolumeRuntime:
             "INVESTIGATION_STARTED",
             {"wake_id": wake["id"], "investigation": investigation, "visibility": visible},
             seat_id=wake["actor_id"],
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
             runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
         )
@@ -3906,7 +3953,7 @@ class VolumeRuntime:
             "OPERATION_STARTED",
             {"wake_id": wake["id"], "operation": started, "visibility": visible},
             seat_id=wake["actor_id"],
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
             runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
         )
@@ -3934,7 +3981,7 @@ class VolumeRuntime:
                         "visibility": visible,
                     },
                     seat_id=wake["actor_id"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[started_event["id"]],
                     runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
                 )
@@ -3994,7 +4041,7 @@ class VolumeRuntime:
                 "MESSAGE_DISPATCHED",
                 message,
                 seat_id=wake["actor_id"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
                 runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
             )
@@ -4028,7 +4075,7 @@ class VolumeRuntime:
                     "visibility": [offer["issuer"]],
                 },
                 seat_id=wake["actor_id"],
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[causal_parent_id] if causal_parent_id else [],
                 runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
             )
@@ -4171,7 +4218,7 @@ class VolumeRuntime:
                         "visibility": visible,
                     },
                     seat_id=message["sender"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[delivered["id"]],
                     runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
                 )
@@ -4192,7 +4239,7 @@ class VolumeRuntime:
                     "OFFER_ACCEPTED",
                     accepted_payload,
                     seat_id=message["sender"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[delivered["id"]],
                     runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
                 )
@@ -4216,7 +4263,7 @@ class VolumeRuntime:
                     "AGREEMENT_CREATED",
                     {"agreement": agreement, "visibility": visible},
                     seat_id=message["sender"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[accepted["id"]],
                     runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
                 )
@@ -4242,7 +4289,7 @@ class VolumeRuntime:
                     event_type,
                     {"offer": offer, "visibility": visible},
                     seat_id=message["sender"],
-                    provenance=Provenance.BRANCH_DERIVED.value,
+                    provenance=Provenance.VOLUME_DERIVED.value,
                     causal_parent_ids=[delivered["id"]],
                     runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
                 )
@@ -4264,7 +4311,7 @@ class VolumeRuntime:
                 "visibility": sorted(set(offer.get("visible_to", visible if "visible" in locals() else []))),
             },
             seat_id=message["recipient"],
-            provenance=Provenance.BRANCH_DERIVED.value,
+            provenance=Provenance.VOLUME_DERIVED.value,
             causal_parent_ids=[specialized_event_id],
             runtime_epoch=self.db.worldline(worldline_id)["runtime_epoch"],
         )
@@ -4291,7 +4338,97 @@ class VolumeRuntime:
             raise VolumeRuntimeError("VOLUME Worldline not found")
         if row["status"] != WorldlineStatus.ACTIVE.value:
             raise VolumeRuntimeConflict("Volume Worldline is sealed")
+        if row.get("runtime_mode") == "live" and row.get("runtime_phase") == "FAILED":
+            raise VolumeRuntimeConflict(
+                "Live Volume runtime is unavailable; reconcile it before continuing"
+            )
         return row
+
+    def _transition_controller(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        controller: str,
+        *,
+        event_type: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        try:
+            return self.db.transition_volume_controller(
+                worldline_id,
+                lifetime_id,
+                controller,
+                event_type=event_type,
+                reason=reason,
+            )
+        except KeyError as exc:
+            raise VolumeRuntimeError(str(exc)) from exc
+        except (sqlite3.IntegrityError, ValueError) as exc:
+            raise VolumeRuntimeConflict(str(exc)) from exc
+
+    def _assert_presence_allowed(self, worldline_id: str, target_seat: str) -> None:
+        """Prevent switching into another participant while a knot is unresolved."""
+
+        active_statuses = {"ACTIVE", "RESOLUTION_PENDING", "AFTERMATH"}
+        active_instances = [
+            instance
+            for instance in self.db.crisis_instances(worldline_id)
+            if instance["status"] in active_statuses
+        ]
+        if not active_instances:
+            return
+        inhabited_seats = {
+            str(event.get("payload", {}).get("seat") or event.get("seat_id") or "")
+            for event in self.db.worldline_events(worldline_id)
+            if event["event_type"] == "LIFETIME_INHABITED"
+        }
+        for instance in active_instances:
+            participants = set(self.pack.pack(instance["crisis_id"]).participant_ids)
+            if target_seat not in participants:
+                continue
+            prior_other = (inhabited_seats & participants) - {target_seat}
+            if prior_other:
+                raise VolumeRuntimeConflict(
+                    "this active Crisis Instance already has another inhabited Participant; "
+                    "settle it before switching sides"
+                )
+
+    def _controller_response(self, result: dict[str, Any]) -> dict[str, Any]:
+        lifetime = result["lifetime"]
+        return {
+            "worldline": self._public_worldline(result["worldline"]),
+            "lifetime": {
+                "id": lifetime["id"],
+                "worldline_id": lifetime["worldline_id"],
+                "seat": lifetime["seat"],
+                "controller": lifetime["controller"],
+                "status": lifetime["status"],
+                "profile_name": lifetime["profile_name"],
+                "profile_state": lifetime["profile_state"],
+                "updated_at": lifetime["updated_at"],
+            },
+            "event": result["event"],
+            "handoff_wake_ids": result["handoff_wake_ids"],
+            "idempotent": result["idempotent"],
+        }
+
+    @staticmethod
+    def _public_worldline(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "scenario_id": row["scenario_id"],
+            "kind": row["kind"],
+            "status": row["status"],
+            "current_tick": int(row["current_tick"]),
+            "runtime_epoch": row["runtime_epoch"],
+            "runtime_mode": row.get("runtime_mode", "fixture"),
+            "volume_id": row.get("volume_id", ""),
+            "volume_content_version": int(row.get("volume_content_version", 0)),
+            "volume_content_hash": row.get("volume_content_hash", ""),
+            "worldline_phase": row.get("worldline_phase", "READY"),
+            "human_lifetime_id": row.get("human_lifetime_id", ""),
+            "updated_at": row["updated_at"],
+        }
 
     def _resolve_ready_crises(
         self,
@@ -4353,7 +4490,7 @@ class VolumeRuntime:
                     "readiness": readiness_data,
                     "result": result_data,
                 },
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=parent_ids,
                 event_id=f"{worldline_id}:crisis:{crisis_id}:resolved:{tick}",
                 runtime_epoch=row["runtime_epoch"],
@@ -4392,7 +4529,7 @@ class VolumeRuntime:
                             "description": effect.description,
                             "visibility": sorted(crisis.get("participants", [])),
                         },
-                        provenance=Provenance.BRANCH_DERIVED.value,
+                        provenance=Provenance.VOLUME_DERIVED.value,
                         causal_parent_ids=[resolved["id"]],
                         event_id=f"{resolved['id']}:entity:{entity_id}",
                         runtime_epoch=row["runtime_epoch"],
@@ -4425,7 +4562,7 @@ class VolumeRuntime:
                             "description": effect.description,
                             "visibility": sorted(crisis.get("participants", [])),
                         },
-                        provenance=Provenance.BRANCH_DERIVED.value,
+                        provenance=Provenance.VOLUME_DERIVED.value,
                         causal_parent_ids=[resolved["id"]],
                         event_id=f"{resolved['id']}:agreement:{effect.agreement_id}",
                         runtime_epoch=row["runtime_epoch"],
@@ -4446,7 +4583,7 @@ class VolumeRuntime:
                     "contract_version": result.contract_version,
                     "outcome": result_data,
                 },
-                provenance=Provenance.BRANCH_DERIVED.value,
+                provenance=Provenance.VOLUME_DERIVED.value,
                 causal_parent_ids=[resolved["id"]],
                 event_id=f"{resolved['id']}:settled",
                 runtime_epoch=row["runtime_epoch"],
@@ -4737,7 +4874,7 @@ class VolumeRuntime:
         payload: dict[str, Any],
         *,
         seat_id: str | None = None,
-        provenance: str = "branch_derived",
+        provenance: str = "volume_derived",
         causal_parent_ids: list[str] | None = None,
         event_id: str | None = None,
         runtime_epoch: str | None = None,

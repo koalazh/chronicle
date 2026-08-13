@@ -7,13 +7,12 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .editorial import volume_attention
 from .hermes import HermesRuntimeError
 from .host import ChronicleHost
 from .models import WorldlineKind
-from .runtime import WorldlineConflict, WorldlineError
 from .volume_live import HermesVolumeActorDriver
 from .volume_runtime import VolumeRuntimeConflict, VolumeRuntimeError
 
@@ -26,10 +25,10 @@ V6_MEANINGFUL_BOUNDARY_EVENTS = frozenset(
 
 
 class ProductWorldlineRequest(BaseModel):
-    """V5 creates a Volume unless the legacy entry_id compatibility field is used."""
+    """Create the current V6 Volume Worldline."""
 
-    entry_id: str | None = Field(default=None, max_length=128)
-    seat: str = Field(default="A", max_length=16)
+    model_config = ConfigDict(extra="forbid")
+
     live: bool = False
 
 
@@ -47,9 +46,9 @@ class ProductSealRequest(BaseModel):
 
 
 def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter:
-    """Expose the V5 product contract while keeping the V4 router readable."""
+    """Expose the current V6 Volume product contract."""
 
-    router = APIRouter(prefix="/api", tags=["v5-product"])
+    router = APIRouter(prefix="/api", tags=["v6-product"])
 
     def active_host() -> ChronicleHost:
         return host_factory()
@@ -60,6 +59,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             raise HTTPException(status_code=404, detail="Worldline not found")
         if row["kind"] != WorldlineKind.VOLUME.value:
             raise HTTPException(status_code=404, detail="Volume Worldline not found")
+        if row.get("runtime_mode") == "live" and row.get("runtime_phase") == "FAILED":
+            raise HTTPException(
+                status_code=503,
+                detail="Live Volume runtime is unavailable; reconcile it before continuing",
+            )
         return row
 
     def public_worldline(row: dict[str, Any]) -> dict[str, Any]:
@@ -924,9 +928,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         }
 
     def classify_error(exc: Exception) -> HTTPException:
-        if isinstance(exc, (WorldlineConflict, VolumeRuntimeConflict)):
+        if isinstance(exc, HTTPException):
+            return exc
+        if isinstance(exc, VolumeRuntimeConflict):
             return HTTPException(status_code=409, detail=str(exc))
-        if isinstance(exc, (WorldlineError, VolumeRuntimeError)):
+        if isinstance(exc, VolumeRuntimeError):
             status = 404 if "not found" in str(exc).lower() else 400
             return HTTPException(status_code=status, detail=str(exc))
         if isinstance(exc, HermesRuntimeError):
@@ -1117,16 +1123,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.post("/worldlines")
     async def create_worldline(request: ProductWorldlineRequest) -> dict[str, Any]:
         active = active_host()
-        if request.entry_id:
-            try:
-                return await asyncio.to_thread(
-                    active.worldline_runtime.create,
-                    request.entry_id,
-                    request.seat,
-                    live=request.live,
-                )
-            except Exception as exc:
-                raise classify_error(exc) from exc
         if not request.live and not active.config.dev:
             raise HTTPException(
                 status_code=409,
@@ -1159,7 +1155,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         active = active_host()
         row = active.db.active_volume_worldline()
         if row is None:
-            return {"active": await asyncio.to_thread(active.worldline_runtime.active)}
+            return {"active": None}
         return {
             "active": public_worldline(row),
             "world": public_world(active, row["id"]),
@@ -1168,14 +1164,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.get("/worldlines")
     async def worldlines() -> dict[str, Any]:
         active = active_host()
-        if active.db.active_volume_worldline() is None:
-            legacy_worldlines = await asyncio.to_thread(active.worldline_runtime.sealed)
-            volume_worldlines = [
-                public_worldline(active.db.worldline(row["id"]) or row)
-                for row in active.db.worldlines(status="SEALED")
-                if row["kind"] == WorldlineKind.VOLUME.value
-            ]
-            return {"worldlines": [*legacy_worldlines, *volume_worldlines]}
         return {
             "worldlines": [
                 public_worldline(row)
@@ -1196,11 +1184,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.get("/worldlines/{worldline_id}/lifetimes")
     async def lifetimes(worldline_id: str) -> dict[str, Any]:
         active = active_host()
-        row = active.db.worldline(worldline_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Worldline not found")
-        if row["kind"] != WorldlineKind.VOLUME.value:
-            return await asyncio.to_thread(active.worldline_runtime.lifetimes, worldline_id)
+        volume_row(active, worldline_id)
         try:
             return public_lifetimes(active, worldline_id)
         except Exception as exc:
@@ -1228,15 +1212,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.post("/worldlines/{worldline_id}/inhabit")
     async def inhabit(worldline_id: str, request: ProductInhabitRequest) -> dict[str, Any]:
         active = active_host()
-        row = active.db.worldline(worldline_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Worldline not found")
+        row = volume_row(active, worldline_id)
         try:
             result = await asyncio.to_thread(
-                active.worldline_runtime.inhabit, worldline_id, request.lifetime_id
+                active.volume_runtime.inhabit, worldline_id, request.lifetime_id
             )
-            if row["kind"] != WorldlineKind.VOLUME.value:
-                return result
             if active.db.worldline_snapshot(worldline_id, int(row["current_tick"])) is None:
                 return result
             state = active.volume_runtime.worldline(worldline_id)
@@ -1262,13 +1242,9 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.post("/worldlines/{worldline_id}/leave")
     async def leave(worldline_id: str) -> dict[str, Any]:
         active = active_host()
-        row = active.db.worldline(worldline_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Worldline not found")
+        row = volume_row(active, worldline_id)
         try:
-            result = await asyncio.to_thread(active.worldline_runtime.leave, worldline_id)
-            if row["kind"] != WorldlineKind.VOLUME.value:
-                return result
+            result = await asyncio.to_thread(active.volume_runtime.leave, worldline_id)
             if active.db.worldline_snapshot(worldline_id, int(row["current_tick"])) is None:
                 return result
             return {
@@ -1405,11 +1381,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         lifetime_id: str | None = Query(default=None, max_length=128),
     ) -> dict[str, Any]:
         active = active_host()
-        row = active.db.worldline(worldline_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Worldline not found")
-        if row["kind"] != WorldlineKind.VOLUME.value:
-            return await asyncio.to_thread(active.worldline_runtime.debrief, worldline_id)
+        row = volume_row(active, worldline_id)
         if row["status"] != "SEALED":
             raise HTTPException(status_code=409, detail="卷册尚未到达封存边界")
         try:
@@ -1441,19 +1413,10 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.post("/worldlines/{worldline_id}/seal")
     async def seal(worldline_id: str, request: ProductSealRequest) -> dict[str, Any]:
         active = active_host()
-        row = active.db.worldline(worldline_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Worldline not found")
-        if row["kind"] == WorldlineKind.VOLUME.value:
-            try:
-                return await asyncio.to_thread(
-                    active.volume_runtime.seal, worldline_id, request.reason
-                )
-            except Exception as exc:
-                raise classify_error(exc) from exc
         try:
+            volume_row(active, worldline_id)
             return await asyncio.to_thread(
-                active.worldline_runtime.seal, worldline_id, request.reason
+                active.volume_runtime.seal, worldline_id, request.reason
             )
         except Exception as exc:
             raise classify_error(exc) from exc

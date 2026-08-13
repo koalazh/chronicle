@@ -1,38 +1,8 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
 
-from chronicle.crisis_runtime import ActorTurnResult, CrisisRunEngine, RunMode
 from chronicle.subject_attention import evaluate_attention
-
-
-class PerfectWaitDriver:
-    source = "fixture"
-
-    def run_wake(self, actor_id, wake, perspective, world):
-        return ActorTurnResult("保持等待，直到世界边界自行到达。")
-
-
-def test_perfect_wait_reaches_bounded_outcome_for_shanhai_and_nanjing(app_config):
-    for crisis_id, suffix in (
-        ("before-shanhaiguan", "shanhai"),
-        ("nanjing-succession", "nanjing"),
-    ):
-        config = replace(
-            app_config,
-            database_path=app_config.database_path.with_name(f"chronicle-v6-perfect-wait-{suffix}.db"),
-        )
-        engine = CrisisRunEngine(config, actor_driver=PerfectWaitDriver())
-        run_id = engine.create(RunMode.WATCH, crisis_id=crisis_id)["run"]["id"]
-        result = engine.run_until_idle(run_id)
-        summary = engine.run_summary(run_id)
-
-        assert summary["status"] in {"SEALED", "ACTIVE"}
-        assert int(summary["current_tick"]) <= int(summary["maximum_tick"])
-        assert result["events"]
-        assert int(summary["current_tick"]) > 0
-        assert int(result["moments"]) > 0
 
 
 def test_canonicality_perturbation_changes_state_bound_affordance(host):
@@ -111,6 +81,7 @@ def test_volume_operation_uses_crisis_local_tick_after_late_activation(host):
 
 def test_role_state_swap_attention_policy_does_not_use_seat_name():
     course = {
+        "course_schema_version": 1,
         "status": "IN_FORCE",
         "open_dependencies": [
             {"id": "await-report", "type": "MESSAGE_FROM", "actor_id": "courier"}
@@ -134,10 +105,9 @@ def test_role_state_swap_attention_policy_does_not_use_seat_name():
 
 
 def test_v6_game_proof_modules_keep_fixture_boundaries_explicit():
-    # Continuous Agency, Attention precision, Agency Conservation, Shanhai and
-    # Nanjing causal tests live in their phase-specific modules; this module only
-    # adds the three game-shaped probes above and does not create a benchmark.
-    assert PerfectWaitDriver.source == "fixture"
+    # Continuous Agency, Attention precision, Agency Conservation and the
+    # causal crisis tests live in their phase-specific modules.
+    assert evaluate_attention is not None
 
 
 def test_volume_runtime_settles_ready_crisis_through_registered_contract(host):

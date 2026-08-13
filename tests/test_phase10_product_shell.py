@@ -17,7 +17,7 @@ def _keys(value: Any) -> set[str]:
     return set()
 
 
-def test_v5_product_shell_creates_one_braided_volume_and_public_world(app_config):
+def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config):
     config = replace(app_config, dev=True)
     client = TestClient(create_app(config))
 
@@ -57,7 +57,7 @@ def test_v5_product_shell_creates_one_braided_volume_and_public_world(app_config
     assert "c003" not in world_fact_text
 
 
-def test_v5_product_shell_derives_private_desk_and_keeps_follow_public(app_config):
+def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_config):
     config = replace(app_config, dev=True)
     client = TestClient(create_app(config))
     worldline_id = client.post("/api/worldlines", json={"live": False}).json()["worldline"]["id"]
@@ -131,7 +131,7 @@ def test_v6_product_shell_continues_after_agent_handoff(app_config):
     assert resumed.json()["advanced_ticks"] > 0
 
 
-def test_v5_product_shell_keeps_fixture_creation_dev_only(app_config):
+def test_v6_product_shell_keeps_fixture_creation_dev_only(app_config):
     client = TestClient(create_app(app_config))
 
     response = client.post("/api/worldlines", json={"live": False})

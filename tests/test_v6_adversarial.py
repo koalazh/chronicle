@@ -13,12 +13,12 @@ from chronicle.host import ChronicleHost
 BOUNDARY_EVALUATOR = (
     Path(__file__).resolve().parents[1]
     / "scripts"
-    / "v5_controller_boundary_evaluator.py"
+    / "v6_controller_boundary_evaluator.py"
 )
 PUBLIC_TRACE_EXPORTER = (
     Path(__file__).resolve().parents[1]
     / "scripts"
-    / "v5_export_public_trace.py"
+    / "v6_export_public_trace.py"
 )
 
 
@@ -218,8 +218,8 @@ def test_controller_boundary_uses_blind_external_evaluator(app_config):
 
     before = runtime.db.worldline_lifetime(worldline_id, dorgon["seat"])
     assert before is not None
-    runtime.host.worldline_runtime.inhabit(worldline_id, dorgon["id"])
-    runtime.host.worldline_runtime.leave(worldline_id)
+    runtime.host.volume_runtime.inhabit(worldline_id, dorgon["id"])
+    runtime.host.volume_runtime.leave(worldline_id)
     after = runtime.db.worldline_lifetime(worldline_id, dorgon["seat"])
     assert after is not None
     assert after["controller"] == before["controller"]

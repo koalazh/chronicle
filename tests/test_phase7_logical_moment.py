@@ -22,7 +22,7 @@ def _runtime(app_config, suffix: str):
     wu = runtime.db.worldline_lifetime(worldline_id, "wu-sangui")
     dorgon = runtime.db.worldline_lifetime(worldline_id, "dorgon")
     assert wu is not None and dorgon is not None
-    host.worldline_runtime.inhabit(worldline_id, wu["id"])
+    host.volume_runtime.inhabit(worldline_id, wu["id"])
     runtime.activate_crisis(worldline_id, "before-shanhaiguan")
     runtime.advance_one(worldline_id)
     runtime.db.create_subject_wake(

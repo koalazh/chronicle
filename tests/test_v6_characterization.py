@@ -126,7 +126,7 @@ def test_completion_admits_knowledge_and_reopens_without_a_current_course(
     ]
 
 
-def test_v5_plan_is_a_single_current_plan_with_prose_reconsideration(app_config):
+def test_v6_plan_is_a_single_current_course_with_prose_reconsideration(app_config):
     _config, runtime, worldline_id, wu, _frozen = _runtime(app_config, "current-plan")
 
     runtime.stage_intent(
@@ -153,7 +153,7 @@ def test_v5_plan_is_a_single_current_plan_with_prose_reconsideration(app_config)
     assert context["current_plan"] == updated_wu["plan"]
 
 
-def test_v5_volume_mcp_rejects_a_second_write_for_the_same_wake(app_config, monkeypatch):
+def test_v6_volume_mcp_rejects_a_second_write_for_the_same_wake(app_config, monkeypatch):
     config, runtime, worldline_id, wu, frozen = _runtime(app_config, "single-write")
     wake_id = frozen["pending_moment"]["wake_ids"][0]
     wake = runtime.db.crisis_wake(wake_id)
@@ -173,7 +173,7 @@ def test_v5_volume_mcp_rejects_a_second_write_for_the_same_wake(app_config, monk
     )
 
     assert first["status"] == "accepted"
-    with pytest.raises(WorldAccessError, match="one V5 action"):
+    with pytest.raises(WorldAccessError, match="one V6 action"):
         world_mcp._volume_tool(
             "communicate",
             {"recipient": "dorgon", "content": "请确认行军态势。"},

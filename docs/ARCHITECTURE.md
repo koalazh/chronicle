@@ -42,7 +42,7 @@ Host 拥有现实：时间、来源、位置、路线、消息抵达、权限、
 | `Logical Moment` | 同一 tick 的冻结上下文、主体 intent 和原子 commit 单元 | Pending projection + Ledger |
 | `Archive` | 封存后的公共回看和选定 Lifetime 回看 | 只读；不重跑过去 |
 
-数据库保留为兼容和迁移服务的旧物理表与字段；物理表名不等于产品概念。任何迁移都必须先在副本上验证，不能通过直接改状态字段制造验收结果。
+数据库当前只创建和使用 V6 Volume 所需的表。既有 schema `10` 数据库只做一次窄的物理形状补齐（例如 Lifetime genesis 列名），不恢复旧迁移链、不读取旧 Branch/Run 数据，也不提供旧 API 兼容层。未知或旧 schema 会在写入前拒绝打开，不能通过直接改状态字段制造验收结果。
 
 ## 状态分层与隐私
 
@@ -145,7 +145,7 @@ Human/Hermes 执行顺序、网络 wall time 和模型响应快慢都不能改�
 | Archive | `/{id}/archive[?lifetime_id=...]` | public replay；可选一个 selected Lifetime replay |
 | Ending | `/{id}/seal` | 仅 boundary ready 时写入 `VOLUME_SEALED` |
 
-旧 API 和旧 replay 继续服务兼容数据，但新页面不依赖它们。新功能必须沿当前 Volume API、Host、Ledger 和 projection 边界实现。
+旧 API 和旧 replay 已不再注册；旧路径返回 404。新功能必须沿当前 Volume API、Host、Ledger 和 projection 边界实现。
 
 ## 明确不引入
 

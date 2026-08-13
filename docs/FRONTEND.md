@@ -15,7 +15,7 @@ Volume Home
   └─ Archive → 公共回看 → 人生回看 → 判断回看
 ```
 
-当前页面是 `volume`、`world`、`follow/{lifetime_id}`、`desk`、`archive` 和 `ending`。旧导航只作为兼容读取，不是新增页面的设计来源。
+当前页面是 `volume`、`world`、`follow/{lifetime_id}`、`desk`、`archive` 和 `ending`。旧导航和旧页面不再注册，不是新增页面的设计来源。
 
 ## 页面合同
 

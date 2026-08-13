@@ -57,7 +57,7 @@ VOLUME_ATTENTION_EVENT_TYPES = {
 
 
 def volume_attention(events: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Classify already-committed events for the V5 editorial shell."""
+    """Classify already-committed events for the V6 editorial shell."""
 
     for event in events:
         event_type = str(event.get("event_type", ""))

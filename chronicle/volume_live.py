@@ -17,11 +17,11 @@ from .hermes import (
 
 
 class VolumeActorDriverError(HermesRuntimeError):
-    """A controlled failure while running one live V5 Lifetime Wake."""
+    """A controlled failure while running one live V6 Lifetime Wake."""
 
 
 class HermesVolumeActorDriver:
-    """Run one fresh Hermes session and require one V5 logical intent."""
+    """Run one fresh Hermes session and require one V6 logical intent."""
 
     source = "hermes"
 
@@ -33,23 +33,23 @@ class HermesVolumeActorDriver:
         actor_id = str(wake["actor_id"])
         lifetime = self.db.worldline_lifetime(str(wake["worldline_id"]), actor_id)
         if lifetime is None or not lifetime["profile_name"]:
-            raise VolumeActorDriverError(f"live V5 Profile is missing for {actor_id}")
+            raise VolumeActorDriverError(f"live V6 Profile is missing for {actor_id}")
         profile = str(lifetime["profile_name"])
         key = profile_api_key(self.config, profile)
         if not key:
-            raise VolumeActorDriverError(f"live V5 Profile key is missing for {actor_id}")
+            raise VolumeActorDriverError(f"live V6 Profile key is missing for {actor_id}")
 
         client = HermesClient(self.config)
         session_id = client.create_fresh_session(profile, key, str(wake["id"]))
         if not session_id:
-            raise VolumeActorDriverError(f"live V5 Session creation failed for {actor_id}")
+            raise VolumeActorDriverError(f"live V6 Session creation failed for {actor_id}")
         before_text, before_hash = read_profile_memory(self.config, profile)
         before_existed = (
             self.config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
         ).exists()
         expected_hash = str(lifetime.get("memory_hash") or before_hash)
         if expected_hash != before_hash:
-            raise VolumeActorDriverError(f"live V5 Memory hash drifted for {actor_id}")
+            raise VolumeActorDriverError(f"live V6 Memory hash drifted for {actor_id}")
 
         self.db.update_crisis_wake(
             str(wake["id"]),
@@ -67,7 +67,7 @@ class HermesVolumeActorDriver:
             )
         except Exception as exc:
             self._fail_wake(wake, actor_id, profile, before_text, before_hash, before_existed)
-            raise VolumeActorDriverError(f"live V5 Wake failed for {actor_id}") from exc
+            raise VolumeActorDriverError(f"live V6 Wake failed for {actor_id}") from exc
 
         after_text, after_hash = read_profile_memory(self.config, profile)
         if after_hash != before_hash:
@@ -83,7 +83,7 @@ class HermesVolumeActorDriver:
             )
             self._fail_wake(wake, actor_id)
             raise VolumeActorDriverError(
-                f"ordinary live V5 Wake attempted a durable Memory mutation for {actor_id}"
+                f"ordinary live V6 Wake attempted a durable Memory mutation for {actor_id}"
             )
 
         operation = self._logical_operation_or_fail(wake, perspective, actor_id)
@@ -100,7 +100,7 @@ class HermesVolumeActorDriver:
                 self._fail_wake(
                     wake, actor_id, profile, before_text, before_hash, before_existed
                 )
-                raise VolumeActorDriverError(f"live V5 Wake repair failed for {actor_id}") from exc
+                raise VolumeActorDriverError(f"live V6 Wake repair failed for {actor_id}") from exc
             response_text = repair_text or response_text
             returned_session = repaired_session or returned_session
             repaired_text, repaired_hash = read_profile_memory(self.config, profile)
@@ -117,7 +117,7 @@ class HermesVolumeActorDriver:
                 )
                 self._fail_wake(wake, actor_id)
                 raise VolumeActorDriverError(
-                    f"repair V5 Wake attempted a durable Memory mutation for {actor_id}"
+                    f"repair V6 Wake attempted a durable Memory mutation for {actor_id}"
                 )
             operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
@@ -126,13 +126,13 @@ class HermesVolumeActorDriver:
             except Exception as exc:
                 self._fail_wake(wake, actor_id, failure_code="invalid_structured_intent")
                 raise VolumeActorDriverError(
-                    f"live V5 Wake returned an invalid structured logical intent for {actor_id}"
+                    f"live V6 Wake returned an invalid structured logical intent for {actor_id}"
                 ) from exc
             operation = self._logical_operation_or_fail(wake, perspective, actor_id)
         if operation is None:
             self._fail_wake(wake, actor_id, failure_code="missing_logical_intent")
             raise VolumeActorDriverError(
-                f"live V5 Wake did not produce one logical_intent operation for {actor_id}"
+                f"live V6 Wake did not produce one logical_intent operation for {actor_id}"
             )
 
         self.db.update_crisis_wake(
@@ -181,7 +181,7 @@ class HermesVolumeActorDriver:
             {
                 "role": "system",
                 "content": (
-                    "你是 Chronicle V5 中一个持续存在的历史主体，不是旁白、史官或主持人。"
+                    "你是 Chronicle V6 中一个持续存在的历史主体，不是旁白、史官或主持人。"
                     "只使用本次冻结视角中的事实、已知证据、当前计划与有限主体记忆；禁止使用后世知识，"
                     "也不要推断其他主体的私有信息。普通 Wake 不得调用 memory。"
                     "你必须调用 chronicle-world 的 commit_deliberation 恰好一次，提交一次完整判断。"
@@ -334,7 +334,7 @@ class HermesVolumeActorDriver:
             and operation["payload"].get("moment_id") == moment_id
         ]
         if len(operations) > 1:
-            raise VolumeActorDriverError("one V5 Wake produced multiple logical intents")
+            raise VolumeActorDriverError("one V6 Wake produced multiple logical intents")
         return operations[0] if operations else None
 
     def _logical_operation_or_fail(
@@ -427,7 +427,7 @@ class HermesVolumeActorDriver:
                 "seat": f"{wake['worldline_id']}:{actor_id}",
                 "tick": int(wake["tick"]),
                 "wake_type": wake["wake_type"],
-                "reason": "ordinary live V5 Wake attempted a durable Memory mutation",
+                "reason": "ordinary live V6 Wake attempted a durable Memory mutation",
                 "memory_hash_before": before_hash,
                 "memory_hash_after": after_hash,
                 "memory_diff": "".join(

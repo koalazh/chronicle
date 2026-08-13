@@ -6,50 +6,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from chronicle.app import create_app
-from chronicle.db import ChronicleDB
-from chronicle.models import Controller, WorldlineKind, WorldlineStatus
-from chronicle.runtime import WorldlineConflict, WorldlineRuntime
+from chronicle.host import ChronicleHost
+from chronicle.models import Controller
+from chronicle.volume_runtime import VolumeRuntimeConflict
 
 
-def _create_volume(db: ChronicleDB) -> str:
-    volume_id = "volume-inhabitation"
-    db.create_worldline(
-        {
-            "id": volume_id,
-            "scenario_id": "jiashen",
-            "kind": WorldlineKind.VOLUME.value,
-            "status": WorldlineStatus.ACTIVE.value,
-            "current_tick": 100,
-            "runtime_epoch": "epoch-inhabitation",
-            "volume_id": "jiashen",
-            "volume_content_version": 1,
-            "volume_content_hash": "volume-hash",
-            "worldline_phase": "READY",
-            "human_lifetime_id": "",
-        }
-    )
-    for lifetime_id, seat in (("lifetime-wu", "wu-sangui"), ("lifetime-dorgon", "dorgon")):
-        db.create_worldline_lifetime(
-            {
-                "id": lifetime_id,
-                "worldline_id": volume_id,
-                "seat": seat,
-                "controller": Controller.AGENT.value,
-                "profile_name": f"chronicle-volume-inhabitation-{lifetime_id}",
-                "profile_state": "ACTIVE",
-                "genesis_hash": f"genesis-{lifetime_id}",
-            }
-        )
-    return volume_id
+def _create_volume(host) -> str:
+    return str(host.volume_runtime.create()["worldline"]["id"])
 
 
 def test_inhabit_and_leave_preserve_one_trigger_and_do_not_advance_time(host):
-    volume_id = _create_volume(host.db)
+    volume_id = _create_volume(host)
+    baseline_event_count = len(host.db.worldline_events(volume_id))
     wake = host.db.create_subject_wake(
         {
             "id": "wake-pending-dorgon",
             "worldline_id": volume_id,
-            "lifetime_id": "lifetime-dorgon",
+            "lifetime_id": "dorgon",
             "wake_type": "OBSERVATION",
             "tick": 100,
             "status": "QUEUED",
@@ -57,11 +30,11 @@ def test_inhabit_and_leave_preserve_one_trigger_and_do_not_advance_time(host):
             "trigger_event_id": "event-message-arrived",
         }
     )
-    runtime = WorldlineRuntime(host)
+    runtime = host.volume_runtime
 
-    inhabited = runtime.inhabit(volume_id, "lifetime-dorgon")
-    assert inhabited["worldline"]["human_lifetime_id"] == "lifetime-dorgon"
-    assert inhabited["worldline"]["current_tick"] == 100
+    inhabited = runtime.inhabit(volume_id, "dorgon")
+    assert inhabited["worldline"]["human_lifetime_id"] == volume_id + ":lifetime:dorgon"
+    assert inhabited["worldline"]["current_tick"] == 0
     assert inhabited["lifetime"]["controller"] == Controller.HUMAN.value
     assert inhabited["lifetime"]["profile_state"] == "DORMANT"
     assert inhabited["handoff_wake_ids"] == [wake["id"]]
@@ -69,39 +42,43 @@ def test_inhabit_and_leave_preserve_one_trigger_and_do_not_advance_time(host):
     assert host.db.crisis_wake(wake["id"])["status"] == "WAITING_HUMAN"
     assert host.db.crisis_wake(wake["id"])["trigger_event_id"] == "event-message-arrived"
 
-    repeated = runtime.inhabit(volume_id, "lifetime-dorgon")
+    repeated = runtime.inhabit(volume_id, "dorgon")
     assert repeated["idempotent"] is True
     assert repeated["event"] is None
-    assert len(host.db.worldline_events(volume_id)) == 1
+    assert len(host.db.worldline_events(volume_id)) == baseline_event_count + 1
 
-    with pytest.raises(WorldlineConflict, match="leave it first"):
-        runtime.inhabit(volume_id, "lifetime-wu")
+    with pytest.raises(VolumeRuntimeConflict, match="leave it first"):
+        runtime.inhabit(volume_id, "wu-sangui")
 
     left = runtime.leave(volume_id)
     assert left["worldline"]["human_lifetime_id"] == ""
-    assert left["worldline"]["current_tick"] == 100
+    assert left["worldline"]["current_tick"] == 0
     assert left["lifetime"]["controller"] == Controller.AGENT.value
     assert left["lifetime"]["profile_state"] == "ACTIVE"
     assert left["handoff_wake_ids"] == [wake["id"]]
     assert left["event"]["event_type"] == "LIFETIME_LEFT"
     assert host.db.crisis_wake(wake["id"])["status"] == "QUEUED"
     assert host.db.crisis_wake(wake["id"])["trigger_event_id"] == "event-message-arrived"
-    assert len(host.db.worldline_events(volume_id)) == 2
+    assert len(host.db.worldline_events(volume_id)) == baseline_event_count + 2
+    assert [event["event_type"] for event in host.db.worldline_events(volume_id)][-2:] == [
+        "LIFETIME_INHABITED",
+        "LIFETIME_LEFT",
+    ]
     assert all(event["event_type"] != "TIME_ADVANCED" for event in host.db.worldline_events(volume_id))
 
     repeated_leave = runtime.leave(volume_id)
     assert repeated_leave["idempotent"] is True
     assert repeated_leave["event"] is None
-    assert len(host.db.worldline_events(volume_id)) == 2
+    assert len(host.db.worldline_events(volume_id)) == baseline_event_count + 2
 
 
 def test_controller_boundary_ablation_preserves_subject_state_and_trigger(host):
-    volume_id = _create_volume(host.db)
+    volume_id = _create_volume(host)
     wake = host.db.create_subject_wake(
         {
             "id": "wake-ablation-dorgon",
             "worldline_id": volume_id,
-            "lifetime_id": "lifetime-dorgon",
+            "lifetime_id": "dorgon",
             "wake_type": "OBSERVATION",
             "tick": 100,
             "status": "QUEUED",
@@ -125,14 +102,14 @@ def test_controller_boundary_ablation_preserves_subject_state_and_trigger(host):
     before_wake = host.db.crisis_wake(wake["id"])
     assert before is not None and before_wake is not None
 
-    runtime = WorldlineRuntime(host)
-    runtime.inhabit(volume_id, "lifetime-dorgon")
+    runtime = host.volume_runtime
+    runtime.inhabit(volume_id, "dorgon")
     runtime.leave(volume_id)
 
     after = host.db.worldline_lifetime(volume_id, "dorgon")
     after_wake = host.db.crisis_wake(wake["id"])
     assert after is not None and after_wake is not None
-    assert host.db.worldline(volume_id)["current_tick"] == 100
+    assert host.db.worldline(volume_id)["current_tick"] == 0
     assert after["plan"] == before["plan"]
     assert after["beliefs"] == before["beliefs"]
     assert after["commitments"] == before["commitments"]
@@ -140,40 +117,30 @@ def test_controller_boundary_ablation_preserves_subject_state_and_trigger(host):
     assert after_wake["id"] == before_wake["id"]
     assert after_wake["trigger_event_id"] == before_wake["trigger_event_id"]
     assert after_wake["status"] == "QUEUED"
-    assert [event["event_type"] for event in host.db.worldline_events(volume_id)] == [
+    assert [event["event_type"] for event in host.db.worldline_events(volume_id)][-2:] == [
         "LIFETIME_INHABITED",
         "LIFETIME_LEFT",
     ]
 
 
 def test_inhabitation_endpoints_use_the_same_volume_transition(app_config):
-    db = ChronicleDB(app_config.database_path)
-    volume_id = _create_volume(db)
+    host = ChronicleHost(app_config)
+    volume_id = _create_volume(host)
     client = TestClient(create_app(app_config))
 
     inhabited = client.post(
         f"/api/worldlines/{volume_id}/inhabit",
-        json={"lifetime_id": "lifetime-wu"},
+        json={"lifetime_id": "wu-sangui"},
     )
     assert inhabited.status_code == 200
-    assert inhabited.json()["worldline"]["human_lifetime_id"] == "lifetime-wu"
+    assert inhabited.json()["worldline"]["inhabited_lifetime_id"] == "wu-sangui"
 
     left = client.post(f"/api/worldlines/{volume_id}/leave")
     assert left.status_code == 200
-    assert left.json()["worldline"]["human_lifetime_id"] == ""
+    assert left.json()["worldline"]["inhabited_lifetime_id"] == ""
 
-    branch = db.create_worldline(
-        {
-            "id": "legacy-branch-for-inhabit",
-            "kind": WorldlineKind.BRANCH.value,
-            "status": WorldlineStatus.ACTIVE.value,
-            "current_tick": 100,
-            "controller_seat": "A",
-        }
-    )
-    assert branch["kind"] == WorldlineKind.BRANCH.value
     rejected = client.post(
-        f"/api/worldlines/{branch['id']}/inhabit",
-        json={"lifetime_id": "lifetime-wu"},
+        "/api/worldlines/not-a-volume/inhabit",
+        json={"lifetime_id": "wu-sangui"},
     )
-    assert rejected.status_code == 409
+    assert rejected.status_code == 404

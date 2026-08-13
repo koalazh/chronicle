@@ -79,7 +79,7 @@ def test_volume_wake_id_routes_tools_to_the_exact_duplicate_subject_wake(app_con
     pending = snapshot["projection"]["pending_moment"]
     first_wake_id = pending["wake_ids"][0]
     exact_wake_id = f"{worldline_id}:duplicate-wu-wake"
-    runtime.db.create_crisis_wake(
+    runtime.db.create_subject_wake(
         {
             "id": exact_wake_id,
             "worldline_id": worldline_id,

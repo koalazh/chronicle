@@ -9,43 +9,20 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppConfig, is_loopback_host, load_config, write_runtime_env
-from .crisis import CrisisPack, CrisisValidationError, VolumeRegistry
-from .crisis_runtime import (
-    CrisisRunConflict,
-    CrisisRunEngine,
-    CrisisRunError,
-    RunMode,
-)
-from .db import ChronicleDB
+from .crisis import CrisisPack, CrisisValidationError, VolumePack
 from .doctor import doctor
-from .hermes import HermesRuntimeError
-from .hermes import bootstrap as bootstrap_hermes
-from .host import BranchEngine, ChronicleHost
-from .live_runtime import LiveRuntimeManager
-from .models import BranchAction, WakeType
+from .host import ChronicleHost
 from .product_api import build_product_router
-from .runtime import WorldlineConflict, WorldlineError, WorldlineRuntime
 from .subject_continuity import SubjectContinuityError
 from .volume_runtime import VolumeRuntimeError
 
 logger = logging.getLogger(__name__)
-
-
-class AdvanceRequest(BaseModel):
-    tick: int = Field(ge=0, le=78)
-
-
-class WakeRequest(BaseModel):
-    tick: int | None = Field(default=None, ge=0, le=78)
-    wake_type: WakeType = WakeType.OBSERVATION
-    live: bool = False
-    outcome: str = ""
 
 
 class SetupRequest(BaseModel):
@@ -54,47 +31,6 @@ class SetupRequest(BaseModel):
     model: str = Field(max_length=256)
     api_mode: Literal["chat_completions", "responses"] = "chat_completions"
     reasoning_effort: str = Field(default="", max_length=128)
-
-
-class CreateWorldlineRequest(BaseModel):
-    entry_id: str = Field(max_length=128)
-    seat: str = Field(default="A", max_length=16)
-    live: bool = False
-
-
-class InhabitRequest(BaseModel):
-    lifetime_id: str = Field(min_length=1, max_length=128)
-
-
-class WorldlineInputRequest(BaseModel):
-    text: str = Field(max_length=4000)
-
-
-class WorldlineConfirmRequest(BaseModel):
-    confirmation_id: str = Field(max_length=128)
-
-
-class WorldlineAdvanceRequest(BaseModel):
-    live: bool = False
-
-
-class WorldlineSealRequest(BaseModel):
-    reason: str = Field(default="user_exit", max_length=256)
-
-
-class CreateRunRequest(BaseModel):
-    crisis_id: str | None = Field(default=None, min_length=1, max_length=128)
-    mode: Literal["WATCH", "TAKEOVER"]
-    human_actor_id: str | None = Field(default=None, min_length=1, max_length=128)
-    live: bool = True
-
-
-class HumanDecisionRequest(BaseModel):
-    text: str = Field(default="", max_length=4000)
-
-
-class SealRunRequest(BaseModel):
-    reason: str = Field(default="user_exit", max_length=256)
 
 
 def _provider_url_error(value: str) -> str | None:
@@ -162,9 +98,6 @@ def _provider_model_ids(response: Any) -> set[str]:
 
 def create_app(
     config: AppConfig | None = None,
-    *,
-    live_runtime: LiveRuntimeManager | None = None,
-    manage_live_runtime_on_startup: bool = False,
 ) -> FastAPI:
     base_config = config or load_config()
     if not is_loopback_host(base_config.host):
@@ -197,21 +130,12 @@ def create_app(
         return ChronicleHost(active)
 
     def assert_archivist_open(active: ChronicleHost) -> None:
-        if active.db.active_human_worldline() is not None:
+        current = active.db.active_volume_worldline()
+        if current is not None and current.get("human_lifetime_id"):
             raise HTTPException(status_code=423, detail="Archivist view is locked while a human Seat is active")
 
-    def worldline_runtime(active: ChronicleHost) -> WorldlineRuntime:
-        return active.worldline_runtime
-
-    def worldline_http_error(exc: WorldlineError) -> HTTPException:
-        status = 423 if "Archivist view is locked" in str(exc) else 409 if isinstance(exc, WorldlineConflict) else 400
-        return HTTPException(status_code=status, detail=str(exc))
-
-    def crisis_engine() -> CrisisRunEngine:
-        return CrisisRunEngine(current_config())
-
-    def volume_registry() -> VolumeRegistry:
-        return VolumeRegistry.load(current_config().volume_path)
+    def volume_pack() -> VolumePack:
+        return VolumePack.load(current_config().volume_path)
 
     def crisis_payload(pack: CrisisPack) -> dict[str, Any]:
         return {
@@ -238,16 +162,8 @@ def create_app(
             ],
         }
 
-    managed_runtime = live_runtime
-
-    def crisis_runtime(active: AppConfig) -> LiveRuntimeManager:
-        nonlocal managed_runtime
-        if managed_runtime is None or managed_runtime.config != active:
-            managed_runtime = LiveRuntimeManager(active)
-        return managed_runtime
-
     async def reconcile_volume_runtime_on_startup() -> None:
-        """Fail closed on restart until the live V5 Volume is reconciled."""
+        """Fail closed on restart until the live V6 Volume is reconciled."""
 
         try:
             active = current_config()
@@ -269,45 +185,9 @@ def create_app(
                     str(row["id"]),
                 )
         except Exception:
-            logger.exception("Chronicle V5 Volume startup reconcile failed closed")
+            logger.exception("Chronicle V6 Volume startup reconcile failed closed")
 
     app.router.add_event_handler("startup", reconcile_volume_runtime_on_startup)
-
-    def runtime_message(run: dict[str, Any]) -> str:
-        phase = str(run.get("runtime_phase") or "READY")
-        code = str(run.get("runtime_error_code") or "")
-        if phase == "READY":
-            return ""
-        if phase in {"BOOTSTRAPPING", "RECONCILING"}:
-            return "这一局正在建立或恢复，暂不能推进。"
-        if phase == "SEALING":
-            return "这一局正在封存，暂不能继续操作。"
-        if phase == "CLEANUP_PENDING":
-            return "卷册已经封存，正在收束本地主体。"
-        if code in {"runtime_owner_unknown", "runtime_port_occupied"}:
-            return "发现一个无法安全接管的本地服务；为避免影响其他项目，这一局尚未启动。"
-        return "这一局尚未准备好；请在页面中重新准备。"
-
-    if manage_live_runtime_on_startup:
-
-        @app.on_event("startup")
-        async def reconcile_live_runtime() -> None:
-            await asyncio.to_thread(crisis_runtime(current_config()).reconcile_active)
-
-    def crisis_http_error(exc: CrisisRunError) -> HTTPException:
-        if isinstance(exc, CrisisRunConflict):
-            detail: str | dict[str, Any] = {
-                "code": exc.code,
-                "message": str(exc),
-                "state": exc.state,
-                "tick": exc.tick,
-            }
-        else:
-            detail = str(exc)
-        return HTTPException(
-            status_code=409 if isinstance(exc, CrisisRunConflict) else 400,
-            detail=detail,
-        )
 
     app.include_router(build_product_router(host))
 
@@ -334,286 +214,21 @@ def create_app(
             "dev": active.dev,
         }
 
-    @app.get("/api/crisis")
-    async def crisis() -> dict[str, Any]:
-        return crisis_payload(volume_registry().default_pack)
-
     @app.get("/api/volume")
     async def volume() -> dict[str, Any]:
-        return volume_registry().summary()
+        return volume_pack().summary()
 
     @app.get("/api/crises")
     async def crises() -> dict[str, Any]:
-        registry = volume_registry()
-        return {"crises": [pack.summary() for pack in registry.packs.values()]}
+        pack = volume_pack()
+        return {"crises": [crisis.summary() for crisis in pack.packs.values()]}
 
     @app.get("/api/crises/{crisis_id}")
     async def crisis_detail(crisis_id: str) -> dict[str, Any]:
         try:
-            return crisis_payload(volume_registry().pack(crisis_id))
+            return crisis_payload(volume_pack().pack(crisis_id))
         except CrisisValidationError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.post("/api/runs")
-    async def create_run(request: CreateRunRequest) -> dict[str, Any]:
-        active = current_config()
-        try:
-            pack = volume_registry().pack(request.crisis_id) if request.crisis_id else volume_registry().default_pack
-        except CrisisValidationError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if not request.live and not active.dev:
-            raise HTTPException(
-                status_code=409,
-                detail="正式体验只使用真实主体运行；测试替身仅在开发模式开放。",
-            )
-        if request.live and not active.llm_configured:
-            raise HTTPException(
-                status_code=409,
-                detail="请先在设置页连接主体所需的模型服务。",
-            )
-        engine = CrisisRunEngine(active, pack=pack)
-        try:
-            if request.live:
-                summary = await asyncio.to_thread(
-                    crisis_runtime(active).create,
-                    RunMode(request.mode),
-                    human_actor_id=request.human_actor_id,
-                    crisis_id=pack.crisis.id,
-                )
-                return {
-                    "run": summary,
-                    "started": summary["runtime_phase"] == "READY",
-                    "start_error": runtime_message(summary),
-                }
-            created = await asyncio.to_thread(
-                engine.create,
-                RunMode(request.mode),
-                runtime_mode="fixture",
-                human_actor_id=request.human_actor_id,
-            )
-            if not request.live:
-                await asyncio.to_thread(engine.advance_one, created["run"]["id"])
-            return {
-                "run": engine.run_summary(created["run"]["id"]),
-                "started": True,
-                "start_error": "",
-            }
-        except CrisisRunConflict as exc:
-            raise HTTPException(
-                status_code=409,
-                detail="已有一局尚未封存，请先继续或封存当前这一局。",
-            ) from exc
-        except CrisisRunError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail="这一局未能建立，请确认设置页中的模型连接后重试。",
-            ) from exc
-
-    @app.get("/api/runs/active")
-    async def active_run() -> dict[str, Any]:
-        engine = crisis_engine()
-        run = engine.db.active_run()
-        if run is None:
-            return {"run": None}
-        return {"run": engine.run_summary(run["id"])}
-
-    @app.post("/api/runs/{run_id}/continue")
-    async def continue_run(run_id: str) -> dict[str, Any]:
-        active = current_config()
-        engine = CrisisRunEngine(active)
-        try:
-            summary = engine.run_summary(run_id)
-            advancement = await asyncio.to_thread(
-                crisis_runtime(active).advance_to_attention
-                if summary["runtime_mode"] == "live"
-                else engine.advance_to_attention,
-                run_id,
-            )
-            return {
-                "advanced": advancement["advanced"],
-                "attention": advancement["attention"],
-                "moments": advancement["moments"],
-                "run": crisis_engine().run_summary(run_id),
-            }
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/runs/{run_id}/world")
-    async def run_world(run_id: str) -> dict[str, Any]:
-        engine = crisis_engine()
-        try:
-            summary = engine.run_summary(run_id)
-            if summary["mode"] == "TAKEOVER" and summary["status"] == "ACTIVE":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Human Takeover is locked to the Human perspective",
-                )
-            return engine.world_view(run_id)
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/runs/{run_id}/perspective/{actor_id}")
-    async def run_perspective(run_id: str, actor_id: str) -> dict[str, Any]:
-        engine = crisis_engine()
-        try:
-            summary = engine.run_summary(run_id)
-            if (
-                summary["mode"] == "TAKEOVER"
-                and summary["status"] == "ACTIVE"
-                and actor_id != summary["human_actor"]
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Human Takeover is locked to the Human perspective",
-                )
-            return engine.product_perspective(run_id, actor_id)
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.post("/api/runs/{run_id}/decision")
-    async def decide(run_id: str, request: HumanDecisionRequest) -> dict[str, Any]:
-        try:
-            engine = crisis_engine()
-            summary = engine.run_summary(run_id)
-            return await asyncio.to_thread(
-                crisis_runtime(current_config()).submit_human_decision
-                if summary["runtime_mode"] == "live"
-                else engine.submit_human_decision,
-                run_id,
-                request.text,
-            )
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.post("/api/runs/{run_id}/seal")
-    async def seal_run(run_id: str, request: SealRunRequest) -> dict[str, Any]:
-        engine = crisis_engine()
-        try:
-            summary = engine.run_summary(run_id)
-            sealed = await asyncio.to_thread(
-                crisis_runtime(current_config()).seal
-                if summary["runtime_mode"] == "live"
-                else engine.seal,
-                run_id,
-                request.reason,
-            )
-            return {"run": sealed}
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/runs/{run_id}/outcome")
-    async def run_outcome(run_id: str) -> dict[str, Any]:
-        engine = crisis_engine()
-        try:
-            summary = engine.run_summary(run_id)
-            if summary["status"] != "SEALED":
-                raise CrisisRunConflict(
-                    "危局尚未结算，暂不能查看 Outcome。",
-                    code="outcome_not_ready",
-                    state=str(summary["crisis_phase"] or "OPEN"),
-                    tick=int(summary["current_tick"]),
-                )
-            return {"run": summary, "outcome": summary["outcome_json"]}
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.post("/api/runs/{run_id}/runtime/retry")
-    async def retry_runtime(run_id: str) -> dict[str, Any]:
-        active = current_config()
-        try:
-            return {"run": await asyncio.to_thread(crisis_runtime(active).retry, run_id)}
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/runs/{run_id}/replay")
-    async def replay_run(run_id: str) -> dict[str, Any]:
-        engine = crisis_engine()
-        try:
-            return engine.replay(run_id)
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/compare")
-    async def compare_runs(
-        left: str = Query(min_length=1, max_length=128),
-        right: str = Query(min_length=1, max_length=128),
-    ) -> dict[str, Any]:
-        try:
-            return crisis_engine().compare(left, right)
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
-
-    @app.get("/api/archive")
-    async def archive() -> dict[str, Any]:
-        active = current_config()
-        db = ChronicleDB(active.database_path)
-        runs = []
-        for row in db.worldlines(status="SEALED"):
-            if row["kind"] == "CRISIS":
-                runs.append(CrisisRunEngine(active, db=db).run_summary(row["id"]))
-            else:
-                runs.append(
-                    {
-                        "id": row["id"],
-                        "mode": "LEGACY_V2",
-                        "status": row["status"],
-                        "current_tick": row["current_tick"],
-                        "created_at": row["created_at"],
-                        "seal_reason": row["seal_reason"],
-                    }
-                )
-        return {"runs": runs}
-
-    @app.get("/api/history")
-    async def historical_background() -> dict[str, Any]:
-        pack = volume_registry().default_pack
-        return historical_payload(pack)
-
-    @app.get("/api/crises/{crisis_id}/history")
-    async def crisis_history(crisis_id: str) -> dict[str, Any]:
-        try:
-            return historical_payload(volume_registry().pack(crisis_id))
-        except CrisisValidationError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    def historical_payload(pack: CrisisPack) -> dict[str, Any]:
-        return {
-            "sources": [source.model_dump(mode="json") for source in pack.sources],
-            "assertions": [assertion.model_dump(mode="json") for assertion in pack.assertions],
-            "anchors": [anchor.model_dump(mode="json") for anchor in pack.crisis.anchors],
-            "boundary": pack.crisis.simulation_boundary.model_dump(mode="json"),
-        }
-
-    @app.get("/api/dev/runs/{run_id}")
-    async def dev_run(run_id: str) -> dict[str, Any]:
-        active = current_config()
-        if not active.dev:
-            raise HTTPException(status_code=404, detail="Developer diagnostics are disabled")
-        engine = CrisisRunEngine(active)
-        try:
-            summary = engine.run_summary(run_id)
-            events = engine.db.worldline_events(run_id)
-            wakes = engine.db.crisis_wakes(run_id)
-            lifetimes = engine.db.worldline_lifetimes(run_id)
-            if summary["mode"] == "TAKEOVER" and summary["status"] == "ACTIVE":
-                human_actor = str(summary["human_actor"])
-                lifetimes = [item for item in lifetimes if item["seat"] == human_actor]
-                wakes = [item for item in wakes if item["actor_id"] == human_actor]
-                events = [
-                    item
-                    for item in events
-                    if not item["seat_id"]
-                    or item["seat_id"] == human_actor
-                    or human_actor in item["payload"].get("visibility", [])
-                ]
-            return {
-                "run": summary,
-                "wakes": wakes,
-                "events": events,
-                "lifetimes": lifetimes,
-            }
-        except CrisisRunError as exc:
-            raise crisis_http_error(exc) from exc
 
     @app.get("/api/dev/worldlines/{worldline_id}/why/{event_id}")
     async def dev_worldline_causal_trace(worldline_id: str, event_id: str) -> dict[str, Any]:
@@ -628,298 +243,6 @@ def create_app(
             )
         except (SubjectContinuityError, VolumeRuntimeError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/scenario")
-    async def scenario() -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {
-            "summary": active.pack.summary(),
-            "current_tick": active.current_tick,
-            "world": active.world_state(),
-            "actors": [actor.model_dump(mode="json") for actor in active.pack.actors],
-            "locations": [location.model_dump(mode="json") for location in active.pack.locations],
-            "routes": [route.model_dump(mode="json") for route in active.pack.routes],
-            "fork": active.pack.fork.model_dump(mode="json"),
-            "entry": active.pack.fork.model_dump(mode="json"),
-        }
-
-    @app.get("/api/timeline")
-    async def timeline(tick: int | None = Query(default=None, ge=0, le=78)) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {"current_tick": active.current_tick if tick is None else tick, "items": active.timeline(tick)}
-
-    @app.post("/api/canon/advance")
-    async def advance(request: AdvanceRequest) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        try:
-            tick = active.set_tick(request.tick)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"current_tick": tick, "world": active.world_state(tick), "who_knows": active.who_knows(tick)}
-
-    @app.post("/api/canon/advance-next")
-    async def advance_next() -> dict[str, Any]:
-        active = host()
-        try:
-            return worldline_runtime(active).advance_canon_next()
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.get("/api/events/{event_id}")
-    async def event_detail(event_id: str, tick: int | None = Query(default=None, ge=0, le=78)) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        if event_id not in active.pack.event_by_id:
-            raise HTTPException(status_code=404, detail="event not found")
-        return active.event_detail(event_id, tick)
-
-    @app.get("/api/sources/{assertion_id}")
-    async def source_detail(assertion_id: str) -> dict[str, Any]:
-        active = host()
-        active_worldline = active.db.active_human_worldline()
-        if active_worldline is not None:
-            context = active.worldline_runtime.seat_context(active_worldline["id"])
-            if assertion_id not in context.visible_assertion_ids:
-                raise HTTPException(status_code=404, detail="source not found")
-        else:
-            assert_archivist_open(active)
-        if assertion_id not in active.pack.assertion_by_id:
-            raise HTTPException(status_code=404, detail="assertion not found")
-        return active.source_detail(assertion_id)
-
-    @app.get("/api/who-knows")
-    async def who_knows(tick: int | None = Query(default=None, ge=0, le=78)) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {"tick": active.current_tick if tick is None else tick, "seats": active.who_knows(tick)}
-
-    @app.get("/api/lifetimes/{seat}")
-    async def lifetime(seat: str) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        if seat not in active.pack.actor_by_seat:
-            raise HTTPException(status_code=404, detail="Seat not found")
-        return active.lifetime(seat)
-
-    @app.post("/api/lifetimes/{seat}/wake")
-    async def wake(seat: str, request: WakeRequest) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        try:
-            return await asyncio.to_thread(
-                active.wake,
-                seat,
-                request.tick,
-                request.wake_type,
-                live=request.live,
-                outcome=request.outcome,
-            )
-        except (ValueError, KeyError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except HermesRuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.post("/api/lifetimes/{seat}/reflect")
-    async def reflect(seat: str, request: WakeRequest) -> dict[str, Any]:
-        request.wake_type = WakeType.REFLECTION
-        active = host()
-        assert_archivist_open(active)
-        try:
-            return await asyncio.to_thread(
-                active.wake,
-                seat,
-                request.tick,
-                WakeType.REFLECTION,
-                live=request.live,
-                outcome=request.outcome or "A later event contradicted an earlier assessment.",
-            )
-        except (ValueError, KeyError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except HermesRuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.get("/api/branch/definition")
-    async def branch_definition() -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {
-            "fork": active.pack.fork.model_dump(mode="json"),
-            "event": active.pack.event_by_id[active.pack.fork.event_id].model_dump(mode="json"),
-        }
-
-    @app.post("/api/branch")
-    async def create_branch() -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        try:
-            return BranchEngine(active).create()
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get("/api/branch/{branch_id}")
-    async def branch(branch_id: str) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        value = active.db.branch(branch_id)
-        if value is None:
-            raise HTTPException(status_code=404, detail="branch not found")
-        return {"branch": value, "records": active.db.branch_records(branch_id)}
-
-    @app.post("/api/branch/{branch_id}/step")
-    async def branch_step(branch_id: str, seat: str, action: BranchAction) -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        try:
-            return BranchEngine(active).step(branch_id, seat, action)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/api/entries")
-    async def entries() -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {"entries": [active.pack.fork.model_dump(mode="json")]}
-
-    @app.post("/api/worldlines")
-    async def create_worldline(request: CreateWorldlineRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).create,
-                request.entry_id,
-                request.seat,
-                live=request.live,
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-        except HermesRuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.get("/api/worldlines/active")
-    async def active_worldline() -> dict[str, Any]:
-        active = host()
-        return {"active": await asyncio.to_thread(worldline_runtime(active).active)}
-
-    @app.get("/api/worldlines")
-    async def sealed_worldlines() -> dict[str, Any]:
-        active = host()
-        assert_archivist_open(active)
-        return {"worldlines": await asyncio.to_thread(worldline_runtime(active).sealed)}
-
-    @app.get("/api/worldlines/{worldline_id}/context")
-    async def worldline_context(worldline_id: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).context, worldline_id)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/inhabit")
-    async def inhabit_worldline(
-        worldline_id: str, request: InhabitRequest
-    ) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).inhabit, worldline_id, request.lifetime_id
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/leave")
-    async def leave_worldline(worldline_id: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).leave, worldline_id)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.get("/api/worldlines/{worldline_id}/lifetimes")
-    async def worldline_lifetimes(worldline_id: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).lifetimes, worldline_id)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.get("/api/worldlines/{worldline_id}/lifetimes/{seat}")
-    async def worldline_lifetime(worldline_id: str, seat: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).lifetime, worldline_id, seat)
-        except WorldlineError as exc:
-            if str(exc) == "Seat not found":
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-            raise worldline_http_error(exc) from exc
-
-    @app.get("/api/worldlines/{worldline_id}/ledger")
-    async def worldline_ledger(worldline_id: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).ledger, worldline_id)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/input")
-    async def worldline_input(worldline_id: str, request: WorldlineInputRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).input, worldline_id, request.text)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/confirm")
-    async def worldline_confirm(worldline_id: str, request: WorldlineConfirmRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).confirm, worldline_id, request.confirmation_id
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/cancel")
-    async def worldline_cancel(worldline_id: str, request: WorldlineConfirmRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).cancel, worldline_id, request.confirmation_id
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/advance")
-    async def worldline_advance(worldline_id: str, request: WorldlineAdvanceRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).advance, worldline_id, live=request.live
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-        except HermesRuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.post("/api/worldlines/{worldline_id}/seal")
-    async def worldline_seal(worldline_id: str, request: WorldlineSealRequest) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(
-                worldline_runtime(active).seal, worldline_id, request.reason
-            )
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
-
-    @app.get("/api/worldlines/{worldline_id}/debrief")
-    async def worldline_debrief(worldline_id: str) -> dict[str, Any]:
-        active = host()
-        try:
-            return await asyncio.to_thread(worldline_runtime(active).debrief, worldline_id)
-        except WorldlineError as exc:
-            raise worldline_http_error(exc) from exc
 
     @app.get("/api/doctor")
     async def run_doctor() -> dict[str, Any]:
@@ -994,17 +317,8 @@ def create_app(
             "reasoning_effort": configured.llm_reasoning_effort,
             "api_key": configured.masked_api_key(),
             "runtime_file_mode": oct(active.runtime_env_path.stat().st_mode & 0o777),
-            "message": "Runtime saved server-side. Bootstrap can now create the three Seats.",
+            "message": "Runtime saved server-side. Live Volume Lifetimes can now be materialized.",
         }
-
-    @app.post("/api/bootstrap")
-    async def bootstrap() -> dict[str, Any]:
-        active = current_config()
-        assert_archivist_open(host())
-        try:
-            return await asyncio.to_thread(bootstrap_hermes, active)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -1012,10 +326,21 @@ def create_app(
 
     @app.get("/{path:path}")
     async def spa_fallback(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
         candidate = web_root / path
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(web_root / "index.html")
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    @app.api_route(
+        "/{path:path}",
+        methods=["POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
+    async def api_method_fallback(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        raise HTTPException(status_code=405, detail="Method not allowed")
 
     return app
 

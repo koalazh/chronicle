@@ -70,7 +70,7 @@ def export(database: Path, worldline_id: str) -> dict[str, Any]:
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: v5_export_public_trace.py DATABASE WORLDLINE_ID", file=sys.stderr)
+        print("usage: v6_export_public_trace.py DATABASE WORLDLINE_ID", file=sys.stderr)
         return 2
     try:
         payload = export(Path(sys.argv[1]), sys.argv[2])

@@ -216,6 +216,7 @@ def test_attention_policy_is_pure_and_requires_explicit_reopen_conditions():
         "seat": "wu-sangui",
         "plan": [
             {
+                "course_schema_version": 1,
                 "course": "维持关口可控",
                 "status": "IN_FORCE",
                 "open_dependencies": [],
@@ -310,7 +311,7 @@ def test_rejected_world_action_reopens_own_consequence(app_config):
 def test_attention_policy_reopens_for_each_non_course_source():
     lifetime = {
         "seat": "wu-sangui",
-        "plan": [{"course": "维持关口可控", "status": "IN_FORCE", "open_dependencies": []}],
+        "plan": [{"course_schema_version": 1, "course": "维持关口可控", "status": "IN_FORCE", "open_dependencies": []}],
     }
 
     structural = evaluate_attention(

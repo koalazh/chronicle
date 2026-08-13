@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from chronicle.models import CrisisInstanceStatus, WorldlineStatus
-from chronicle.runtime import WorldlineConflict
+from chronicle.volume_runtime import VolumeRuntimeConflict
 
 
 def test_volume_runtime_uses_one_clock_for_multiple_crises(host):
@@ -130,20 +130,20 @@ def test_active_crisis_presence_protects_one_unresolved_knot(host):
     li = runtime.db.worldline_lifetime(worldline_id, "li-zicheng")
     wu = runtime.db.worldline_lifetime(worldline_id, "wu-sangui")
     assert li is not None and wu is not None
-    host.worldline_runtime.inhabit(worldline_id, li["id"])
-    host.worldline_runtime.leave(worldline_id)
+    host.volume_runtime.inhabit(worldline_id, li["id"])
+    host.volume_runtime.leave(worldline_id)
 
-    with pytest.raises(WorldlineConflict, match="another inhabited"):
-        host.worldline_runtime.inhabit(worldline_id, wu["id"])
+    with pytest.raises(VolumeRuntimeConflict, match="another inhabited"):
+        host.volume_runtime.inhabit(worldline_id, wu["id"])
 
     # The parallel Crisis remains inhabitable, while the original knot is protected.
     shi = runtime.db.worldline_lifetime(worldline_id, "shi-kefa")
     assert shi is not None
-    host.worldline_runtime.inhabit(worldline_id, shi["id"])
-    host.worldline_runtime.leave(worldline_id)
+    host.volume_runtime.inhabit(worldline_id, shi["id"])
+    host.volume_runtime.leave(worldline_id)
 
     runtime.settle_crisis(worldline_id, "before-shanhaiguan")
-    host.worldline_runtime.inhabit(worldline_id, wu["id"])
+    host.volume_runtime.inhabit(worldline_id, wu["id"])
 
 
 def test_global_clock_queues_offscreen_wake_without_inventing_agent_intent(host):

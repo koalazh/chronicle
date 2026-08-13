@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from chronicle.config import AppConfig, load_config
+from chronicle.crisis import VolumePack
 from chronicle.host import ChronicleHost
-from chronicle.scenario import ScenarioPack
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,8 +27,8 @@ def app_config(tmp_path: Path) -> AppConfig:
 
 
 @pytest.fixture
-def pack() -> ScenarioPack:
-    return ScenarioPack.load(PROJECT_ROOT / "scenarios" / "jiashen")
+def pack() -> VolumePack:
+    return VolumePack.load(PROJECT_ROOT / "scenarios" / "jiashen")
 
 
 @pytest.fixture

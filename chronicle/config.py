@@ -22,7 +22,7 @@ def _path_from_database_url(value: str, root: Path) -> Path:
         raw = value[len(prefix) :]
         path = Path(raw)
         return path if path.is_absolute() else root / path
-    raise ValueError("Chronicle V1 supports only sqlite:/// database URLs")
+    raise ValueError("Chronicle supports only sqlite:/// database URLs")
 
 
 def _bool(value: str | None, default: bool = False) -> bool:
@@ -71,12 +71,6 @@ class AppConfig:
     @property
     def volume_path(self) -> Path:
         return self.scenario_path
-
-    @property
-    def crisis_path(self) -> Path:
-        from .crisis import VolumeRegistry
-
-        return VolumeRegistry.load(self.volume_path).default_pack.root
 
     def provider_hash(self) -> str:
         return hashlib.sha256(self.llm_base_url.encode()).hexdigest()[:16]

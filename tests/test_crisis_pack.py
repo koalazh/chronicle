@@ -11,7 +11,7 @@ from chronicle.crisis import (
     CrisisSurfaceKind,
     CrisisValidationError,
     HistoricalPolicy,
-    VolumeRegistry,
+    VolumePack,
     validate_crisis_pack,
 )
 
@@ -277,17 +277,17 @@ def test_political_surface_requires_referenced_entities(tmp_path, surface, messa
         CrisisPack.load(root)
 
 
-def test_volume_registry_declares_the_current_crisis_without_a_global_actor_set():
-    registry = VolumeRegistry.load(PROJECT_ROOT / "scenarios" / "jiashen")
+def test_volume_pack_declares_current_crises_without_a_global_actor_set():
+    volume = VolumePack.load(PROJECT_ROOT / "scenarios" / "jiashen")
 
-    assert registry.volume.id == "jiashen"
-    assert registry.default_pack.crisis.id == "before-shanhaiguan"
-    assert registry.default_pack.crisis.playable_actor_ids == [
+    assert volume.volume.id == "jiashen"
+    assert volume.pack("before-shanhaiguan").crisis.id == "before-shanhaiguan"
+    assert volume.pack("before-shanhaiguan").crisis.playable_actor_ids == [
         "wu-sangui",
         "li-zicheng",
         "dorgon",
     ]
-    assert [crisis["id"] for crisis in registry.summary()["crises"]] == [
+    assert [crisis["id"] for crisis in volume.summary()["crises"]] == [
         "before-shanhaiguan",
         "nanjing-succession",
         "southern-consolidation",

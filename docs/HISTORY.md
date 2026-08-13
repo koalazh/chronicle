@@ -8,11 +8,11 @@
 
 Chronicle 不把一段“历史简介”直接塞给模型。史料先整理成 Source、Assertion、争议说明和场景假设；运行时只把当前主体合法收到的内容交给它。模型输出、测试结果和 UI 文案都不能创造新的历史事实。
 
-当前 Source Pack 位于 `scenarios/jiashen/`，保留 Canon、Entry、Branch 和来源索引；可运行的危局材料位于 `scenarios/jiashen/crises/`，由 `crisis.yaml` 和 `sources.yaml` 定义检查点、主体、走廊、路线、在途消息、停止边界、历史锚点和断言 ID。旧数据和兼容读取所需的历史格式仍保留在仓库，但不作为新页面的产品心智模型。
+当前 Volume Pack 位于 `scenarios/jiashen/`，由 `volume.yaml`、`lifetimes.yaml`、`world.yaml`、共享地点/路线和 `crises/` 下的 Crisis Pack 组成。每个 Crisis Pack 由 `crisis.yaml` 和 `sources.yaml` 定义检查点、主体、走廊、路线、在途消息、停止边界、历史锚点和断言 ID；当前运行时只读取这套 V6 Volume 结构。
 
 ## 断言的两个标签
 
-`provenance` 说明来源：`historical` 是来源直接支撑的事实，`scenario_assumption` 是把检查点变成可运行时间窗的显式假设，`modeled` 是路线或资源粒度等抽象，`branch_derived` 只属于某次旧 Branch/Run 的派生结果。
+`provenance` 说明来源：`historical` 是来源直接支撑的事实，`scenario_assumption` 是把检查点变成可运行时间窗的显式假设，`modeled` 是路线或资源粒度等抽象，`volume_derived` 是当前 Volume 内由确定性运行时推导出的结果。
 
 `evidence_status` 说明证据强度：`corroborated`、`single_attested`、`disputed` 或 `approximate`。争议不能被 UI 文案抹平；到达日、路线时长、兵力规模和人物动机排序都要保留对应状态。
 
@@ -52,5 +52,5 @@ History 通过 `/api/history` 提供来源、断言、证据状态、争议和�
 - 初始 Knowledge 写可读 claim，不把内部 ID 当作人物知识；
 - 消息 dispatch、delivery 和路线时长注明是来源事实还是模型值；
 - 有争议的日期、兵力、意图和因果标成 disputed/approximate；
-- `source validate`、`scenario validate`、`crisis validate` 任一失败，都不能宣称资料就绪；
+- `volume validate` 失败，都不能宣称当前 Volume 资料就绪；
 - 历史材料与当前产品文档分开维护，旧记录进入 [归档](archive/README.md)。

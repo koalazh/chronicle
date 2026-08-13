@@ -211,7 +211,7 @@ function deskPage() {
       <div><p class="kicker">Life Desk · ${text(life.location?.display_name || "位置未明")}</p><h1>${text(life.display_name)}</h1><p>你暂时拥有的是这段人生的下一步，不是这个人的全部。</p></div>
       <div class="run-actions"><button class="secondary" data-action="leave-life" ${state.busy ? "disabled" : ""}>离开这段人生</button></div>
     </section>
-    <section class="desk-layout v5-desk">
+    <section class="desk-layout">
       <div class="desk-main">
         <div class="desk-surface"><div class="section-heading"><span>此前</span><h2>你准备这样办</h2></div>${listMarkup(desk.current_course || desk.current_plan, "desk-list")}</div>
         <div class="desk-surface"><div class="section-heading"><span>自那以后</span><h2>真正进入你所知的变化</h2></div>${listMarkup(desk.since_last_deliberation || desk.arrivals, "desk-list")}</div>

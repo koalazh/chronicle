@@ -14,7 +14,7 @@ def _frontend_source() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in FORMAL_FILES)
 
 
-def test_frontend_uses_the_v5_product_language_and_ia():
+def test_frontend_uses_the_v6_product_language_and_ia():
     source = _frontend_source()
     index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
@@ -127,7 +127,7 @@ def test_frontend_does_not_render_internal_ids_as_product_copy():
         assert required in source
 
 
-def test_frontend_routes_only_formal_v5_pages():
+def test_frontend_routes_only_formal_v6_pages():
     router = (ROOT / "web" / "router.js").read_text(encoding="utf-8")
 
     for required in ("volume", "world", "follow", "desk", "archive", "ending", "goFollow"):

@@ -104,8 +104,8 @@ def test_current_course_survives_tick_restart_controller_switch_and_fresh_perspe
     before = copy.deepcopy(runtime.db.worldline_lifetime(worldline_id, wu["seat"])["plan"][0])
 
     runtime.advance_one(worldline_id)
-    host.worldline_runtime.inhabit(worldline_id, wu["id"])
-    host.worldline_runtime.leave(worldline_id)
+    host.volume_runtime.inhabit(worldline_id, wu["id"])
+    host.volume_runtime.leave(worldline_id)
     restarted = ChronicleHost(config).volume_runtime
     after = restarted.db.worldline_lifetime(worldline_id, wu["seat"])
     assert after is not None
@@ -170,42 +170,6 @@ def test_current_course_revision_replaces_the_projection_and_keeps_ledger_histor
         "DECISION_HORIZON_ESTABLISHED",
         "DECISION_HORIZON_REVISED",
     ]
-
-
-def test_legacy_v5_plan_is_read_as_a_current_course_without_mutating_it(app_config):
-    _config, _host, runtime, worldline_id, wu = _runtime(app_config, "legacy-read")
-    legacy = {
-        "version": "legacy-plan",
-        "objective": "暂缓定论",
-        "steps": ["继续核验"],
-        "rationale": "旧记录",
-        "reconsider_when": ["收到回信"],
-        "updated_tick": 1,
-    }
-    runtime.db.update_worldline_lifetime(
-        worldline_id,
-        wu["seat"],
-        plan_json=json.dumps([legacy], ensure_ascii=False, sort_keys=True),
-    )
-
-    context = runtime.lifetime_context(worldline_id, wu["id"])
-    stored = runtime.db.worldline_lifetime(worldline_id, wu["seat"])
-    assert stored is not None
-
-    assert stored["plan"] == [legacy]
-    assert context["current_course"] == {
-        **legacy,
-        "course_schema_version": 1,
-        "course": "暂缓定论",
-        "status": "IN_FORCE",
-        "established_tick": 1,
-        "established_event_id": "",
-        "open_dependencies": [],
-        "explicit_rationale": "旧记录",
-        "evidence_event_ids": [],
-        "last_deliberated_tick": 1,
-        "last_deliberated_event_id": "",
-    }
 
 
 def test_open_dependencies_are_typed_and_reject_free_form_predicates(app_config):

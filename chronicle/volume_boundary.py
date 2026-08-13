@@ -27,7 +27,7 @@ class VolumeBoundaryDecision:
 
 
 class VolumeBoundaryPolicy:
-    """Keep the V5 structural ending separate from Crisis settlement."""
+    """Keep the V6 structural ending separate from Crisis settlement."""
 
     id = "jiashen-north-south-recognition-v1"
 

@@ -12,6 +12,7 @@ from chronicle import hermes, world_mcp
 from chronicle.app import create_app
 from chronicle.host import ChronicleHost
 from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
+from chronicle.volume_runtime import VolumeRuntimeConflict
 from chronicle.world import WorldAccessError, token_hash
 
 
@@ -245,6 +246,42 @@ def test_live_volume_reconcile_fails_closed_on_binding_identity_drift(
     assert failed["runtime_error_code"] == "volume_reconcile_failed"
 
 
+def test_failed_live_reconcile_blocks_reads_and_mutations(
+    app_config, monkeypatch
+):
+    config = replace(app_config, dev=True)
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute(
+            "UPDATE worldlines SET runtime_mode = 'live', runtime_phase = 'FAILED' WHERE id = ?",
+            (worldline_id,),
+        )
+
+    def keep_failed(_runtime, _worldline_id):
+        raise RuntimeError("reconcile remains unavailable")
+
+    monkeypatch.setattr(
+        "chronicle.volume_runtime.VolumeRuntime.reconcile_live_runtime",
+        keep_failed,
+    )
+
+    with pytest.raises(VolumeRuntimeConflict, match="unavailable"):
+        host.volume_runtime.worldline(worldline_id)
+    with pytest.raises(VolumeRuntimeConflict, match="unavailable"):
+        host.volume_runtime.seal(worldline_id)
+
+    with TestClient(create_app(config)) as client:
+        world = client.get(f"/api/worldlines/{worldline_id}/world")
+        continued = client.post(f"/api/worldlines/{worldline_id}/continue")
+        sealed = client.post(f"/api/worldlines/{worldline_id}/seal", json={})
+
+    assert world.status_code == 503
+    assert continued.status_code == 503
+    assert sealed.status_code == 503
+
+
 def test_volume_mcp_requires_exact_wake_when_one_lifetime_has_duplicate_wakes(
     app_config, monkeypatch, tmp_path: Path
 ):
@@ -267,7 +304,7 @@ def test_volume_mcp_requires_exact_wake_when_one_lifetime_has_duplicate_wakes(
             (token_hash(token), "profile-wu", worldline_id, "wu-sangui"),
         )
     for wake_id in ("wake-a", "wake-b"):
-        host.db.create_crisis_wake(
+        host.db.create_subject_wake(
             {
                 "id": wake_id,
                 "worldline_id": worldline_id,

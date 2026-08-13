@@ -1184,8 +1184,8 @@ class CrisisPack:
                 errors.append(f"pressure {pressure.id}: CONDITIONAL pressure requires preconditions")
             if not pressure.effects:
                 errors.append(f"pressure {pressure.id}: effects are required")
-            if pressure.provenance == Provenance.BRANCH_DERIVED:
-                errors.append(f"pressure {pressure.id}: provenance cannot be branch_derived")
+            if pressure.provenance == Provenance.VOLUME_DERIVED:
+                errors.append(f"pressure {pressure.id}: provenance cannot be volume_derived")
             unknown_assertions = set(pressure.assertion_ids) - known_assertions
             if not pressure.assertion_ids or unknown_assertions:
                 errors.append(
@@ -1467,7 +1467,7 @@ class VolumePack:
                 continue
             packs[reference.id] = pack
 
-        lifetimes = cls._load_lifetimes(root, volume, packs, errors)
+        lifetimes = cls._load_lifetimes(root, volume, errors)
         world = cls._load_world(root, volume, errors)
         location_ids = set(world.location_by_id)
         for alias, target in world.location_aliases.items():
@@ -1498,7 +1498,7 @@ class VolumePack:
             actor_ids = set(pack.actor_by_id)
             if set(participant_ids) != actor_ids:
                 errors.append(
-                    f"crisis {crisis_id}: participant ids must match the legacy actor overlays"
+                    f"crisis {crisis_id}: participant ids must match the crisis actor overlays"
                 )
             reference = next(item for item in volume.crises if item.id == crisis_id)
             if reference.participants and set(reference.participants) != set(participant_ids):
@@ -1550,44 +1550,25 @@ class VolumePack:
     def _load_lifetimes(
         root: Path,
         volume: VolumeDefinition,
-        packs: dict[str, CrisisPack],
         errors: list[str],
     ) -> dict[str, VolumeLifetimeDefinition]:
         path = _volume_child_path(root, volume.lifetimes_path, "lifetimes", errors)
-        if path is not None and path.exists():
-            try:
-                items = _read_yaml(path).get("lifetimes", [])
-                lifetimes = [VolumeLifetimeDefinition.model_validate(item) for item in items]
-                result: dict[str, VolumeLifetimeDefinition] = {}
-                for lifetime in lifetimes:
-                    if lifetime.id in result:
-                        errors.append(f"volume: duplicate lifetime id {lifetime.id}")
-                        continue
-                    result[lifetime.id] = lifetime
-                return result
-            except (CrisisValidationError, TypeError, ValueError) as exc:
-                errors.append(f"volume: lifetimes are invalid: {exc}")
-                return {}
-
-        derived: dict[str, VolumeLifetimeDefinition] = {}
-        for pack in packs.values():
-            for actor in pack.crisis.actors:
-                candidate = VolumeLifetimeDefinition(
-                    id=actor.id,
-                    display_name=actor.display_name,
-                    genesis_context={"legacy_role": actor.role_charter.who},
-                    starting_location=actor.initial_location,
-                    initial_knowledge=list(actor.initial_knowledge),
-                    initial_beliefs=dict(actor.initial_beliefs),
-                    initial_resources=dict(actor.resources),
-                    stable_authority=list(actor.world_authority),
-                )
-                existing = derived.get(candidate.id)
-                if existing is not None and existing != candidate:
-                    errors.append(f"volume: conflicting legacy lifetime definition {candidate.id}")
+        if path is None or not path.exists():
+            errors.append("volume: lifetimes file is required")
+            return {}
+        try:
+            items = _read_yaml(path).get("lifetimes", [])
+            lifetimes = [VolumeLifetimeDefinition.model_validate(item) for item in items]
+            result: dict[str, VolumeLifetimeDefinition] = {}
+            for lifetime in lifetimes:
+                if lifetime.id in result:
+                    errors.append(f"volume: duplicate lifetime id {lifetime.id}")
                     continue
-                derived[candidate.id] = candidate
-        return derived
+                result[lifetime.id] = lifetime
+            return result
+        except (CrisisValidationError, TypeError, ValueError) as exc:
+            errors.append(f"volume: lifetimes are invalid: {exc}")
+            return {}
 
     @staticmethod
     def _load_world(
@@ -1619,10 +1600,6 @@ class VolumePack:
             institutional_state=dict(definition.institutional_state),
             historical_field=tuple(definition.historical_field),
         )
-
-    @property
-    def default_pack(self) -> CrisisPack:
-        return self.packs[self.volume.crises[0].id]
 
     def pack(self, crisis_id: str) -> CrisisPack:
         try:
@@ -1666,15 +1643,10 @@ def _volume_child_path(
     return candidate
 
 
-# Compatibility name retained for V2/V3/V4 callers while V5 content ownership is
-# represented by VolumePack.
-VolumeRegistry = VolumePack
-
-
 def validate_volume(root: Path) -> list[str]:
-    registry = VolumeRegistry.load(root)
+    volume = VolumePack.load(root)
+    crisis_label = "crisis" if len(volume.packs) == 1 else "crises"
     return [
         "Volume valid: "
-        f"{registry.volume.id}, {len(registry.packs)} crisis"
-        f"{'es' if len(registry.packs) != 1 else ''}"
+        f"{volume.volume.id}, {len(volume.packs)} {crisis_label}"
     ]

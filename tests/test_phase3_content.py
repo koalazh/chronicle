@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from chronicle.crisis import VolumePack, VolumeRegistry
+from chronicle.crisis import VolumePack
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VOLUME_ROOT = PROJECT_ROOT / "scenarios" / "jiashen"
@@ -11,7 +11,6 @@ VOLUME_ROOT = PROJECT_ROOT / "scenarios" / "jiashen"
 def test_volume_pack_owns_lifetimes_shared_world_and_crisis_participants():
     pack = VolumePack.load(VOLUME_ROOT)
 
-    assert VolumeRegistry is VolumePack
     assert set(pack.lifetimes) == {
         "li-zicheng",
         "wu-sangui",

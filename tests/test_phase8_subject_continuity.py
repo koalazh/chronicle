@@ -9,11 +9,6 @@ from fastapi.testclient import TestClient
 
 from chronicle.app import create_app
 from chronicle.db import content_hash
-from chronicle.decision import (
-    DecisionOperation,
-    InterpretedDecision,
-    guard_human_interpretation,
-)
 from chronicle.host import ChronicleHost
 from chronicle.volume_runtime import VolumeRuntimeConflict
 
@@ -31,7 +26,7 @@ def _runtime(app_config, suffix: str):
     wu = runtime.db.worldline_lifetime(worldline_id, "wu-sangui")
     dorgon = runtime.db.worldline_lifetime(worldline_id, "dorgon")
     assert wu is not None and dorgon is not None
-    host.worldline_runtime.inhabit(worldline_id, wu["id"])
+    host.volume_runtime.inhabit(worldline_id, wu["id"])
     runtime.activate_crisis(worldline_id, "before-shanhaiguan")
     runtime.advance_one(worldline_id)
     runtime.db.create_subject_wake(
@@ -118,36 +113,6 @@ def test_lifetime_context_exposes_subject_scoped_affordances(app_config):
         item for item in scoped["operations"] if item["id"] == "make_fu_backing_visible"
     )
     assert backing["targets"][0]["options"][0]["id"] == "jiangbei-military-backing"
-
-
-def test_human_interpretation_does_not_infer_reason_or_belief():
-    decision = InterpretedDecision(
-        summary="已决定。",
-        operations=[
-            DecisionOperation(
-                tool="update_plan",
-                arguments={
-                    "objective": "执行",
-                    "steps": ["执行"],
-                    "rationale": "因为他值得信任",
-                    "belief_updates": [
-                        {
-                            "subject": "peer:dorgon",
-                            "assessment": "对方可信",
-                            "confidence": "high",
-                        }
-                    ],
-                },
-            )
-        ],
-    )
-
-    guarded = guard_human_interpretation("直接执行", decision)
-
-    assert guarded.operations[0].arguments["rationale"] == ""
-    assert guarded.operations[0].arguments["rationale_source"] == "unstated"
-    assert guarded.operations[0].arguments["belief_updates"] == []
-    assert guarded.operations[0].arguments["belief_source"] == "unstated"
 
 
 def test_evidence_backed_expectation_requires_human_provenance(app_config):

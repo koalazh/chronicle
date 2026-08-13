@@ -174,8 +174,8 @@ def test_p6_disconfirming_reality_revises_with_actor_visible_evidence(app_config
 def test_p6_course_survives_restart_controller_switch_and_fresh_context(app_config, tmp_path):
     config, host, runtime, worldline_id, wu = _runtime(app_config, tmp_path)
     _committed, before = _establish(runtime, worldline_id, wu)
-    host.worldline_runtime.inhabit(worldline_id, wu["id"])
-    host.worldline_runtime.leave(worldline_id)
+    host.volume_runtime.inhabit(worldline_id, wu["id"])
+    host.volume_runtime.leave(worldline_id)
 
     restarted = ChronicleHost(config).volume_runtime
     after = restarted.db.worldline_lifetime(worldline_id, wu["seat"])

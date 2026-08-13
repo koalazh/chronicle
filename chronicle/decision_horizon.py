@@ -86,13 +86,13 @@ def normalize_open_dependencies(
 def current_course_from_plan(
     plan: list[Any], *, fallback_tick: int = 0
 ) -> dict[str, Any] | None:
-    """Return a V6 Course view while continuing to read persisted V5 plans."""
+    """Return the current persisted Course, or no Course when none exists."""
 
     raw = next((item for item in plan if isinstance(item, dict)), None)
-    if raw is None:
+    if raw is None or _integer(raw.get("course_schema_version"), -1) != COURSE_SCHEMA_VERSION:
         return None
     current = copy.deepcopy(raw)
-    objective = str(current.get("course") or current.get("objective") or "").strip()
+    objective = str(current.get("course") or "").strip()
     updated_tick = _integer(current.get("updated_tick"), fallback_tick)
     established_tick = _integer(current.get("established_tick"), updated_tick)
     last_deliberated_tick = _integer(current.get("last_deliberated_tick"), established_tick)
@@ -111,9 +111,7 @@ def current_course_from_plan(
         "established_tick": established_tick,
         "established_event_id": str(current.get("established_event_id") or ""),
         "open_dependencies": dependencies,
-        "explicit_rationale": str(
-            current.get("explicit_rationale", current.get("rationale", "")) or ""
-        ),
+        "explicit_rationale": str(current.get("explicit_rationale", "") or ""),
         "evidence_event_ids": [
             str(event_id)
             for event_id in current.get("evidence_event_ids", [])
@@ -133,7 +131,7 @@ def build_current_course(
     tick: int,
     event_id: str,
 ) -> dict[str, Any]:
-    """Build the one persisted Current Course from a validated V5 plan intent."""
+    """Build the one persisted Current Course from a validated intent."""
 
     return {
         "course_schema_version": COURSE_SCHEMA_VERSION,
@@ -147,8 +145,6 @@ def build_current_course(
         "evidence_event_ids": list(intent.get("evidence_event_ids", [])),
         "last_deliberated_tick": tick,
         "last_deliberated_event_id": event_id,
-        # V5 readers continue to use these fields while V6 callers consume the
-        # Course fields above.
         "objective": str(intent["objective"]),
         "steps": list(intent["steps"]),
         "rationale": str(intent.get("rationale", "")),

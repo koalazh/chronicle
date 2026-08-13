@@ -6,32 +6,14 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .config import load_config
-from .crisis import VolumeRegistry
 from .db import ChronicleDB
-from .world import WorldAccessError, WorldService, token_hash
+from .world import WorldAccessError, token_hash
 
 mcp = FastMCP("chronicle-world")
 
 
-def _world():
-    token = os.environ.get("CHRONICLE_WORLD_TOKEN", "")
-    if not token:
-        raise WorldAccessError("Chronicle world binding is missing")
-    config = load_config(environ=os.environ)
-    db = ChronicleDB(config.database_path)
-    binding = db.agent_binding_for_token_hash(token_hash(token))
-    if binding is None:
-        raise WorldAccessError("invalid Chronicle world binding")
-    run = db.worldline(str(binding["worldline_id"]))
-    if run is None or run["kind"] != "CRISIS":
-        raise WorldAccessError("Chronicle Run is unavailable")
-    pack = VolumeRegistry.load(config.volume_path).pack(str(run["crisis_id"]))
-    service = WorldService(db, pack)
-    return service.session_for_current_token(token)
-
-
 def _volume_context(wake_id: str = ""):
-    """Return the bound V5 Volume context for the current MCP process."""
+    """Return the bound V6 Volume context for the current MCP process."""
 
     token = os.environ.get("CHRONICLE_WORLD_TOKEN", "")
     if not token:
@@ -64,7 +46,7 @@ def _volume_tool(
     idempotency_key: str,
     wake_id: str = "",
 ) -> dict[str, Any]:
-    """Stage an existing World affordance through the V5 Volume runtime."""
+    """Stage an existing World affordance through the V6 Volume runtime."""
 
     from .host import ChronicleHost
 
@@ -79,7 +61,7 @@ def _volume_tool(
     if existing and not any(
         operation["idempotency_key"] == idempotency_key for operation in existing
     ):
-        raise WorldAccessError("one V5 action is already staged for this Wake")
+        raise WorldAccessError("one V6 action is already staged for this Wake")
     return ChronicleHost(config).volume_runtime.stage_actor_tool(
         str(binding["worldline_id"]),
         str(binding["role"]),
@@ -91,15 +73,6 @@ def _volume_tool(
     )
 
 
-def _is_volume_binding() -> bool:
-    token = os.environ.get("CHRONICLE_WORLD_TOKEN", "")
-    if not token:
-        return False
-    config = load_config(environ=os.environ)
-    binding = ChronicleDB(config.database_path).agent_binding_for_token_hash(token_hash(token))
-    return binding is not None and binding["binding_scope"] == "VOLUME"
-
-
 @mcp.tool()
 def communicate(
     recipient: str | dict[str, Any],
@@ -109,11 +82,9 @@ def communicate(
 ) -> dict[str, Any]:
     """Send an in-world courier message; delivery follows simulated corridor time."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "communicate", {"recipient": recipient, "content": content}, idempotency_key, wake_id
-        )
-    return _world().communicate(recipient, content, idempotency_key=idempotency_key)
+    return _volume_tool(
+        "communicate", {"recipient": recipient, "content": content}, idempotency_key, wake_id
+    )
 
 
 @mcp.tool()
@@ -126,14 +97,12 @@ def investigate(
 ) -> dict[str, Any]:
     """Start a delayed, source-bounded investigation of one available target."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "investigate",
-            {"question": question, "target": target, "method": method},
-            idempotency_key,
-            wake_id,
-        )
-    return _world().investigate(question, target, method=method, idempotency_key=idempotency_key)
+    return _volume_tool(
+        "investigate",
+        {"question": question, "target": target, "method": method},
+        idempotency_key,
+        wake_id,
+    )
 
 
 @mcp.tool()
@@ -149,28 +118,18 @@ def manage_offer(
 ) -> dict[str, Any]:
     """Propose, counter, accept, reject, or withdraw one structured in-world offer."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "manage_offer",
-            {
-                "action": action,
-                "offer_id": offer_id,
-                "recipient": recipient,
-                "terms": terms or [],
-                "message": message,
-                "expires_after_days": expires_after_days,
-            },
-            idempotency_key,
-            wake_id,
-        )
-    return _world().manage_offer(
-        action,
-        offer_id=offer_id,
-        recipient=recipient,
-        terms=terms,
-        message=message,
-        expires_after_days=expires_after_days,
-        idempotency_key=idempotency_key,
+    return _volume_tool(
+        "manage_offer",
+        {
+            "action": action,
+            "offer_id": offer_id,
+            "recipient": recipient,
+            "terms": terms or [],
+            "message": message,
+            "expires_after_days": expires_after_days,
+        },
+        idempotency_key,
+        wake_id,
     )
 
 
@@ -184,19 +143,15 @@ def operate(
 ) -> dict[str, Any]:
     """Start one currently available Crisis-defined Operation."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "operate",
-            {
-                "operation_definition_id": operation_definition_id,
-                "targets": targets,
-                "description": description,
-            },
-            idempotency_key,
-            wake_id,
-        )
-    return _world().operate(
-        operation_definition_id, targets, description, idempotency_key=idempotency_key
+    return _volume_tool(
+        "operate",
+        {
+            "operation_definition_id": operation_definition_id,
+            "targets": targets,
+            "description": description,
+        },
+        idempotency_key,
+        wake_id,
     )
 
 
@@ -214,30 +169,19 @@ def update_plan(
 ) -> dict[str, Any]:
     """Replace the private current plan and optionally revise a few private beliefs."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "update_plan",
-            {
-                "objective": objective,
-                "steps": steps,
-                "rationale": rationale,
-                "rationale_source": rationale_source,
-                "belief_updates": belief_updates or [],
-                "belief_source": belief_source,
-                "reconsider_when": reconsider_when or [],
-            },
-            idempotency_key,
-            wake_id,
-        )
-    return _world().update_plan(
-        objective,
-        steps,
-        rationale=rationale,
-        rationale_source=rationale_source,
-        belief_updates=belief_updates,
-        belief_source=belief_source,
-        reconsider_when=reconsider_when,
-        idempotency_key=idempotency_key,
+    return _volume_tool(
+        "update_plan",
+        {
+            "objective": objective,
+            "steps": steps,
+            "rationale": rationale,
+            "rationale_source": rationale_source,
+            "belief_updates": belief_updates or [],
+            "belief_source": belief_source,
+            "reconsider_when": reconsider_when or [],
+        },
+        idempotency_key,
+        wake_id,
     )
 
 
@@ -250,18 +194,16 @@ def schedule_revisit(
 ) -> dict[str, Any]:
     """Create a private simulated-time Revisit that will cause a future Wake."""
 
-    if _is_volume_binding():
-        return _volume_tool(
-            "schedule_revisit", {"after_days": after_days, "reason": reason}, idempotency_key, wake_id
-        )
-    return _world().schedule_revisit(after_days, reason, idempotency_key=idempotency_key)
+    return _volume_tool(
+        "schedule_revisit", {"after_days": after_days, "reason": reason}, idempotency_key, wake_id
+    )
 
 
 @mcp.tool()
 def logical_intent(
     intent: dict[str, Any], idempotency_key: str, wake_id: str = ""
 ) -> dict[str, Any]:
-    """Stage one V5 logical intent without mutating the shared world."""
+    """Stage one V6 logical intent without mutating the shared world."""
 
     from .host import ChronicleHost
 
@@ -278,7 +220,7 @@ def logical_intent(
             (item for item in existing if item["idempotency_key"] == logical_key), None
         )
         if operation is None:
-            raise WorldAccessError("one V5 action is already staged for this Wake")
+            raise WorldAccessError("one V6 action is already staged for this Wake")
         return {
             "status": "accepted",
             "moment_id": operation["payload"].get("moment_id", ""),

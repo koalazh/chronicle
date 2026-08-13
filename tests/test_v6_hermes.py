@@ -33,7 +33,7 @@ def _lifetime(lifetime_id: str, controller: str, display_name: str) -> dict[str,
     }
 
 
-def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
+def test_v6_materializes_every_lifetime_without_orient_or_crisis_soul(
     app_config, monkeypatch
 ):
     app_config.hermes_home.mkdir(parents=True)
@@ -44,7 +44,9 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         yaml.safe_dump(
             {
                 "mcp_servers": {
-                    "chronicle-world-v4": {"owned_by": "legacy-crisis"},
+                    "unmanaged-world-server": {"owned_by": "external"},
+                    "chronicle-volume-world-volume-jiashen-external": {"owned_by": "external"},
+                    "chronicle-volume-world-other-volume-life": {"owned_by": "other-volume"},
                     "unrelated-server": {"owned_by": "other"},
                 }
             }
@@ -74,8 +76,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         lifetimes,
         volume_id="jiashen",
         content_version=3,
-        content_hash="content-hash-v5",
-        runtime_epoch="epoch-v5",
+        content_hash="content-hash-v6",
+        runtime_epoch="epoch-v6",
     )
 
     assert set(installs) == {
@@ -99,10 +101,10 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
             "worldline_id": "volume-jiashen",
             "volume_id": "jiashen",
             "volume_content_version": 3,
-            "volume_content_hash": "content-hash-v5",
+            "volume_content_hash": "content-hash-v6",
             "lifetime_id": lifetime_id,
             "genesis_hash": lifetime["genesis_hash"],
-            "runtime_epoch": "epoch-v5",
+            "runtime_epoch": "epoch-v6",
             "ownership_marker": record["ownership_marker"],
             "distribution": "chronicle-actor",
             "toolsets": ["memory", record["world_server_name"]],
@@ -120,8 +122,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         lifetimes,
         volume_id="jiashen",
         content_version=3,
-        content_hash="content-hash-v5",
-        runtime_epoch="epoch-v5",
+        content_hash="content-hash-v6",
+        runtime_epoch="epoch-v6",
     )
     assert installs == [
         lifetime_profile_name("volume-jiashen", "human-life"),
@@ -143,8 +145,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         db_lifetimes,
         volume_id="jiashen",
         content_version=3,
-        content_hash="content-hash-v5",
-        runtime_epoch="epoch-v5",
+        content_hash="content-hash-v6",
+        runtime_epoch="epoch-v6",
     )
     assert set(loaded) == set(records)
     assert all(
@@ -163,8 +165,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
             db_lifetimes,
             volume_id="jiashen",
             content_version=3,
-            content_hash="content-hash-v5",
-            runtime_epoch="epoch-v5",
+            content_hash="content-hash-v6",
+            runtime_epoch="epoch-v6",
         )
     materialize_lifetime_profiles(
         app_config,
@@ -172,8 +174,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         lifetimes,
         volume_id="jiashen",
         content_version=3,
-        content_hash="content-hash-v5",
-        runtime_epoch="epoch-v5",
+        content_hash="content-hash-v6",
+        runtime_epoch="epoch-v6",
     )
 
     marker_path = human_profile / "chronicle-genesis.json"
@@ -187,8 +189,8 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
             lifetimes,
             volume_id="jiashen",
             content_version=3,
-            content_hash="content-hash-v5",
-            runtime_epoch="epoch-v5",
+            content_hash="content-hash-v6",
+            runtime_epoch="epoch-v6",
         )
     marker["worldline_id"] = "volume-jiashen"
     marker_path.write_text(json.dumps(marker), encoding="utf-8")
@@ -203,7 +205,12 @@ def test_v5_materializes_every_lifetime_without_orient_or_crisis_soul(
         for record in records.values()
     )
     gateway = yaml.safe_load((app_config.hermes_home / "config.yaml").read_text(encoding="utf-8"))
-    assert set(gateway["mcp_servers"]) == {"chronicle-world-v4", "unrelated-server"}
+    assert set(gateway["mcp_servers"]) == {
+        "unmanaged-world-server",
+        "chronicle-volume-world-volume-jiashen-external",
+        "chronicle-volume-world-other-volume-life",
+        "unrelated-server",
+    }
     gateway_env = (app_config.hermes_home / ".env").read_text(encoding="utf-8")
     assert "KEEP_ME=yes" in gateway_env
     assert all(record["world_token"] not in gateway_env for record in records.values())

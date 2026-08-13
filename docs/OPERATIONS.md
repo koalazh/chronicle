@@ -19,15 +19,13 @@
 
 ```bash
 uv sync
-uv run chronicle source validate
-uv run chronicle scenario validate
-uv run chronicle crisis validate
+uv run chronicle volume validate
 uv run pytest -q
 uv run ruff check .
 uv run python -m compileall -q chronicle tests scripts
 
 set -o noglob
-for file in $(git ls-files '*.js'); do
+for file in $(find web -type f -name '*.js'); do
   node --check "$file" || exit 1
 done
 
@@ -102,9 +100,11 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN
 
 只有确认 owner marker、PID 起始信息和 Worldline 一致后，才允许停止或清理。未知端口和全局 Hermes Home 不在本操作手册的权限范围内。
 
-## 6. 数据与迁移
+## 6. 数据边界
 
-迁移保持 additive：先备份、只在副本上打开、保留未知表和旧字段。不要直接修改真实数据库的 `status`、`runtime_phase`、`outcome_json` 或 binding 来制造验收结果。
+当前数据库只接受 schema marker `10`。新库只创建 V6 Volume 所需的表；既有 schema `10` 数据库只做当前 Lifetime 列形状的窄补齐，不恢复 V1–V5 迁移链、旧 Branch/Run 读取或旧 API。旧 schema 和没有 schema marker 的非空数据库会在任何建表写入前拒绝打开。
+
+需要处理旧数据时，先复制到隔离目录并确认它是当前 V6 schema `10`，再运行 doctor；不直接修改真实数据库的 `status`、`runtime_phase`、`outcome_json` 或 binding 来制造验收结果。
 
 副本检查：
 
@@ -114,7 +114,7 @@ CHRONICLE_HERMES_HOME=/absolute/temp/hermes-home \
 uv run chronicle doctor
 ```
 
-具体历史迁移边界、备份命名和旧数据退出路径见 [历史归档](archive/README.md) 中的迁移归档；当前产品的运行入口不依赖旧 API 或旧 replay。
+V1–V5 的迁移边界、旧数据和验收记录只作为历史归档阅读；当前产品的运行入口不依赖旧 API、旧 replay 或旧迁移脚本。
 
 ## 7. 浏览器检查
 

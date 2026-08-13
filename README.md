@@ -64,6 +64,7 @@ uv run chronicle serve --host 127.0.0.1 --port 8711
 ## 想了解更多
 
 - 想了解产品想带来的体验：读 [PRODUCT.md](PRODUCT.md)。
+- 想了解多段人生如何各自继续、又通过已经发生的事情互相影响：读 [多主体运行说明](docs/MULTI_AGENT.md)（给开发者和架构评审）。
 - 想了解文档怎么分层：读 [docs/README.md](docs/README.md)。
 - 想开发、排障或运行真实模型：读 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
 - 想核对当前证据和限制：读 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。

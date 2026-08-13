@@ -2,7 +2,7 @@
 
 > 读者：开发者、验收人员和项目维护者。本文用于核对证据，不是产品上手指南；如果你只想体验，请从 [README](../README.md) 开始。
 
-本文只记录当前工作树中可以复核的结果。不同证据层各自回答不同问题：自动化检查不能替代浏览器体验，浏览器不能替代真实 Hermes 业务链，一次真实业务链也不能替代真人主观反馈。
+本文只记录当前工作树中可以复核的结果。多主体 Profile 的实现边界见 [多主体运行说明](MULTI_AGENT.md)。不同证据层各自回答不同问题：自动化检查不能替代浏览器体验，浏览器不能替代真实 Hermes 业务链，一次真实业务链也不能替代真人主观反馈。
 
 ## 结论
 
@@ -51,7 +51,7 @@ git diff --check
 最近一次脱敏记录使用独立 SQLite、Hermes Home、loopback 产品端和 Gateway；没有覆盖项目默认数据库、全局 Hermes Home 或未知端口。业务链包含：
 
 1. 浏览器 Human 写入 Course，离席，再次进入后仍能看到该判断；
-2. 多个独立主体在同一 Volume 中产生 Attention、HOLD/REVISE、消息、Agreement 和 Operation；
+2. 六个真实 Hermes Profile 均按各自 binding materialize，并以 fresh Session 在同一 Volume 中产生 Attention、HOLD/REVISE、消息、Agreement 和 Operation；
 3. Wu 的判断经历 `BACKGROUND → REOPEN → HOLD`，Archive 可回看此前判断、重新判断和后来抵达的事实；
 4. Shanhai、Nanjing 和 Southern consolidation 通过统一的世界时钟和结构边界自然完成；
 5. Volume Seal 后状态为 `SEALED/ARCHIVED`，六条 binding 为 `REVOKED`，本卷 Profile 目录、Gateway owner 和任务端口均已精确清理。

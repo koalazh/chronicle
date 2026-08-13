@@ -17,6 +17,7 @@ README 里的命令可以整段复制，不需要先理解项目内部名称。
 | 目的 | 入口 | 读者 |
 | --- | --- | --- |
 | 理解世界如何推进、权限如何保持 | [ARCHITECTURE.md](ARCHITECTURE.md) | 开发者 |
+| 理解多主体如何保持独立、协作和隔离 | [MULTI_AGENT.md](MULTI_AGENT.md) | 产品架构 / 开发者 / 验收人员 |
 | 修改页面、文案或隐私边界 | [FRONTEND.md](FRONTEND.md) | 前端开发者 |
 | 启动、隔离、排障和清理运行资源 | [OPERATIONS.md](OPERATIONS.md) | 开发者 / 运维人员 |
 | 核对测试、浏览器和真实运行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) | 验收人员 |

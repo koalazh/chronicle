@@ -2,7 +2,7 @@
 
 > 读者：开发者。本文解释系统内部如何保持世界、权限和因果的一致性；普通用户无需阅读，也不应把其中的代码名称当成产品词汇。
 
-本文描述当前实现的唯一运行边界。产品旅程见 [产品说明](../PRODUCT.md)，页面合同见 [前端](FRONTEND.md)，启动和验收见 [运维](OPERATIONS.md) 与 [当前验收](ACCEPTANCE.md)。历史迁移和阶段记录只在 [归档](archive/README.md) 中保留。
+本文描述当前实现的唯一运行边界。多主体 Profile 的身份、协作传输和 Hermes 边界见 [多主体运行说明](MULTI_AGENT.md)。产品旅程见 [产品说明](../PRODUCT.md)，页面合同见 [前端](FRONTEND.md)，启动和验收见 [运维](OPERATIONS.md) 与 [当前验收](ACCEPTANCE.md)。历史迁移和阶段记录只在 [归档](archive/README.md) 中保留。
 
 ## 一条因果链
 

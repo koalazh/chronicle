@@ -197,15 +197,18 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     assert archive.status_code == 200
     payload = archive.json()
     assert payload["available"] is True
-    assert payload["boundary"]["code"] == "structural_boundary"
-    assert payload["replay"]["public"]["items"]
-    assert len(payload["events"]) == len(runtime.db.worldline_events(worldline_id))
-    shi = payload["replay"]["lifetime"]
+    assert payload["ending"]["code"] == "structural_boundary"
+    assert payload["history"]
+    assert payload["lives"]
+    assert "events" not in payload
+    assert "replay" not in payload
+    assert "boundary" not in payload
+    shi = payload["selected_life"]
     assert isinstance(shi["later_known"], list)
     assert all(item["happened_tick"] < item["known_tick"] for item in shi["later_known"])
-    assert not {"knowledge", "beliefs", "plan", "controller", "profile_name"} & _keys(payload["replay"]["public"])
+    assert not {"knowledge", "beliefs", "plan", "controller", "profile_name"} & _keys(payload)
     visible_replay_text = " ".join(
-        item["text"] for item in payload["replay"]["public"]["items"]
+        beat["text"] for chapter in payload["history"] for beat in chapter["beats"]
     )
     for internal_id in (
         "before-shanhaiguan",

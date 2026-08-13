@@ -106,7 +106,7 @@ def test_archive_projects_append_only_judgment_history(app_config):
         params={"lifetime_id": "wu-sangui"},
     )
     assert archive.status_code == 200
-    history = archive.json()["replay"]["lifetime"]["judgment_history"]
+    history = archive.json()["selected_life"]["judgment_history"]
     assert history
     first = history[0]
     assert first["label"] == "第一次判断"

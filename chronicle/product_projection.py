@@ -224,6 +224,28 @@ class ProductProjection:
                 actor["location"] = self.location_name(str(actor.get("location", "")))
         return surface
 
+    def durable_reality(self, projection: dict[str, Any]) -> list[dict[str, str]]:
+        pack = self.active.volume_runtime.pack
+        reality = []
+        for entity in pack.world.entities:
+            current_state = str(
+                projection.get("entities", {}).get(entity.id, {}).get(
+                    "state", entity.initial_state
+                )
+            )
+            state_label = entity.state_labels.get(current_state)
+            if current_state == entity.initial_state or not state_label:
+                continue
+            reality.append(
+                {
+                    "id": entity.id,
+                    "title": entity.display_name,
+                    "state": current_state,
+                    "text": self.public_copy(state_label),
+                }
+            )
+        return reality
+
     def public_world(self, worldline_id: str) -> dict[str, Any]:
         state = self.volume_state(worldline_id)
         row = state["worldline"]
@@ -269,24 +291,6 @@ class ProductProjection:
                 }
             )
 
-        present_reality = []
-        for entity in pack.world.entities:
-            current_state = str(
-                projection.get("entities", {}).get(entity.id, {}).get(
-                    "state", entity.initial_state
-                )
-            )
-            state_label = entity.state_labels.get(current_state)
-            if current_state == entity.initial_state or not state_label:
-                continue
-            present_reality.append(
-                {
-                    "id": entity.id,
-                    "title": entity.display_name,
-                    "state": current_state,
-                    "text": self.public_copy(state_label),
-                }
-            )
         current_life_id = self.lifetime_seat(
             str(row["id"]), str(row.get("human_lifetime_id") or "")
         )
@@ -304,7 +308,7 @@ class ProductProjection:
                 for location in pack.world.locations
             ],
             "open_questions": open_questions,
-            "present_reality": present_reality,
+            "present_reality": self.durable_reality(projection),
             "current_life": people_by_id.get(current_life_id) if current_life_id else None,
         }
 
@@ -345,6 +349,28 @@ class ProductProjection:
             "trace": trace,
         }
 
+    def actor_name(self, actor_id: Any) -> str:
+        identifier = str(actor_id or "")
+        if not identifier:
+            return ""
+        pack = self.active.volume_runtime.pack
+        lifetime = pack.lifetimes.get(identifier)
+        if lifetime is not None:
+            return lifetime.display_name
+        for crisis_pack in pack.packs.values():
+            actor = crisis_pack.actor_by_id.get(identifier)
+            if actor is not None:
+                return actor.display_name
+        return self.public_copy(identifier)
+
+    def entity_definition(self, crisis_id: str, entity_id: str) -> Any | None:
+        pack = self.active.volume_runtime.pack
+        for entity in pack.world.entities:
+            if entity.id == entity_id:
+                return entity
+        crisis_pack = pack.packs.get(crisis_id)
+        return crisis_pack.entity_by_id.get(entity_id) if crisis_pack is not None else None
+
     replay_labels = {
         "WORLDLINE_CREATED": "卷册展开",
         "WORLD_INITIALIZED": "共同世界成形",
@@ -359,6 +385,9 @@ class ProductProjection:
         "LIFETIME_LEFT": "这段人生暂时交还世界",
         "PLAN_UPDATED": "计划发生变化",
         "BELIEF_UPDATED": "一个判断留下证据",
+        "OPERATION_COMPLETED": "一项行动完成",
+        "ENTITY_STATE_CHANGED": "现实发生变化",
+        "AGREEMENT_CREATED": "一项约定形成",
         "HUMAN_INTENT_STAGED": "一个决定被提出",
         "AGENT_INTENT_STAGED": "一个决定被提出",
         "CRISIS_SETTLED": "一处局势留下结果",
@@ -381,6 +410,30 @@ class ProductProjection:
         if event_type == "CRISIS_PRESSURE_APPLIED":
             pressure = payload.get("pressure", {})
             return str(pressure.get("title") or "外部压力改变了局面")
+        if event_type == "OPERATION_COMPLETED":
+            operation = payload.get("operation", {})
+            operation_name = str(operation.get("display_name") or "一项行动")
+            actor = self.actor_name(operation.get("actor_id"))
+            return f"{actor}{operation_name}已经完成。" if actor else f"{operation_name}已经完成。"
+        if event_type == "ENTITY_STATE_CHANGED":
+            description = payload.get("description")
+            if description:
+                return self.public_copy(description)
+            entity = self.entity_definition(
+                str(payload.get("crisis_id", "")), str(payload.get("entity_id", ""))
+            )
+            state = str(payload.get("after", ""))
+            label = entity.state_labels.get(state) if entity is not None else ""
+            if entity is not None and label:
+                return f"{entity.display_name}{label}。"
+            return self.replay_labels["ENTITY_STATE_CHANGED"]
+        if event_type == "AGREEMENT_CREATED":
+            agreement = payload.get("agreement", {})
+            parties = [self.actor_name(item) for item in agreement.get("parties", [])]
+            parties = [item for item in parties if item]
+            if len(parties) >= 2:
+                return f"{parties[0]}与{parties[1]}形成了一项约定。"
+            return self.replay_labels["AGREEMENT_CREATED"]
         if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
             source = str(payload.get("source", ""))
             if source == "historical_field":
@@ -646,11 +699,6 @@ class ProductProjection:
         events: list[dict[str, Any]],
     ) -> dict[str, Any]:
         lifetime_id = str(lifetime["seat"])
-        items = [
-            item
-            for event in events
-            if (item := self.lifetime_replay_event(event, lifetime_id)) is not None
-        ]
         dispatches = {
             str(event.get("payload", {}).get("id", "")): event
             for event in events
@@ -706,38 +754,280 @@ class ProductProjection:
             "display_name": self.public_lifetime(
                 state["worldline"], state["projection"], lifetime
             )["display_name"],
-            "items": items,
             "known_at_time": known_at_time,
             "later_known": later_known,
             "unknown_at_time": unknown_at_time,
             "judgment_history": self.judgment_history(lifetime, events),
         }
 
+    def _history_beat(
+        self,
+        event_id: str,
+        tick: int,
+        kind: str,
+        text: str,
+        *,
+        crisis_id: str = "",
+        actor_ids: list[str] | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        actors = [
+            {"id": actor_id, "display_name": self.actor_name(actor_id)}
+            for actor_id in dict.fromkeys(actor_ids or [])
+            if actor_id
+        ]
+        item: dict[str, Any] = {
+            "id": event_id,
+            "tick": int(tick),
+            "kind": kind,
+            "text": self.public_copy(text).strip(),
+            "actors": actors,
+        }
+        if actors:
+            item["actor"] = actors[0]
+        if crisis_id:
+            item["chapter_id"] = crisis_id
+        item.update(extra)
+        return item
+
+    def _public_event_visibility(self, event: dict[str, Any], crisis_id: str) -> bool:
+        payload = event.get("payload", {})
+        visibility = payload.get("visibility")
+        if isinstance(visibility, str):
+            return visibility in {"PUBLIC", "SHARED"}
+        if not isinstance(visibility, list) or not crisis_id:
+            return False
+        crisis_pack = self.active.volume_runtime.pack.packs.get(crisis_id)
+        if crisis_pack is None:
+            return False
+        return set(crisis_pack.participant_ids) <= {str(item) for item in visibility}
+
+    def history_beats(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Project a small public history from the immutable Runtime ledger."""
+
+        pack = self.active.volume_runtime.pack
+        operation_changes: dict[str, list[dict[str, Any]]] = {}
+        for event in events:
+            if event.get("event_type") != "ENTITY_STATE_CHANGED":
+                continue
+            operation_id = str(event.get("payload", {}).get("operation_id", ""))
+            if operation_id:
+                operation_changes.setdefault(operation_id, []).append(event)
+
+        beats: list[dict[str, Any]] = []
+        consumed_entity_events: set[str] = set()
+        grouped_messages: set[tuple[str, str, int]] = set()
+
+        for event in events:
+            event_type = str(event.get("event_type", ""))
+            payload = event.get("payload", {})
+            crisis_id = str(payload.get("crisis_id", ""))
+
+            if event_type == "OPERATION_COMPLETED":
+                operation = payload.get("operation", {})
+                operation_id = str(operation.get("id", ""))
+                changes = [
+                    change
+                    for change in operation_changes.get(operation_id, [])
+                    if str(event.get("id", ""))
+                    in set(change.get("causal_parent_ids", []))
+                ]
+                operation_crisis_id = crisis_id or next(
+                    (
+                        str(change.get("payload", {}).get("crisis_id", ""))
+                        for change in changes
+                        if change.get("payload", {}).get("crisis_id")
+                    ),
+                    "",
+                )
+                if not self._public_event_visibility(event, operation_crisis_id):
+                    if not changes:
+                        continue
+                    continue
+                actor_id = str(operation.get("actor_id", ""))
+                change_texts = []
+                change_crisis_id = crisis_id
+                for change in changes:
+                    change_payload = change.get("payload", {})
+                    entity_id = str(change_payload.get("entity_id", ""))
+                    change_crisis_id = str(change_payload.get("crisis_id", "")) or change_crisis_id
+                    entity = self.entity_definition(change_crisis_id, entity_id)
+                    state = str(change_payload.get("after", ""))
+                    label = entity.state_labels.get(state) if entity is not None else ""
+                    if entity is not None and label:
+                        change_texts.append(f"{self.actor_name(actor_id)}让{entity.display_name}{label}。")
+                    elif entity is not None:
+                        change_texts.append(f"{self.actor_name(actor_id)}让{entity.display_name}发生了变化。")
+                    consumed_entity_events.add(str(change.get("id", "")))
+                definition = None
+                definition_id = str(operation.get("definition_id", ""))
+                for crisis_pack in pack.packs.values():
+                    definition = crisis_pack.operation_by_id.get(definition_id)
+                    if definition is not None:
+                        break
+                text = "；".join(change_texts)
+                if not text:
+                    operation_name = (
+                        definition.display_name if definition is not None else "一项行动"
+                    )
+                    text = f"{self.actor_name(actor_id)}{operation_name}已经完成。"
+                beats.append(
+                    self._history_beat(
+                        str(event["id"]),
+                        int(event["tick"]),
+                        "行动",
+                        text,
+                        crisis_id=change_crisis_id or operation_crisis_id,
+                        actor_ids=[actor_id],
+                    )
+                )
+                continue
+
+            if event_type == "ENTITY_STATE_CHANGED":
+                event_id = str(event.get("id", ""))
+                if event_id in consumed_entity_events:
+                    continue
+                entity_id = str(payload.get("entity_id", ""))
+                entity = self.entity_definition(crisis_id, entity_id)
+                shared_entity = any(item.id == entity_id for item in pack.world.entities)
+                if not shared_entity and not self._public_event_visibility(event, crisis_id):
+                    continue
+                beats.append(
+                    self._history_beat(
+                        event_id,
+                        int(event["tick"]),
+                        "现实",
+                        self.replay_event_text(event),
+                        crisis_id=crisis_id,
+                        actor_ids=[str(event.get("seat_id", ""))],
+                    )
+                )
+                continue
+
+            if event_type == "CRISIS_PRESSURE_APPLIED":
+                pressure = payload.get("pressure", {})
+                if str(pressure.get("visibility", "")) not in {"PUBLIC", "SHARED"}:
+                    continue
+                beats.append(
+                    self._history_beat(
+                        str(event["id"]),
+                        int(event["tick"]),
+                        "外部现实",
+                        str(pressure.get("title") or pressure.get("description") or "现实发生了变化。"),
+                        crisis_id=crisis_id,
+                    )
+                )
+                continue
+
+            if event_type == "AGREEMENT_CREATED":
+                agreement = payload.get("agreement", {})
+                if str(agreement.get("visibility", "")) not in {"PUBLIC", "SHARED"}:
+                    continue
+                parties = [str(item) for item in agreement.get("parties", [])]
+                beats.append(
+                    self._history_beat(
+                        str(event["id"]),
+                        int(event["tick"]),
+                        "约定",
+                        self.replay_event_text(event),
+                        crisis_id=str(agreement.get("crisis_id", crisis_id)),
+                        actor_ids=parties,
+                    )
+                )
+                continue
+
+            if event_type == "MESSAGE_DELIVERED":
+                if str(payload.get("source", "")) != "historical_field":
+                    continue
+                key = (
+                    str(payload.get("source", "")),
+                    str(payload.get("content", "")),
+                    int(event.get("tick", 0)),
+                )
+                if key in grouped_messages:
+                    continue
+                grouped_messages.add(key)
+                deliveries = [
+                    candidate
+                    for candidate in events
+                    if candidate.get("event_type") == "MESSAGE_DELIVERED"
+                    and str(candidate.get("payload", {}).get("source", "")) == key[0]
+                    and str(candidate.get("payload", {}).get("content", "")) == key[1]
+                    and int(candidate.get("tick", 0)) == key[2]
+                ]
+                recipients = [
+                    self.actor_name(candidate.get("payload", {}).get("recipient"))
+                    for candidate in deliveries
+                ]
+                beats.append(
+                    self._history_beat(
+                        str(event["id"]),
+                        int(event["tick"]),
+                        "公共记录",
+                        str(payload.get("content") or "一条公开军情抵达。"),
+                        crisis_id=crisis_id,
+                        recipients=[item for item in recipients if item],
+                    )
+                )
+                continue
+
+            if event_type == "CRISIS_SETTLED":
+                outcome = payload.get("outcome", {})
+                beats.append(
+                    self._history_beat(
+                        str(event["id"]),
+                        int(event["tick"]),
+                        "结果",
+                        str(outcome.get("summary") or "这一处局势留下了结果。"),
+                        crisis_id=crisis_id,
+                    )
+                )
+
+        return beats
+
+    def history_chapters(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        chapters: dict[str, dict[str, Any]] = {}
+        for beat in self.history_beats(events):
+            chapter_id = str(beat.get("chapter_id") or "volume")
+            if chapter_id not in chapters:
+                crisis_pack = self.active.volume_runtime.pack.packs.get(chapter_id)
+                chapters[chapter_id] = {
+                    "id": chapter_id,
+                    "title": (
+                        crisis_pack.crisis.title
+                        if crisis_pack is not None
+                        else self.active.volume_runtime.pack.volume.title
+                    ),
+                    "beats": [],
+                }
+            chapters[chapter_id]["beats"].append(
+                {key: value for key, value in beat.items() if key != "chapter_id"}
+            )
+        return list(chapters.values())
+
+    def archive_lives(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        projection = state["projection"]
+        pack = self.active.volume_runtime.pack
+        lives = []
+        for lifetime in state["lifetimes"]:
+            lifetime_id = str(lifetime["seat"])
+            definition = pack.lifetimes.get(lifetime_id)
+            location_id = str(projection.get("positions", {}).get(lifetime_id, ""))
+            lives.append(
+                {
+                    "id": lifetime_id,
+                    "display_name": definition.display_name if definition else "一段人生",
+                    "location": {
+                        "id": location_id,
+                        "display_name": self.location_name(location_id),
+                    },
+                }
+            )
+        return lives
+
     def volume_archive(self, worldline_id: str) -> dict[str, Any]:
         state = self.volume_state(worldline_id)
         events = self.active.db.worldline_events(worldline_id)
-        public_items = [
-            item
-            for event in events
-            if (item := self.public_replay_event(event)) is not None
-        ]
-        ledger = []
-        for event in events:
-            public_item = self.public_replay_event(event)
-            ledger.append(
-                {
-                    **(
-                        public_item
-                        or {
-                            "id": str(event["id"]),
-                            "tick": int(event["tick"]),
-                            "kind": "主体内部记录",
-                            "text": "一项未向公共世界公开的主体记录。",
-                        }
-                    ),
-                    "public": public_item is not None,
-                }
-            )
         sealed_event = next(
             (event for event in reversed(events) if event["event_type"] == "VOLUME_SEALED"),
             None,
@@ -751,10 +1041,10 @@ class ProductProjection:
                 "title": self.active.volume_runtime.pack.volume.title,
                 "subtitle": self.active.volume_runtime.pack.volume.subtitle,
             },
-            "world": self.public_world(worldline_id),
-            "boundary": boundary,
-            "events": ledger,
-            "replay": {"public": {"items": public_items}},
+            "ending": boundary,
+            "final_reality": self.durable_reality(state["projection"]),
+            "history": self.history_chapters(events),
+            "lives": self.archive_lives(state),
         }
 
     def desk_course_items(self, context: dict[str, Any]) -> list[dict[str, str]]:

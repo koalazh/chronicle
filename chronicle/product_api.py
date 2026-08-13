@@ -565,7 +565,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 )
                 if lifetime is None:
                     raise HTTPException(status_code=404, detail="Lifetime not found")
-                result["replay"]["lifetime"] = view.lifetime_replay(
+                result["selected_life"] = view.lifetime_replay(
                     state,
                     lifetime,
                     active.db.worldline_events(worldline_id),

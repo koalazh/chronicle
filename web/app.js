@@ -253,29 +253,34 @@ function archivePage() {
   const rows = state.archive || [];
   const detail = state.archiveDetail;
   if (detail) {
-    const replay = detail.replay?.public?.items || [];
-    const boundary = detail.boundary || {};
+    const history = detail.history || [];
+    const ending = detail.ending || {};
+    const selectedLife = detail.selected_life;
     return chrome(`
       <section class="actor-title">
         <p class="kicker">卷册边界 · ${text(detail.volume?.native_period || "甲申")}</p>
         <h1>这一卷已经成为过去。</h1>
-        <p>${text(boundary.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
+        <p>${text(ending.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
         <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回封存卷册</button></div>
       </section>
+      <section class="world-section archive-reality">
+        <div class="section-heading"><span>最后成为现实</span><h2>这一卷最后留下了什么</h2></div>
+        ${realityMarkup(detail.final_reality)}
+      </section>
       <section class="world-section archive-replay">
-        <div class="section-heading"><span>公共回看</span><h2>世界留下的轨迹</h2></div>
-        <ol class="trace-list">${replay.map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind)}</strong><p>${text(event.text)}</p></div></li>`).join("") || `<li class="empty-copy">没有可公开回看的事件。</li>`}</ol>
+        <div class="section-heading"><span>历史如何走到这里</span><h2>留下的几次变化</h2></div>
+        ${history.map((chapter) => `<section class="archive-chapter"><h3>${text(chapter.title)}</h3><ol class="trace-list">${(chapter.beats || []).map((beat) => `<li><span>第 ${text(beat.tick)} 个时刻</span><div><strong>${text(beat.kind)}</strong><p>${text(beat.text)}</p></div></li>`).join("")}</ol></section>`).join("") || `<p class="empty-copy">没有可公开回看的历史。</p>`}
       </section>
       <section class="world-section">
         <div class="section-heading"><span>人生回看</span><h2>从一段人生回看</h2></div>
-        <div class="people-grid">${(detail.world?.people || []).map((person) => `<article class="person-card"><div><span class="column-label">${text(person.display_name)}</span><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
-        ${state.selectedReplayLifetime && detail.replay?.lifetime ? `
+        <div class="people-grid">${(detail.lives || []).map((person) => `<article class="person-card"><div><span class="column-label">${text(person.display_name)}</span><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
+        ${state.selectedReplayLifetime && selectedLife ? `
           <section class="judgment-history-section">
-            <div class="section-heading"><span>判断回看</span><h3>${text(detail.replay.lifetime.display_name)} 的判断如何变化</h3></div>
+            <div class="section-heading"><span>判断回看</span><h3>${text(selectedLife.display_name)} 的判断如何变化</h3></div>
             <p class="history-intro">这里只回看已经落下的判断、后来进入所知的事实，以及它们留下的后果；不展示未落笔的思考。</p>
-            ${judgmentHistoryMarkup(detail.replay.lifetime.judgment_history)}
+            ${judgmentHistoryMarkup(selectedLife.judgment_history)}
           </section>
-          <div class="known-strip"><span>${text(detail.replay.lifetime.display_name)} · 后知事实</span>${listMarkup(detail.replay.lifetime.later_known, "desk-list")}</div>
+          <div class="known-strip"><span>${text(selectedLife.display_name)} · 后知事实</span>${listMarkup(selectedLife.later_known, "desk-list")}</div>
         ` : ""}
       </section>
     `, { compact: true });
@@ -293,7 +298,7 @@ function archivePage() {
 
 function endingPage() {
   if (state.archiveDetail) {
-    return chrome(`<section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.boundary?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
+    return chrome(`<section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.ending?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
   }
   return chrome(`
     <section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷仍未走到边界。</h1><p class="empty-copy">局部结果会先留在世界中；整卷封存与后知事实将在卷册真正结束时出现。</p><button class="secondary" data-page="world">返回世界</button></section>

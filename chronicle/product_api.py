@@ -1237,6 +1237,19 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             )
             if row["kind"] != WorldlineKind.VOLUME.value:
                 return result
+            state = active.volume_runtime.worldline(worldline_id)
+            current_tick = int(state["worldline"]["current_tick"])
+            human_seat = lifetime_seat(active, worldline_id, request.lifetime_id)
+            has_current_human_wake = any(
+                str(wake["actor_id"]) == human_seat
+                and int(wake["tick"]) == current_tick
+                and wake["status"] in {"QUEUED", "WAITING_HUMAN"}
+                for wake in active.db.subject_wakes(worldline_id)
+            )
+            if not state["projection"].get("pending_moment") and has_current_human_wake:
+                await asyncio.to_thread(
+                    active.volume_runtime.freeze_pending_moment, worldline_id
+                )
             if active.db.worldline_snapshot(worldline_id, int(row["current_tick"])) is None:
                 return result
             return {

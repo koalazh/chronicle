@@ -114,6 +114,26 @@ def test_human_can_reconsider_at_current_tick_without_advancing_or_hermes(app_co
         assert sum(event["event_type"] == "TIME_ADVANCED" for event in events) == before_time_advances
 
 
+def test_inhabit_freezes_an_initial_human_checkpoint_for_direct_judgment(app_config):
+    config = replace(app_config, dev=True)
+    with TestClient(create_app(config)) as client:
+        worldline_id = client.post("/api/worldlines", json={"live": False}).json()["worldline"]["id"]
+        assert client.post(
+            f"/api/worldlines/{worldline_id}/inhabit",
+            json={"lifetime_id": "wu-sangui"},
+        ).status_code == 200
+
+        decided = client.post(
+            f"/api/worldlines/{worldline_id}/decision",
+            json={"text": "先守住关口，继续核验清方条件"},
+        )
+
+        assert decided.status_code == 200
+        assert decided.json()["desk"]["desk"]["current_course"][0]["text"].startswith(
+            "先守住关口"
+        )
+
+
 def test_life_desk_projects_v6_judgment_sections_without_internal_terms(app_config):
     config = replace(app_config, dev=True)
     with TestClient(create_app(config)) as client:

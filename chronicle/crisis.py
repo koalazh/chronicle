@@ -350,6 +350,7 @@ class CrisisActivationPrecondition(StrictModel):
     required_statuses: list[str] = Field(default_factory=list)
     required_states: list[str] = Field(default_factory=list)
     suppressed_statuses: list[str] = Field(default_factory=list)
+    suppressed_states: list[str] = Field(default_factory=list)
 
 
 class VolumeDefinition(StrictModel):
@@ -1485,6 +1486,95 @@ class VolumePack:
         for route in world.routes:
             if route.from_location not in location_ids or route.to_location not in location_ids:
                 errors.append(f"volume: shared route {route.id} has an unknown endpoint")
+        for field_index, field_event in enumerate(world.historical_field):
+            messages = field_event.get("messages", [])
+            if messages is None:
+                messages = []
+            if not isinstance(messages, list):
+                errors.append(f"volume: historical field {field_index} messages must be a list")
+                continue
+            for message_index, message in enumerate(messages):
+                if not isinstance(message, dict):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "must be a mapping"
+                    )
+                    continue
+                has_content = "content" in message
+                has_position_report = "position_report" in message
+                if has_content == has_position_report:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "must declare exactly one of content or position_report"
+                    )
+                recipients = message.get("recipients")
+                if recipients is None:
+                    recipients = [message.get("recipient", "")]
+                elif not isinstance(recipients, list):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "recipients must be a list"
+                    )
+                    recipients = []
+                recipient_ids = [str(item) for item in recipients]
+                unknown_recipients = set(recipient_ids) - set(lifetimes)
+                if unknown_recipients:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "has unknown recipients "
+                        + ", ".join(sorted(str(item) for item in unknown_recipients))
+                    )
+                if not has_position_report:
+                    continue
+                report = message.get("position_report")
+                if not isinstance(report, dict):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report must be a mapping"
+                    )
+                    continue
+                if set(report) != {"lifetime_ids"}:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report only accepts lifetime_ids"
+                    )
+                lifetime_ids = report.get("lifetime_ids")
+                if not isinstance(lifetime_ids, list) or not lifetime_ids:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report lifetime_ids must be nonempty"
+                    )
+                    lifetime_ids = []
+                lifetime_ids = [str(item) for item in lifetime_ids]
+                if len(lifetime_ids) != len(set(lifetime_ids)):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report lifetime_ids must be unique"
+                    )
+                unknown_lifetimes = set(lifetime_ids) - set(lifetimes)
+                if unknown_lifetimes:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report has unknown lifetimes "
+                        + ", ".join(sorted(str(item) for item in unknown_lifetimes))
+                    )
+                source_crisis_id = str(message.get("source_crisis_id", ""))
+                source_pack = packs.get(source_crisis_id)
+                if source_pack is None:
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        f"references unknown source crisis {source_crisis_id}"
+                    )
+                elif set(lifetime_ids) - set(source_pack.participant_ids):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report lifetimes must belong to source_crisis_id participants"
+                    )
+                if message.get("assertion_ids") not in (None, []):
+                    errors.append(
+                        f"volume: historical field {field_index} message {message_index} "
+                        "position_report messages must have empty assertion_ids"
+                    )
         for crisis_id, pack in packs.items():
             participant_ids = pack.participant_ids
             if len(participant_ids) != len(set(participant_ids)):
@@ -1536,6 +1626,35 @@ class VolumePack:
                         errors.append(
                             f"crisis {crisis_id}: activation precondition {precondition.id} "
                             "needs required_states"
+                        )
+                    shared_entity = next(
+                        (entity for entity in world.entities if entity.id == precondition.entity_id),
+                        None,
+                    )
+                    if shared_entity is None:
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            f"references unknown shared entity {precondition.entity_id}"
+                        )
+                    else:
+                        valid_states = {
+                            shared_entity.initial_state,
+                            *shared_entity.state_labels,
+                        }
+                        unknown_states = (
+                            set(precondition.required_states)
+                            | set(precondition.suppressed_states)
+                        ) - valid_states
+                        if unknown_states:
+                            errors.append(
+                                f"crisis {crisis_id}: activation precondition {precondition.id} "
+                                "references unknown shared states "
+                                + ", ".join(sorted(unknown_states))
+                            )
+                    if set(precondition.required_states) & set(precondition.suppressed_states):
+                        errors.append(
+                            f"crisis {crisis_id}: activation precondition {precondition.id} "
+                            "has overlapping required_states and suppressed_states"
                         )
                 if not precondition.description:
                     errors.append(

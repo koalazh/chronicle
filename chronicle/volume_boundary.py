@@ -27,9 +27,9 @@ class VolumeBoundaryDecision:
 
 
 class VolumeBoundaryPolicy:
-    """Keep the V6 structural ending separate from Crisis settlement."""
+    """Keep the structural ending separate from Crisis settlement."""
 
-    id = "jiashen-north-south-recognition-v1"
+    id = "jiashen-structural-closure-v2"
 
     def evaluate(
         self,
@@ -41,7 +41,6 @@ class VolumeBoundaryPolicy:
         due_wakes: list[dict[str, Any]],
         next_tick: int | None,
         safety_horizon_tick: int | None,
-        required_field_event_ids: tuple[str, ...] = (),
     ) -> VolumeBoundaryDecision:
         fallback = safety_horizon_tick is not None and current_tick >= int(safety_horizon_tick)
         if projection.get("pending_moment"):
@@ -60,28 +59,11 @@ class VolumeBoundaryPolicy:
         if next_tick is not None:
             return self._blocked("future_historical_trigger", "世界仍有下一项真实触发", fallback)
 
-        applied_field_ids = {
-            str(event.get("payload", {}).get("field_event", {}).get("id", ""))
-            for event in events
-            if event.get("event_type") == "FIELD_EVENT_APPLIED"
-        }
-        missing_field_ids = set(required_field_event_ids) - applied_field_ids
-        if missing_field_ids:
-            return self._blocked(
-                "public_boundary_not_reached",
-                "南北现实尚未正式进入彼此的判断范围",
-                fallback,
-            )
-
         evidence = tuple(
             str(event["id"])
             for event in events
-            if event.get("event_type") in {"CRISIS_SETTLED", "FIELD_EVENT_APPLIED"}
-            and (
-                event.get("event_type") == "CRISIS_SETTLED"
-                or str(event.get("payload", {}).get("field_event", {}).get("id", ""))
-                in set(required_field_event_ids)
-            )
+            if event.get("event_type")
+            in {"CRISIS_SETTLED", "CRISIS_SUPPRESSED", "FIELD_EVENT_APPLIED"}
         )
         evidence_assertions = tuple(
             sorted(
@@ -89,8 +71,6 @@ class VolumeBoundaryPolicy:
                     str(assertion_id)
                     for event in events
                     if event.get("event_type") == "FIELD_EVENT_APPLIED"
-                    and str(event.get("payload", {}).get("field_event", {}).get("id", ""))
-                    in set(required_field_event_ids)
                     for assertion_id in event.get("payload", {}).get("field_event", {}).get(
                         "assertion_ids", []
                     )
@@ -100,7 +80,7 @@ class VolumeBoundaryPolicy:
         return VolumeBoundaryDecision(
             ready=True,
             code="structural_boundary",
-            message="南北现实已经开始正式互相成为判断对象",
+            message="本卷当前能够承载的历史问题已经落地。",
             evidence_event_ids=evidence,
             evidence_assertion_ids=evidence_assertions,
         )

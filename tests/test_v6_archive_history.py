@@ -59,6 +59,12 @@ def _settle_all(runtime: Any, worldline_id: str) -> None:
                 crisis_id,
                 outcome={"summary": f"{crisis_id} 已留下结果"},
             )
+        elif current["status"] == "DORMANT" and crisis_id == "southern-consolidation":
+            runtime._suppress_dormant_crisis(
+                worldline_id,
+                crisis_id,
+                "南京政治中心未在当前测试分支形成可执行状态",
+            )
 
 
 def test_archive_projects_append_only_judgment_history(app_config):

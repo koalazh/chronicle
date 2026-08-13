@@ -171,7 +171,11 @@ def test_no_offscreen_cognition_changes_the_pending_user_boundary(app_config):
         runtime.reconcile_crisis_envelopes(worldline_id)
         runtime.settle_crisis(worldline_id, "before-shanhaiguan")
         runtime.settle_crisis(worldline_id, "nanjing-succession")
-        runtime.settle_crisis(worldline_id, "southern-consolidation")
+        runtime._suppress_dormant_crisis(
+            worldline_id,
+            "southern-consolidation",
+            "南京政治中心未在当前测试分支形成可执行状态",
+        )
 
     deterministic_boundary = deterministic.boundary(deterministic_id)["boundary"]
     assert deterministic_boundary["code"] == "due_wake_pending"

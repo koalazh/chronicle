@@ -42,7 +42,7 @@ Host 拥有现实：时间、来源、位置、路线、消息抵达、权限、
 | `Logical Moment` | 同一 tick 的冻结上下文、主体 intent 和原子 commit 单元 | Pending projection + Ledger |
 | `Archive` | 封存后的公共回看和选定 Lifetime 回看 | 只读；不重跑过去 |
 
-数据库当前只创建和使用 V6 Volume 所需的表。既有 schema `10` 数据库只做一次窄的物理形状补齐（例如 Lifetime genesis 列名），不恢复旧迁移链、不读取旧 Branch/Run 数据，也不提供旧 API 兼容层。未知或旧 schema 会在写入前拒绝打开，不能通过直接改状态字段制造验收结果。
+数据库当前只创建和使用当前 Volume 所需的表。既有 schema `10` 数据库只做一次窄的物理形状补齐（例如 Lifetime genesis 列名），不恢复旧迁移链、不读取旧 Branch/Run 数据，也不提供旧 API 兼容层。未知或旧 schema 会在写入前拒绝打开，不能通过直接改状态字段制造验收结果。
 
 ## 状态分层与隐私
 
@@ -72,7 +72,7 @@ Memory
 
 `VolumeRuntime.create()` 在一个新 Volume Worldline 中建立 Volume genesis、所有 Lifetime genesis、初始 Projection、共享 World、历史 Field Event、危局来源引用、Profile binding metadata 和从 tick `0` 开始的 Ledger/Snapshot。
 
-危局引用先注册为带 Envelope 元数据的 `DORMANT` Instance，再按最早激活 tick、结构性前置条件、参与者和 local horizon 进行确定性 reconcile。当前 `before-shanhaiguan` 与 `nanjing-succession` 在初始 tick eligible；`southern-consolidation` 要等南都定策结算后才激活。前置条件消失时写入 `SUPPRESSED`，不伪造可玩的危局。
+危局引用先注册为带 Envelope 元数据的 `DORMANT` Instance，再按最早激活 tick、结构性前置条件、参与者和 local horizon 进行确定性 reconcile。当前 `before-shanhaiguan` 与 `nanjing-succession` 在初始 tick eligible；`southern-consolidation` 只有在当前 World 真正形成 shared `nanjing-political-center = FU_RECOGNIZED` 后才激活；潞王承认、争议、碎片化或延期会使其 `SUPPRESSED`，中心仍为 `UNFORMED` 时保持 `DORMANT`。前置条件消失时写入 `SUPPRESSED`，不伪造可玩的危局。
 
 ### Restart reconcile
 
@@ -88,7 +88,7 @@ Memory
 - 没有在途消息和待应用 historical field；
 - 没有后续 `next_tick`；
 - 每个 Crisis Instance 都是 `SETTLED` 或 `SUPPRESSED`；
-- required historical field 已实际应用。
+- 所有待应用 historical field 已完成；不要求某个固定 Field Event 产生消息。
 
 安全 horizon 只能说明“尚未收束”的 fallback，不能把未满足条件的卷册伪装成 Ending。Seal event 记录 boundary policy、证据事件和 reason，之后才允许 Archive。
 
@@ -107,6 +107,8 @@ VOLUME_SEALED
 ## Global Clock 与 Logical Moment
 
 一个 Volume Worldline 只有一个 authoritative world tick。危局的 `local_tick` 是从 activation tick 派生的显示值，不能改变 Ledger 排序。
+
+当前历史 Field 仍沿用 `FIELD_EVENT_APPLIED → MESSAGE_DISPATCHED → MESSAGE_DELIVERED` 的既有链路。North 的 bounded `position_report` 只在 observation tick 读取当前 Projection：genesis 位置不报告、在途 Movement 不泄露，且每个公开位置必须由已提交的 Movement completion 支撑；没有可报告事实时 Field 仍会应用但保持静默。动态消息是 `VOLUME_DERIVED`，并携带 Field 应用事件与实际 Movement completion 的 causal parents。
 
 推进步骤固定为：
 

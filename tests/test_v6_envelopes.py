@@ -38,7 +38,7 @@ def test_volume_registers_envelopes_and_activates_only_eligible_crises(host):
     ].count("CRISIS_ENVELOPE_REGISTERED") == 3
 
 
-def test_southern_envelope_requires_nanjing_settlement_and_is_idempotent(host):
+def test_southern_envelope_requires_nanjing_settlement_and_shared_center(host):
     runtime = host.volume_runtime
     worldline_id = runtime.create()["worldline"]["id"]
     runtime.reconcile_crisis_envelopes(worldline_id)
@@ -54,16 +54,20 @@ def test_southern_envelope_requires_nanjing_settlement_and_is_idempotent(host):
     instances = {
         item["crisis_id"]: item for item in runtime.db.crisis_instances(worldline_id)
     }
-    assert instances["southern-consolidation"]["status"] == CrisisInstanceStatus.ACTIVE.value
-    assert any(
+    assert instances["southern-consolidation"]["status"] == CrisisInstanceStatus.DORMANT.value
+    assert not any(
         event["event_type"] == "CRISIS_ACTIVATED"
         and event["payload"]["crisis_id"] == "southern-consolidation"
         for event in settled["events"]
     )
+    assert runtime.worldline(worldline_id)["projection"]["entities"][
+        "nanjing-political-center"
+    ]["state"] == "UNFORMED"
 
     repeated = runtime.reconcile_crisis_envelopes(worldline_id)
     assert repeated["events"] == []
-    assert runtime.activate_crisis(worldline_id, "southern-consolidation")["idempotent"] is True
+    with pytest.raises(VolumeRuntimeConflict, match="nanjing-political-center"):
+        runtime.activate_crisis(worldline_id, "southern-consolidation")
 
 
 def test_suppressed_precondition_is_persisted_without_activation(host):

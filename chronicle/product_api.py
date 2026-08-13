@@ -433,9 +433,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             return crisis.crisis.subtitle if crisis else "一个未决节点进入视野"
         if event_type == "FIELD_EVENT_APPLIED":
             field = payload.get("field_event", {})
-            if field.get("id") == "north-south-recognition-bridge":
-                return "北方军情公开记录进入南京可接触的公开范围"
-            return str(field.get("title") or field.get("id") or "公共历史向前推进")
+            return str(field.get("title") or "一次公共历史观察完成")
         if event_type == "CRISIS_PRESSURE_APPLIED":
             pressure = payload.get("pressure", {})
             return str(pressure.get("title") or "外部压力改变了局面")

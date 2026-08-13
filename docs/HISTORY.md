@@ -8,7 +8,9 @@
 
 Chronicle 不把一段“历史简介”直接塞给模型。史料先整理成 Source、Assertion、争议说明和场景假设；运行时只把当前主体合法收到的内容交给它。模型输出、测试结果和 UI 文案都不能创造新的历史事实。
 
-当前 Volume Pack 位于 `scenarios/jiashen/`，由 `volume.yaml`、`lifetimes.yaml`、`world.yaml`、共享地点/路线和 `crises/` 下的 Crisis Pack 组成。每个 Crisis Pack 由 `crisis.yaml` 和 `sources.yaml` 定义检查点、主体、走廊、路线、在途消息、停止边界、历史锚点和断言 ID；当前运行时只读取这套 V6 Volume 结构。
+当前 Volume Pack 位于 `scenarios/jiashen/`，由 `volume.yaml`、`lifetimes.yaml`、`world.yaml`、共享地点/路线和 `crises/` 下的 Crisis Pack 组成。每个 Crisis Pack 由 `crisis.yaml` 和 `sources.yaml` 定义检查点、主体、走廊、路线、在途消息、停止边界、历史锚点和断言 ID；当前运行时只读取这套 Volume 结构，并把主体已提交的行动作为后续 World 的事实来源。
+
+North 汇入 Southern 的公开记录不是固定的历史旁白。`position_report` 在自己的 observation tick 读取当前位置；只有已经完成且有 Ledger origin 的 Movement 才能形成公开军情，位置未改变或仍在路上时保持静默。消息抵达后只是普通 Knowledge，由主体自己的 Attention 与 Course 决定是否重新判断。Nanjing 的 Resolution 也先写入 shared `nanjing-political-center`，Southern 再根据该当前状态激活、抑制或保持休眠；不能由 `outcome` 文案或 `REFERENCE_ONLY` 历史锚点倒灌未来行动。
 
 ## 断言的两个标签
 

@@ -101,6 +101,11 @@ class NanjingSuccessionResolutionContract:
                 ),
                 entity_effects=(
                     ResolutionEntityEffect(
+                        "nanjing-political-center",
+                        "CONTESTED",
+                        "南京政治中心已经在当前世界形成公开争议状态。",
+                    ),
+                    ResolutionEntityEffect(
                         "nanjing-recognition",
                         "CONTESTED",
                         "相互不相容的候选安排使制度承认转为公开争议。",
@@ -129,6 +134,11 @@ class NanjingSuccessionResolutionContract:
                 ),
                 entity_effects=(
                     ResolutionEntityEffect(
+                        "nanjing-political-center",
+                        "FRAGMENTED",
+                        "南京政治中心没有在当前世界汇合为单一承认。",
+                    ),
+                    ResolutionEntityEffect(
                         "nanjing-recognition",
                         "FRAGMENTED",
                         "候选进入与制度程序脱节，未能形成单一承认。",
@@ -154,6 +164,11 @@ class NanjingSuccessionResolutionContract:
                 "当前世界中没有候选完成可执行的制度承认。",
             ),
             entity_effects=(
+                ResolutionEntityEffect(
+                    "nanjing-political-center",
+                    "DEFERRED",
+                    "南京政治中心的形成在当前世界被明确延期。",
+                ),
                 ResolutionEntityEffect(
                     "nanjing-recognition",
                     "DEFERRED",
@@ -190,6 +205,11 @@ class NanjingSuccessionResolutionContract:
             immediate_actor_ids=("shi-kefa", "ma-shiying", "han-zanzhou"),
             factors=tuple(factors),
             entity_effects=(
+                ResolutionEntityEffect(
+                    "nanjing-political-center",
+                    facts.recognition_state,
+                    "南京政治中心的当前承认状态已经成为世界事实。",
+                ),
                 ResolutionEntityEffect(
                     "nanjing-recognition",
                     facts.recognition_state,

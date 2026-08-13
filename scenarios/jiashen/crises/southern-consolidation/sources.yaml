@@ -24,9 +24,16 @@ assertions:
     normalized_evidence: 三种材料均记录定策之后史可法的后续军政安排或督师江北相关节点；本 Knot 只使用“请求与安排成为现实问题”的边界，不把后续执行成功预设为事实。
     notes: continuation reference from the Nanjing Knot; it is material for a new Knot, not an automatic actor action
   - id: s002
-    claim: 江北督师安排需要通过公开文书、军政协调与可见位置继续形成现实杠杆，也可能停留在争议状态。
+    claim: 南京政治中心与江北军政网络之间的协调，只有通过公开制度行动和独立地方主体的现实响应，才会成为可执行世界事实；中心形成或一份文书本身都不能自动推出协调完成。
     provenance: scenario_assumption
     evidence_status: approximate
     source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
-    normalized_evidence: 史料支持后续职位与军政分工的存在，但不支持把具体协调过程或结果自动化；本条将其收缩为可执行协调与争议两种显式状态。
-    notes: qualitative runtime boundary, not a claim that the historical coordination followed this exact sequence
+    normalized_evidence: 史料支持南京中枢与江北军政网络之间存在制度与现实关系，但不支持把具体协调过程或结果自动化；本条将其收缩为必须经过独立行动才能形成的显式世界事实。
+    notes: qualitative runtime boundary, not a claim that any later appointment or coordination already existed
+  - id: s003
+    claim: 当当前世界已经真实形成福王南京政治中心后，南京中枢与江北军政网络之间仍存在一个没有自动解决的协调问题；本 Knot 从这个结构性问题开始，不假设史可法请求督师、督师文书已经形成或江北网络已经接受安排。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-1, mingji-yiwen-2, hongguang-shilu-chao-1]
+    normalized_evidence: 这是把南京中心与江北网络的结构性关系收缩为一个 problem boundary；它不把 checkpoint 之后的历史行动重新注入当前 Worldline。
+    notes: modeled problem boundary, not a future actor action or current appointment

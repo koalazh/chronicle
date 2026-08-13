@@ -48,6 +48,9 @@ class VolumeRuntimeConflict(VolumeRuntimeError):
     """A V6 Volume operation conflicts with the current global state."""
 
 
+VOLUME_CONTENT_VERSION = 2
+
+
 VOLUME_WORLD_TOOLS = frozenset(
     {
         "communicate",
@@ -61,7 +64,7 @@ VOLUME_WORLD_TOOLS = frozenset(
 
 
 class VolumeRuntime:
-    """Deterministic V6 runtime for one shared Volume Worldline."""
+    """Deterministic runtime for one shared Volume Worldline."""
 
     def __init__(self, host: ChronicleHost):
         self.host = host
@@ -81,7 +84,7 @@ class VolumeRuntime:
             raise VolumeRuntimeConflict("an active Volume Worldline already exists")
 
         worldline_id = f"worldline-{uuid.uuid4().hex[:16]}"
-        content_version = 1
+        content_version = VOLUME_CONTENT_VERSION
         volume_content_hash = self._volume_content_hash()
         runtime_epoch = f"volume-{uuid.uuid4().hex[:12]}"
         initial_projection = self._initial_projection(worldline_id)
@@ -339,6 +342,7 @@ class VolumeRuntime:
             return self.db.worldline(worldline_id) or row
         if row["status"] != WorldlineStatus.ACTIVE.value:
             raise VolumeRuntimeConflict("Volume Worldline is not active")
+        self._assert_content_compatible(row)
 
         try:
             active_volumes = [
@@ -508,11 +512,6 @@ class VolumeRuntime:
             for wake in self.db.subject_wakes(worldline_id, tick=int(row["current_tick"]))
             if wake["status"] in {"QUEUED", "WAITING_HUMAN", "STAGED"}
         ]
-        required_field_event_ids = tuple(
-            str(item.get("id"))
-            for item in self.pack.world.historical_field
-            if str(item.get("id", "")) == "north-south-recognition-bridge"
-        )
         decision = VolumeBoundaryPolicy().evaluate(
             current_tick=int(row["current_tick"]),
             projection=snapshot["projection"],
@@ -521,7 +520,6 @@ class VolumeRuntime:
             due_wakes=due_wakes,
             next_tick=next_tick,
             safety_horizon_tick=row.get("safety_horizon_tick"),
-            required_field_event_ids=required_field_event_ids,
         )
         return {"worldline": row, "boundary": decision.as_dict()}
 
@@ -750,6 +748,11 @@ class VolumeRuntime:
             elif precondition.kind == CrisisActivationPreconditionKind.SHARED_ENTITY_STATE:
                 entity = projection.get("entities", {}).get(precondition.entity_id, {})
                 state = str(entity.get("state", "MISSING")) if isinstance(entity, dict) else "MISSING"
+                if state in set(precondition.suppressed_states):
+                    return {
+                        "status": CrisisInstanceStatus.SUPPRESSED.value,
+                        "reason": f"precondition {precondition.id}: {state}",
+                    }
                 if state not in set(precondition.required_states):
                     return {
                         "status": CrisisInstanceStatus.DORMANT.value,
@@ -1313,6 +1316,15 @@ class VolumeRuntime:
             events.append(applied)
             field_events.append(field_event)
             for field_message in field_event.get("messages", []):
+                dynamic_content = None
+                dynamic_causal_parent_ids: list[str] = []
+                if "position_report" in field_message:
+                    position_report = self._position_report_message(
+                        worldline_id, projection, field_message
+                    )
+                    if position_report is None:
+                        continue
+                    dynamic_content, dynamic_causal_parent_ids = position_report
                 recipients = field_message.get("recipients")
                 if recipients is None:
                     recipients = [field_message.get("recipient", "")]
@@ -1329,26 +1341,44 @@ class VolumeRuntime:
                         "source_crisis_id": str(field_message.get("source_crisis_id", "")),
                         "sender": str(field_message.get("sender", "public-record")),
                         "recipient": recipient_id,
-                        "content": str(field_message.get("content", "")),
+                        "content": (
+                            dynamic_content
+                            if dynamic_content is not None
+                            else str(field_message.get("content", ""))
+                        ),
                         "dispatch_tick": target,
                         "delivery_tick": arrival,
                         "arrival_tick": arrival,
                         "status": "in_transit",
                         "source": str(field_message.get("source", "historical_field")),
                         "disputed": bool(field_message.get("disputed", False)),
-                        "assertion_ids": list(
-                            field_message.get("assertion_ids", field_event.get("assertion_ids", []))
-                            or []
+                        "assertion_ids": (
+                            []
+                            if dynamic_content is not None
+                            else list(
+                                field_message.get(
+                                    "assertion_ids", field_event.get("assertion_ids", [])
+                                )
+                                or []
+                            )
                         ),
                     }
                     projection.setdefault("messages", []).append(message)
+                    is_dynamic = dynamic_content is not None
                     dispatch = self._event(
                         worldline_id,
                         target,
                         "MESSAGE_DISPATCHED",
                         message,
-                        provenance=Provenance.HISTORICAL.value,
-                        causal_parent_ids=[applied["id"]],
+                        provenance=(
+                            Provenance.VOLUME_DERIVED.value
+                            if is_dynamic
+                            else Provenance.HISTORICAL.value
+                        ),
+                        causal_parent_ids=[
+                            applied["id"],
+                            *dynamic_causal_parent_ids,
+                        ],
                         event_id=(
                             f"{worldline_id}:field:{field_event['id']}:message:{message_id}:"
                             f"{recipient_id}:dispatch"
@@ -1799,6 +1829,94 @@ class VolumeRuntime:
             "field_events": field_events,
             "pressures": applied_pressures,
         }
+
+    def _position_report_message(
+        self,
+        worldline_id: str,
+        projection: dict[str, Any],
+        field_message: dict[str, Any],
+    ) -> tuple[str, list[str]] | None:
+        report = field_message.get("position_report")
+        if not isinstance(report, dict):
+            return None
+        source_crisis_id = str(field_message.get("source_crisis_id", ""))
+        source_pack = self.pack.pack(source_crisis_id)
+        prior_events = self.db.worldline_events(worldline_id)
+        facts: list[str] = []
+        causal_parent_ids: list[str] = []
+        for lifetime_id in report.get("lifetime_ids", []):
+            lifetime = self.pack.lifetimes.get(str(lifetime_id))
+            current_position = str(projection.get("positions", {}).get(str(lifetime_id), ""))
+            if lifetime is None or not current_position:
+                continue
+            genesis_position = self.pack.world.resolve_location(lifetime.starting_location)
+            if current_position == genesis_position:
+                continue
+            if self._has_unfinished_movement(projection, str(lifetime_id)):
+                continue
+            origin = next(
+                (
+                    event
+                    for event in reversed(prior_events)
+                    if event["event_type"] == "OPERATION_COMPLETED"
+                    and self._movement_completion_matches(
+                        event,
+                        source_crisis_id,
+                        source_pack,
+                        str(lifetime_id),
+                        current_position,
+                    )
+                ),
+                None,
+            )
+            if origin is None:
+                continue
+            location = self.pack.world.location_by_id.get(current_position)
+            if location is None:
+                continue
+            facts.append(f"{lifetime.display_name}现位于{location.display_name}")
+            causal_parent_ids.append(str(origin["id"]))
+        if not facts:
+            return None
+        return "沿线公开军情记录：" + "；".join(facts) + "。", causal_parent_ids
+
+    def _has_unfinished_movement(self, projection: dict[str, Any], actor_id: str) -> bool:
+        for crisis_id, crisis in projection.get("crisis_instances", {}).items():
+            crisis_pack = self.pack.pack(str(crisis_id))
+            for operation in crisis.get("operations", []):
+                if (
+                    str(operation.get("actor_id", "")) != actor_id
+                    or operation.get("status") not in {"PLANNED", "IN_PROGRESS"}
+                ):
+                    continue
+                definition = crisis_pack.operation_by_id.get(
+                    str(operation.get("definition_id", ""))
+                )
+                if definition is not None and definition.kind.value == "MOVEMENT":
+                    return True
+        return False
+
+    def _movement_completion_matches(
+        self,
+        event: dict[str, Any],
+        source_crisis_id: str,
+        source_pack: CrisisPack,
+        lifetime_id: str,
+        current_position: str,
+    ) -> bool:
+        operation = event.get("payload", {}).get("operation", {})
+        if not isinstance(operation, dict):
+            return False
+        if (
+            str(operation.get("actor_id", "")) != lifetime_id
+            or str(operation.get("crisis_id", "")) != source_crisis_id
+        ):
+            return False
+        definition = source_pack.operation_by_id.get(str(operation.get("definition_id", "")))
+        if definition is None or definition.kind.value != "MOVEMENT":
+            return False
+        destination = operation.get("target_map", {}).get(definition.movement_destination_target)
+        return self.pack.world.resolve_location(str(destination or "")) == current_position
 
     def settle_crisis(
         self,
@@ -2580,6 +2698,27 @@ class VolumeRuntime:
                 result.append((str(crisis_id), pack))
         return result
 
+    def _crisis_action_projection(
+        self, projection: dict[str, Any], pack: CrisisPack
+    ) -> dict[str, Any]:
+        """Present shared positions under the active Crisis corridor names."""
+
+        action = copy.deepcopy(projection)
+        route_locations = set(pack.location_by_id)
+        aliases_by_target: dict[str, list[str]] = {}
+        for alias, target in self.pack.world.location_aliases.items():
+            if alias in route_locations:
+                aliases_by_target.setdefault(target, []).append(alias)
+        positions = dict(action.get("positions", {}))
+        for actor_id, position in positions.items():
+            if position in route_locations:
+                continue
+            aliases = aliases_by_target.get(str(position), [])
+            if len(aliases) == 1:
+                positions[actor_id] = aliases[0]
+        action["positions"] = positions
+        return action
+
     def _action_projection(self, projection: dict[str, Any]) -> dict[str, Any]:
         action = copy.deepcopy(projection)
         action["entities"] = {}
@@ -2756,8 +2895,9 @@ class VolumeRuntime:
         for crisis_id, pack in active_packs:
             crisis_state = projection.get("crisis_instances", {}).get(crisis_id, {})
             local_tick = int(crisis_state.get("local_tick", tick))
+            pack_projection = self._crisis_action_projection(projection, pack)
             request, code = pack.operation_request(
-                lifetime["seat"], definition_id, targets, projection, local_tick
+                lifetime["seat"], definition_id, targets, pack_projection, local_tick
             )
             if request is not None:
                 return (
@@ -3915,11 +4055,14 @@ class VolumeRuntime:
         pack = self.pack.pack(crisis_id)
         state = projection["crisis_instances"][crisis_id]
         local_tick = int(state.get("local_tick", tick))
+        pack_projection = self._crisis_action_projection(
+            self._action_projection(projection), pack
+        )
         request, code = pack.operation_request(
             str(wake["actor_id"]),
             str(payload.get("operation_definition_id", "")),
             list(payload.get("targets", [])),
-            self._action_projection(projection),
+            pack_projection,
             local_tick,
         )
         if request is None or request.definition.id != result.get("definition_id"):
@@ -4338,11 +4481,23 @@ class VolumeRuntime:
             raise VolumeRuntimeError("VOLUME Worldline not found")
         if row["status"] != WorldlineStatus.ACTIVE.value:
             raise VolumeRuntimeConflict("Volume Worldline is sealed")
+        self._assert_content_compatible(row)
         if row.get("runtime_mode") == "live" and row.get("runtime_phase") == "FAILED":
             raise VolumeRuntimeConflict(
                 "Live Volume runtime is unavailable; reconcile it before continuing"
             )
         return row
+
+    def _assert_content_compatible(self, row: dict[str, Any]) -> None:
+        if (
+            str(row.get("volume_id") or "") != self.volume_id
+            or int(row.get("volume_content_version") or 0) != VOLUME_CONTENT_VERSION
+            or str(row.get("volume_content_hash") or "") != self._volume_content_hash()
+        ):
+            raise VolumeRuntimeConflict(
+                "This Volume was created under different content semantics "
+                "and cannot be resumed with the current runtime."
+            )
 
     def _transition_controller(
         self,

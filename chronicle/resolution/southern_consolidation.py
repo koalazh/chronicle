@@ -32,7 +32,7 @@ class SouthernConsolidationResolutionContract:
             return ResolutionReadiness(
                 status=ResolutionGateStatus.READY,
                 candidate_kind=ResolutionKind.RECOGNIZED_SETTLEMENT,
-                reasons=("江北督师安排已经进入公开文书与可执行协调状态。",),
+                reasons=("江北协调已经进入公开文书与可执行协调状态。",),
                 facts=facts,
             )
         if command == "CONTESTED":
@@ -45,7 +45,7 @@ class SouthernConsolidationResolutionContract:
         return ResolutionReadiness(
             status=ResolutionGateStatus.NOT_READY,
             candidate_kind=None,
-            reasons=("南京定策留下的江北安排仍可通过后续公开行动改变。",),
+            reasons=("南京中心与江北网络的协调仍可通过后续公开行动改变。",),
             facts=facts,
         )
 
@@ -60,15 +60,15 @@ class SouthernConsolidationResolutionContract:
                 kind=ResolutionKind.RECOGNIZED_SETTLEMENT,
                 variant="JIANGBEI_COORDINATION",
                 ambiguity_used=False,
-                summary="南京定策之后的江北督师安排已经留下可继续使用的现实杠杆。",
+                summary="南京中心与江北军政网络已经通过独立行动形成可执行协调。",
                 immediate_actor_ids=("shi-kefa", "ma-shiying", "han-zanzhou"),
                 factors=readiness.facts,
                 entity_effects=(
                     ResolutionEntityEffect(
-                        "jiangbei-command", "COORDINATING", "江北军政安排进入可执行协调状态。"
+                        "jiangbei-command", "COORDINATING", "江北军政网络进入可执行协调状态。"
                     ),
                     ResolutionEntityEffect(
-                        "jiangbei-mandate", "ISSUED", "督师安排已经进入公开文书。"
+                        "jiangbei-mandate", "ISSUED", "江北公开协调文书已经形成。"
                     ),
                 ),
                 agreement_effects=(),

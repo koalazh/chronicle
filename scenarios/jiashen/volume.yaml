@@ -22,9 +22,15 @@ crises:
     activation_preconditions:
       - id: nanjing-settlement
         kind: CRISIS_STATUS
-        description: 南都定策必须先留下一个已经落地的结果，江北整饬才进入可执行窗口。
+        description: 南都危局必须先结算，江北整饬才有资格观察南京中心留下的现实窗口。
         crisis_id: nanjing-succession
         required_statuses: [SETTLED]
         suppressed_statuses: [SUPPRESSED]
+      - id: nanjing-political-center
+        kind: SHARED_ENTITY_STATE
+        description: 只有当前世界真实形成福王承认的南京政治中心，江北整饬才进入可执行窗口。
+        entity_id: nanjing-political-center
+        required_states: [FU_RECOGNIZED]
+        suppressed_states: [LU_RECOGNIZED, CONTESTED, FRAGMENTED, DEFERRED]
     participants: [shi-kefa, ma-shiying, han-zanzhou]
     local_horizon: 12

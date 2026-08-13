@@ -1,76 +1,123 @@
 # Chronicle · 甲申
 
-> 在同一卷历史里，先看世界，再接过其中一段人生的下一步。
+Chronicle 是一段可以亲自走进去的历史体验：先看共享世界，再接过其中一段人生的下一步。你写下的判断不会直接改写世界；Host 会验证行动，世界按自己的时间继续推进。
 
-## 这是什么
+默认内容是《甲申》：一卷共享历史、六段相互影响的人生，以及几个正在展开的局势。
 
-Chronicle 是一段可以亲自走进去的历史体验。
+## 先启动起来
 
-你先观察世界，再选择一段已经走到当前时刻的人生。你可以替这个人写下下一步，也可以暂时离开；离开以后，世界和其他人仍然继续。等这一卷历史走完，你还能回看当时的选择、后来发生的事，以及那些改变了局势的瞬间。
+要求：
 
-你不需要扮演历史作者，也不需要掌握任何游戏规则。你只需要在看到的事实基础上，决定这一刻愿意做什么。
+- Python 3.11 或更新版本
+- [uv](https://docs.astral.sh/uv/)
 
-## 你会经历什么
+在项目根目录执行下面整段命令。它使用临时 SQLite 和临时 Hermes Home，不会污染仓库里的默认运行状态，也不需要模型 API Key 就能走本机 fixture 体验。
 
-| 你看到的页面 | 你可以做什么 |
-| --- | --- |
-| 卷册首页 | 了解这一卷历史从哪里开始 |
-| 世界 | 看哪些地方和事情正在变得重要 |
-| 人生入口 | 先观察一段人生，再决定是否走近 |
-| 书案 | 看到这段人生已经知道的事，写下下一步或选择等待 |
-| 离席 | 把这段人生交还给世界 |
-| 封存与回看 | 在历史走到尽头后，回看公共轨迹或某一段人生 |
-
-默认内容是《甲申》：一卷共享的历史、六段相互影响的人生，以及几处正在展开的局势。
-
-## 五分钟开始
-
-需要 Python 3.11 或更新版本，以及 [uv](https://docs.astral.sh/uv/)。
-
-在项目目录中复制运行下面整段命令；你不需要理解其中的变量：
-
-~~~
+```bash
 uv sync
 
 CHRONICLE_TMP="$(mktemp -d -t chronicle-dev.XXXXXX)"
 CHRONICLE_DEV=true \
 CHRONICLE_DATABASE_URL="sqlite:///$CHRONICLE_TMP/chronicle.db" \
 CHRONICLE_HERMES_HOME="$CHRONICLE_TMP/hermes-home" \
-uv run chronicle serve --host 127.0.0.1 --port 8711
-~~~
+uv run chronicle start --host 127.0.0.1 --port 8711
+```
 
-然后打开 [http://127.0.0.1:8711/](http://127.0.0.1:8711/)。
+看到服务开始监听后，在浏览器打开：
+
+<http://127.0.0.1:8711/>
+
+也可以在另一个终端确认服务已启动：
+
+```bash
+curl -fsS http://127.0.0.1:8711/health
+```
+
+预期返回：
+
+```json
+{"status":"ok","service":"chronicle-host"}
+```
 
 体验顺序是：
 
-~~~
-了解卷册 → 看世界 → 观察一段人生 → 接过下一步 → 离席 → 回看
-~~~
+```text
+卷册首页 → 世界 → 观察一段人生 → Inhabit → 写下 Course → 离席 → Continue → 回看
+```
 
-结束时按 Ctrl-C 停止服务。只清理这次命令创建的临时目录，不要碰其他目录或正在运行的服务。
+结束时回到运行服务的终端按 `Ctrl-C`。如果确认 `CHRONICLE_TMP` 是本次命令创建的临时目录，再执行：
 
-## 你需要知道的几件事
+```bash
+rm -rf "$CHRONICLE_TMP"
+```
 
-- 你看到的只是当时已经公开、已经抵达，或这段人生已经知道的内容。
-- 一封信在路上时，收信人还不知道它；你离开以后，其他人也不会停下来等你。
-- 写下下一步不会直接改写世界；历史会先检查这一步是否真的做得到。
-- 一处局势有了结果，不代表整卷历史已经结束。
-- 封存后的回看不会补写没有说出口的想法，只展示已经发生并留下痕迹的事。
+不要用这个命令清理项目目录、`~/.chronicle`、全局 Hermes Home 或其他服务的数据。
+
+## `start` 和 `serve` 的区别
+
+日常打开产品使用 `start`：
+
+```bash
+uv run chronicle start --host 127.0.0.1 --port 8711
+```
+
+它创建正式的产品 App，并在启动时检查当前 Volume 的恢复边界。
+
+开发前端、需要代码自动重载时才使用 `serve`：
+
+```bash
+CHRONICLE_DEV=true uv run chronicle serve --host 127.0.0.1 --port 8711
+```
+
+两者都只允许绑定 loopback 地址，不要改成 `0.0.0.0` 对外暴露。端口被占用时，换一个端口，例如 `--port 8712`。
+
+## 常用检查
+
+```bash
+uv run chronicle --help
+uv run chronicle version
+uv run chronicle volume validate
+uv run chronicle doctor
+```
+
+源码或内容变更后的完整检查：
+
+```bash
+uv run pytest -q
+uv run ruff check .
+uv run python -m compileall -q chronicle tests scripts
+git diff --check
+```
+
+## 你会看到什么
+
+| 页面 | 作用 |
+| --- | --- |
+| 卷册首页 | 了解这卷历史从哪里开始 |
+| 世界 | 查看公开事实、地点和正在变化的局势 |
+| Follow | 先观察某段人生当下知道什么 |
+| Inhabit / Life Desk | 接手这一段人生，写下 Course 或选择等待 |
+| Leave | 把这段人生交还给世界 |
+| Archive / Ending | 历史到达结构边界后，回看公共轨迹或某段人生 |
+
+页面只展示当时已经公开、已经抵达，或该 Lifetime 已经知道的内容。离席以后，世界和其他人仍然继续；一处局势结算，也不代表整卷已经封存。
+
+## 真实 Hermes 运行
+
+上面的启动方式是本机 fixture 体验，不代表真实模型业务链已经配置完成。需要配置 Provider、隔离 SQLite/Hermes Home、Profile/Gateway 和 cleanup 时，阅读 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
+
+## 文档入口
+
+- [产品说明](PRODUCT.md)：Chronicle 想提供什么体验
+- [多主体运行说明](docs/MULTI_AGENT.md)：六段人生如何通过已发生的事实互相影响
+- [运维与验收操作手册](docs/OPERATIONS.md)：配置、启动、恢复、真实 Hermes 和安全边界
+- [当前验收记录](docs/ACCEPTANCE.md)：测试、浏览器、真实业务和已知限制
+- [文档索引](docs/README.md)：按读者角色查找其他文档
 
 ## 当前边界
 
-这是一个本机、单人使用的研究型原型，不是联网服务，也没有账号、多用户或公开部署。自动检查和一次真实运行只能说明对应的工程路径成立，不能代替不同环境下的长期稳定性，也不能代替真人体验反馈。
-
-## 想了解更多
-
-- 想了解产品想带来的体验：读 [PRODUCT.md](PRODUCT.md)。
-- 想了解多段人生如何各自继续、又通过已经发生的事情互相影响：读 [多主体运行说明](docs/MULTI_AGENT.md)（给开发者和架构评审）。
-- 想了解文档怎么分层：读 [docs/README.md](docs/README.md)。
-- 想开发、排障或运行真实模型：读 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
-- 想核对当前证据和限制：读 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。
-
-历史实施材料统一放在 [docs/archive/README.md](docs/archive/README.md)，普通用户不需要阅读。
+这是一个本机、单人使用的研究型原型，不是联网服务，没有账号、多用户或公开部署。测试和一次真实运行只能证明对应路径成立，不能代替不同环境下的长期稳定性或真人体验反馈。
 
 ## License
 
-见 LICENSE。
+见 [LICENSE](LICENSE)。

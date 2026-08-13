@@ -67,6 +67,12 @@ def _settle_all(runtime: Any, worldline_id: str) -> None:
                 crisis_id,
                 outcome={"summary": f"{crisis_id} 已留下结果"},
             )
+        elif current["status"] == "DORMANT" and crisis_id == "southern-consolidation":
+            runtime._suppress_dormant_crisis(
+                worldline_id,
+                crisis_id,
+                "南京政治中心未在当前测试分支形成可执行状态",
+            )
 
 
 def test_settlement_is_meaning_and_keeps_volume_active(host):
@@ -111,7 +117,7 @@ def test_volume_boundary_rejects_unsettled_worldline_and_seals_after_full_drain(
     ready = runtime.boundary(worldline_id)["boundary"]
     assert ready["ready"] is True
     assert ready["code"] == "structural_boundary"
-    assert ready["evidence_assertion_ids"] == ["n013"]
+    assert ready["evidence_assertion_ids"] == ["n013", "n014"]
 
     sealed = runtime.seal(worldline_id, "test_boundary")
     assert sealed["worldline"]["status"] == "SEALED"
@@ -128,7 +134,7 @@ def test_volume_boundary_rejects_unsettled_worldline_and_seals_after_full_drain(
 
 
 def test_live_volume_profiles_are_cleaned_only_after_volume_seal(app_config, monkeypatch):
-    config = replace(app_config, dev=True)
+    config = replace(app_config, dev=True, hermes_base_url="http://127.0.0.1:0")
     runtime = ChronicleHost(config).volume_runtime
     materialized: dict[str, Any] = {}
     cleaned: dict[str, Any] = {}
@@ -195,8 +201,8 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     assert payload["replay"]["public"]["items"]
     assert len(payload["events"]) == len(runtime.db.worldline_events(worldline_id))
     shi = payload["replay"]["lifetime"]
-    assert shi["later_known"]
-    assert any(item["happened_tick"] < item["known_tick"] for item in shi["later_known"])
+    assert isinstance(shi["later_known"], list)
+    assert all(item["happened_tick"] < item["known_tick"] for item in shi["later_known"])
     assert not {"knowledge", "beliefs", "plan", "controller", "profile_name"} & _keys(payload["replay"]["public"])
     visible_replay_text = " ".join(
         item["text"] for item in payload["replay"]["public"]["items"]

@@ -126,3 +126,10 @@ assertions:
     source_ids: [mingji-nanlue-public-north, palace-nanming-overview]
     normalized_evidence: 南都纪事与后续概览共同支持北方局势成为南京需要处理的公开军情背景，但不足以为本 Volume 固定单一传递路线或精确日期；因此只建模为延迟公开记录。
     notes: bridge chronology is intentionally approximate; the runtime carries a public record rather than a narrator summary
+  - id: n014
+    claim: 本 Volume 将北方公开军情的可达性收缩为一次有界 observation window：只记录指定北方 Decision Subjects 在该窗口时已经稳定显现、相对 Volume genesis 发生变化的当前位置；不推断主体意图，不回放已消失轨迹，不注入 canonical outcome，且在没有新的可观察事实时允许空白。
+    provenance: modeled
+    evidence_status: approximate
+    source_ids: [mingji-nanlue-public-north, palace-nanming-overview]
+    normalized_evidence: 这是把公开军情材料的可达性收缩为当前 Worldline 的窄观察边界；它只授权观察通道，不替当前主体生成位置、意图或历史结果。
+    notes: bounded observation contract for the Volume historical field

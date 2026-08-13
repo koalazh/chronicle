@@ -1,162 +1,214 @@
-# Hermes 多主体 Profile 运行说明
+# 多主体不是六个聊天窗口
 
-> 读者：开发者、产品架构人员和验收人员。本文解释当前实现，不是普通用户的上手指南；普通用户只需从 [README](../README.md) 开始。
+> Hermes Profile 如何让 Chronicle 里的主体沿着已经作出的判断继续生活
 
-这份说明回答一个核心问题：为什么 Chronicle 不让一个全知 Agent 替所有人做决定，而是把同一卷历史中的每个持久主体分别运行成 Hermes Profile？答案不是“多放几个角色”，而是把身份、上下文、权限、协作和回看都做成可以核对的边界。
+本文面向开发者、产品架构人员和验收人员。它解释当前实现的核心模型，不是普通用户的启动指南；普通用户请从 [README](../README.md) 开始。
 
-## 先给结论
+## 先记住一句话
 
-当前《甲申》Volume 有六个长期主体：李自成、吴三桂、多尔衮、史可法、马士英和韩赞周。每个主体都拥有：
+Chronicle 的多主体能力，不是让一个模型同时扮演六个人，也不是让六个聊天窗口轮流生成下一段剧情。
 
-- 一个与 `worldline_id + lifetime_id` 绑定的 Hermes Profile 身份；
-- 自己的 Hermes Home、配置、SOUL、Memory 文件、API key 和 World MCP binding；
-- 跨离席、重启和多次唤醒仍能识别的 Lifetime 状态；
-- 每次唤醒新建的 Hermes Session；
-- 只包含当时可见事实的冻结 Perspective。
+它要证明的是：
 
-这些 Profile 不是六个互相共享私有提示词的“聊天窗口”，也不是一个叫 Coordinator 的中央 Agent。Chronicle 用现有 Hermes Profile 负责主体的解释和提案，用现有 Volume Host 负责共同世界的时间、权限、因果、原子提交和清理。
+> **判断具有持续时间。**
 
-## 当前拓扑
+一个人已经作出的判断，会在世界时间里继续有效。世界可以继续推进，新的事实可以进入这个人的知识，但大多数变化不值得重新调用认知。只有当现实真正改变了此前判断的基础，主体才重新思考一次，并让新的判断继续生效。
+
+```text
+形成判断
+  → 判断在世界时间中继续有效
+  → 世界继续，事实继续抵达
+  → 事实进入这个人的 Knowledge
+  → 大多数变化只停留在 BACKGROUND
+  → 判断基础真的改变
+  → REOPEN，进行一次 fresh Deliberation
+  → HOLD 或 REVISE
+  → 新判断继续有效
+```
+
+这就是六个 Hermes Profile 的共同价值：它们不是六个名字，而是六段不会因为新 Session、离席或重启而被重置的人生连续性。
+
+## 核心因果拓扑
+
+这张图是本文的主图。它不从组件目录开始，而从因果关系开始：一个事件先成为世界事实，再经过可见性进入某个主体的知识；知识不自动等于重新思考；主体的提案还必须经过 Host 的权威边界，才能成为共享世界的新事实。
 
 ```mermaid
 flowchart TB
-    UI["浏览器 / Product API"] --> HOST["Chronicle Host\nVolume Runtime + Global World Tick"]
-    HOST --> GW["任务独占的 Hermes Gateway\n共享 listener，按 /p/<profile>/ 路由"]
-    GW --> P1["Profile：李自成"]
-    GW --> P2["Profile：吴三桂"]
-    GW --> P3["Profile：多尔衮"]
-    GW --> P4["Profile：史可法"]
-    GW --> P5["Profile：马士英"]
-    GW --> P6["Profile：韩赞周"]
-    P1 --> M1["该主体专属 World MCP"]
-    P2 --> M2["该主体专属 World MCP"]
-    P3 --> M3["该主体专属 World MCP"]
-    P4 --> M4["该主体专属 World MCP"]
-    P5 --> M5["该主体专属 World MCP"]
-    P6 --> M6["该主体专属 World MCP"]
-    M1 --> HOST
-    M2 --> HOST
-    M3 --> HOST
-    M4 --> HOST
-    M5 --> HOST
-    M6 --> HOST
-    HOST --> LEDGER["append-only Ledger\nSnapshot / Projection / Archive"]
+    world["Shared Causal World\n事实 · 世界时间 · 路线 · 结果"]
+    visible["Truth → Visibility\n这个 Lifetime 此刻合法可见的事实"]
+    knowledge["Lifetime Knowledge\n已抵达的事实，不是全知上下文"]
+    attention{"Deterministic Attention\n判断基础是否真的改变？"}
+    background["BACKGROUND\n当前 Course 继续有效\n不创建 Hermes cognition"]
+    reopen["REOPEN\n现实已足够不同"]
+    deliberation["Fresh Deliberation\n同一个 Profile/Lifetime，新 Session"]
+    decision["HOLD / REVISE\n更新当前判断（Decision Horizon）"]
+    proposal["Subject-owned proposal\n只提出自己真正拥有的行动"]
+    host["Host authority\n权限 · 证据 · 时间 · 幂等 · 原子提交"]
+
+    world --> visible --> knowledge --> attention
+    attention -->|大多数事实| background
+    attention -->|load-bearing reality| reopen
+    reopen --> deliberation --> decision --> proposal --> host
+    background -.->|Course remains in force| world
+    host -->|Agency Conservation\n写入因果 Ledger 与世界效果| world
 ```
 
-当前使用的是 Hermes 的 multiplexed Gateway：一个任务独占的 loopback Gateway 承载多个逻辑 Profile，再通过 Profile 路径把请求送到目标 Profile。逻辑上的独立身份不等于每个 Profile 都要有独立进程或端口；也不应把 Profile Home 隔离误解成操作系统沙箱。
+图中的几个词有严格含义：
 
-## 为什么用 Hermes Profile，而不是自建“角色层”
+- `Course` 是一个 Lifetime 当前仍然有效的判断，不是目标、任务、工作流或 Todo 列表。
+- `Attention` 是 Host 内的确定性纯逻辑，不由模型决定是否唤醒自己；它把事件分成 `BACKGROUND` 和 `REOPEN`。
+- `Deliberation` 只在 `REOPEN` 后发生。新的 Session 不是新的人生，而是同一个 Lifetime 在新的现实面前重新形成判断。
+- `Agency Conservation` 是世界不变量：主体只能提交自己拥有的权限、资源、位置和承诺；模型不能凭一句话让另一个主体同意，也不能把提案直接写成结果。
 
-Hermes 在这里承担的是执行基础设施，Chronicle 承担的是历史世界和业务规则。这样分工的优势是：主体可以拥有真正的运行边界，而 Chronicle 不需要再造一套 Agent Runtime、Session、Memory、Gateway 或 Profile Registry。
+## 一卷世界里到底有哪些“人”
 
-| Hermes 原生能力 | Chronicle 的使用方式 | Chronicle 额外负责的部分 |
-| --- | --- | --- |
-| Profile Home、配置和 SOUL | 为每个 Lifetime 安装/校验真实 Profile，保存主体章程和执行配置 | 把 Profile 与 Volume/Lifetime 的归属 marker 绑定，并在漂移时拒绝恢复 |
-| Session 与 Memory | 每次 Wake 使用 fresh Session；普通 Wake 禁止持久 Memory mutation | 把 Session 记录关联到 Wake，把主体的 Course、Knowledge 和判断历史留在 Volume 状态中 |
-| Gateway 与 Profile 路由 | 通过同一个任务 Gateway 的 `/p/<profile>/...` 路由寻址目标 Profile | 只启动和清理当前 Volume 所拥有的 Gateway，不接管未知进程 |
-| Toolset 与 MCP | 每个 Profile 只启用自己的 World MCP 和必要的 Memory toolset | 在 MCP 入口核验 binding、Wake、权限、schema 和幂等键 |
-| Hermes Agent loop | 让 Profile 解释冻结视角、处理不确定性并提出结构化意图 | Host 负责时间、因果、资源、原子提交、消息抵达和世界效果 |
+当前《甲申》卷册承载六个独立主体：李自成、吴三桂、多尔衮、史可法、马士英和韩赞周。每个主体都有一条持久的 `Lifetime`，并由一个 Hermes Profile 作为其认知执行家。它们共享一个世界，但不共享私有判断。
 
-这不是把 Chronicle 业务逻辑藏进 SOUL，也不是把 Hermes 当成数据库。Hermes 保证“哪个主体在执行、用哪个 Session 和哪些工具”；Volume Runtime 保证“什么事实对它可见、它的提案能否发生、发生后如何留下可回看的因果”。
+```mermaid
+flowchart LR
+    human["Human / Product UI\n可暂时代管一个主体"]
 
-## 一个 Profile 实际拥有的东西
+    subgraph shared["一个 Shared Causal World · 1 个全局时间"]
+        world["Truth / Projection\n消息、位置、资源、结果、因果 Ledger"]
+        boundary["Chronicle Host\nVisibility · Attention · 权限 · Atomic Commit"]
+    end
 
-Profile 不是一段角色提示词。Chronicle 在创建 live Volume 时，会为每个 Lifetime 安装或校验真实 Profile，并写入归属 marker：Volume、Lifetime、内容版本、genesis hash、runtime epoch、Profile 名称和 ownership marker 必须全部匹配。无法证明归属时，启动和恢复会 fail closed，而不是按同名目录继续运行。
+    subgraph subjects["六个持久主体 · 6 × Lifetime"]
+        lifetime["各自的 Course、Knowledge、Belief、Authority\n位置、资源、承诺与已落笔判断"]
+        profile["各自的 Hermes Profile\n持久认知 Home、SOUL、工具与 binding"]
+    end
 
-Profile 的关键边界如下：
+    subgraph cognition["只在现实要求时出现"]
+        session["0..n fresh Sessions\n一次 Wake 一个临时认知过程"]
+        mcp["Profile-scoped World MCP\n真实传输 · Host staging"]
+    end
 
-| 边界 | 当前实现 | 价值 |
-| --- | --- | --- |
-| 身份 | Profile 名称由 `worldline_id + lifetime_id` 派生，marker 固定归属 | 离席、重启或回到书案时仍是同一个主体 |
-| 认知上下文 | 每个 Profile 有自己的 Home、SOUL、Memory 和配置 | 不把一个人的私有上下文复制给另一个人 |
-| Session | 每次 Wake 建立 fresh Session；Profile 身份不变 | 避免把上一轮对话误当成当前可见事实，同时保留主体连续性 |
-| 工具与凭据 | 每个 Profile 有独立 API key、World token 和 Profile-specific MCP | 一个主体不能用另一个主体的 binding 读取或写入世界 |
-| 可见范围 | Wake 只收到自己的 frozen Perspective | 后来发生的事、其他主体的私有判断和未送达消息不会提前进入上下文 |
-| 最终决定 | Profile 只提交结构化提案；Host 才能提交世界效果 | 模型可以解释和选择，但不能自行宣布资源、时间或结果 |
+    human --> boundary
+    world --> boundary
+    boundary -->|为每个主体编译 bounded Perspective| lifetime
+    lifetime -->|同一主体身份| profile
+    profile -->|仅 REOPEN 才建立| session
+    session -->|结构化提案| mcp
+    mcp -->|commit_deliberation / logical_intent| boundary
+    boundary -->|一次 Logical Moment 原子提交| world
+    world -->|消息按路线和抵达时间返回| boundary
 
-## 一次 Wake 如何走完
+```
 
-同一轮世界推进中，主体之间先分别判断，再由 Host 统一提交。顺序是：
+这张图表达四个边界：
 
-1. Host 推进唯一的 Global World Tick，并冻结本轮 Pending Logical Moment。
-2. Host 为每个待处理主体编译当时合法的 Perspective，包含可见事实、当前 Course、权限和主体已知的不确定性。
-3. 目标 Profile 建立一个以 Wake 标识的 fresh Session；普通 Wake 不调用 Memory。
-4. Profile 通过自己的 World MCP 提交一次 `commit_deliberation` 或一个受限 `logical_intent`。这一步只是在当前 moment 中 staging，不直接改变公共世界。
-5. MCP 先核对 token、Worldline、主体角色、Wake 身份、权限、schema 和幂等键；不匹配就拒绝。
-6. Host 收齐本轮已冻结 Wake 的提案，按稳定顺序校验并在同一个 atomic commit 中写入 Intent、判断、计划、消息、操作、因果 parents 和 `MOMENT_COMMITTED`。
-7. 消息、调查结果、Operation、Revisit 和外部 Field Event 按世界时间进入未来 tick；主体下一次 Wake 才能看到已经抵达的事实。
+1. **世界只有一个权威。** 全局时间、事实、路线、消息抵达、资源变化、因果记录和封存边界属于 Volume Host，不属于任何模型。
+2. **主体有六个连续身份。** `Lifetime` 持有跨离席、重启、控制者切换和多次唤醒仍然有效的状态；不同主体的过去、知识、权限、位置和 Course 不同。
+3. **Profile 是 Hermes 的执行家，不是业务数据库。** Profile Home、SOUL、配置、凭据和 MCP binding 让 Hermes 知道“谁在执行”；Chronicle 的 Course、Knowledge、Belief 和判断历史仍由 Volume 持久化。
+4. **Session 是临时的。** 一个真实 Wake 使用一个 fresh Session；没有新的 `REOPEN`，就没有为了“保持热度”而强行生成的新认知。
 
-因此，Profile 的输出永远是“我依据当前所见提出什么”，而不是“世界已经发生了什么”。被拒绝的提案会留下可审计结果；同一个幂等键重试只返回既有结果，不产生第二个世界效果。
+逻辑上的六个 Profile 不等于六个进程、六个端口或六个操作系统故障域。当前实现使用任务独占的 multiplexed Hermes Gateway，用 Profile 路径寻址多个逻辑 Profile；需要进程级隔离时必须另外设计和验证，不能从 Profile 名称推断出来。
 
-## 多主体为什么有用
+## Hermes 与 Chronicle 各自负责什么
 
-### 1. 每段人生都有自己的连续性
+这里采用的是“主体更厚、Host 更薄”的分工：Profile 可以在自己的证据范围内解释、不确定、等待和选择；Host 只做必须确定的现实约束。Chronicle 没有再造一套 Agent Runtime、Session、Memory、Gateway、Registry 或 Coordinator Profile。
 
-如果只有一个全知 Agent，离席后的行动、不同人物的限制和重新进入时的上下文很容易被压成一条总叙事。独立 Profile 让“同一个人继续活着”成为可验证的状态：Profile 身份保持稳定，Lifetime 的 Course、Knowledge、Belief、资源和已落笔判断由 Volume 持久化，Session 只是本次执行的短期载体。
+| Hermes Profile 提供 | Chronicle Host 保证 |
+| --- | --- |
+| 持久的 Profile identity、Home、SOUL、配置和工具面 | `worldline_id + lifetime_id` 的真实归属，marker 漂移时 fail closed |
+| 对 bounded Perspective 的解释、主体不确定性和结构化提案 | Truth、Visibility、Knowledge admission 和唯一世界时间 |
+| 一个主体的选择、HOLD/REVISE 判断和自己拥有的下一步 | authority、资源、路线、消息抵达、前置条件和 Agency Conservation |
+| 每次 Wake 的 fresh Session | Wake、controller、幂等键、schema 和 frozen Logical Moment 校验 |
+| 通过 World MCP 表达“我想做什么” | staging 与 atomic commit；模型输出在此之前都只是 proposal |
 
-### 2. 观点可以真正不同，而不是换一段提示词
+两边不能互相越权：
 
-六个主体读取的是各自的 Perspective、已知事实、资源和 authority。李自成、吴三桂、多尔衮不会因为共享同一个模型就共享私有判断；南京的史可法、马士英和韩赞周也各自面对自己的位置和程序约束。这样“独立判断”有身份、输入和权限三层证据，而不只是页面上的不同称呼。
+- Hermes 不能把尚未抵达的消息当成已知事实，不能读取别人的私有上下文，也不能直接写公共世界。
+- Host 不能替主体编造信念、心理或“正确答案”，也不能把 `BACKGROUND` 事件偷偷升级为认知。
+- `Memory` 不是业务真相。普通 Wake 不应把 Hermes Memory 当作持续人生的唯一来源；当前连续性来自 Lifetime 的持久状态和可追溯 Ledger。
 
-### 3. 协作通过世界发生，而不是通过私聊作弊
+## 一次真实的判断是怎样发生的
 
-Profile 之间没有隐形的共享 Memory 或直接注入对方上下文。它们只能通过真实的 World MCP 工具和世界中的消息、Offer、Agreement、Investigation、Operation 等路径影响彼此；消息要经过 route 和 simulated travel time，只有抵达后才进入收件人的 Knowledge，并可能触发新的 Attention/Wake。
+以吴三桂为例，Human 可以先留下这样的当前判断：
 
-这让“多主体协作”具备因果顺序：可以回答谁先知道、谁发出、何时抵达、对方依据哪条事实重新判断，而不是只看到一个最终摘要。
+```text
+暂时不作最终归属；
+继续保持关口可控；
+等待清方明确回复；
+如果东向现实真的发生变化，再重新判断。
+```
 
-### 4. Agent 的灵活性和世界的确定性各司其职
+这不是一条自动执行的任务，而是一个 `Course`。之后同一卷世界按以下顺序向前：
 
-Hermes Profile 处理解释、不确定性、计划和提案；Host 处理认证、权限、时间、路线、资源、幂等、原子事务和硬性边界。任何模型输出都必须穿过 Host 的 mutation boundary 才能成为 Ledger 事件。
+1. **Human Leave。** 这只改变当前控制者；吴三桂的 Lifetime、Course 和 Profile identity 不会被重置。
+2. **世界继续。** 其他主体可以在自己的现实中行动，消息会经过真实的 World MCP、路线和未来抵达时间。
+3. **事实先进入 Knowledge。** 吴三桂可能收到许多不重要的事实；它们仍被记录，但由确定性 Attention 判为 `BACKGROUND`，不调用 Hermes。
+4. **其他主体独立判断。** 多尔衮依据自己的 Perspective 重新判断；李自成也依据自己的现实在另一个时间点判断。没有一个中央 Agent 替他们综合出唯一答案。
+5. **负载事实抵达。** 当真正改变吴三桂 Course 基础的事实进入他的 Knowledge，Attention 才返回 `REOPEN`。
+6. **Fresh Wu Deliberation。** Hermes 用同一个 Profile/Lifetime 建立新 Session，看到此前的 Course、自上次判断以来发生的事实、仍未解决的依赖和未知信息。
+7. **HOLD 或 REVISE。** 新 Session 不能凭“我是新 Session”发明一段新人生；它只能在当前事实和权限内提交一次结构化判断及可选的主体行动。Host 校验后，才在一个原子 Logical Moment 中留下新 Course、因果关系和世界效果。
 
-这保留了语言模型适合处理的开放判断，同时避免让模型直接改写历史、越过权限或把未发生的结果写成事实。
+Human 再次进入吴三桂时，产品应能解释的是：
 
-### 5. 离席、重启、回看和封存可以连成一条证据链
+> 此前一直这样办；直到这里，现实变了；这段人生因此坚持或改了方向。
 
-同一个 Volume 可以把 Profile identity、fresh Session、Wake/Deliberation、Ledger causal parents、Archive judgment history 和 Seal/REVOKED 连接起来。用户离开一段人生后，其他主体仍然可以继续；用户回来时，看到的是已经向前走过的公共世界，而不是被暂停的页面。
+而不是“AI 自动替你执行了七个回合”。这也是南都定策等后续局势复用的认知时间模型：不是为山海关写一套特殊脚本，而是同一条 `Knowledge → Attention → Deliberation → Course` 语义。
 
-封存时，Host 原子地写入 `VOLUME_SEALED`，撤销该卷册的 bindings，取消待处理 Wake，然后只清理 marker 明确属于该 Volume 的 Profile、MCP entry 和 Gateway 状态。历史保留，运行资源回收。
+## 协作为什么是真实的
 
-## “多主体”不等于什么
+多主体协作不是 Profile 之间交换私有提示词。一个主体影响另一个主体，必须在共享世界里留下可观察的因果路径：
 
-- 不等于一个通用多 Agent 平台；Chronicle 没有抽取公共 Runtime、Registry、Router 或新的 Session/Memory 系统。
-- 不等于一个 Hermes Coordinator；当前没有中央模型替所有主体路由、批准或综合决定。Host 的确定性协调和 Profile 的主体判断是两种不同职责。
-- 不等于自由的 Agent-to-Agent 私聊；必须有真实可调用的 MCP/世界传输，且消息的可见性和抵达时间由 Host 决定。
-- 不等于 Profile 之间可以互读文件、Memory、token 或私有 prompt。每个 Profile 的 binding、toolset 和 context 都按主体隔离，跨身份调用应被拒绝。
-- 不等于独立进程、独立端口或完整 OS 沙箱。当前实现使用一个任务独占的 multiplexed Gateway；需要进程级故障域时，必须另行设计并验证，不能从 Profile 名称推断出来。
-- 不等于模型稳定性保证。一次真实 Provider 轨迹证明一条业务链可运行，不证明不同 Provider、版本、提示或重复运行都得到同样选择。
+```text
+主体拥有的行动
+  → 消息 / Offer / Agreement / Investigation / Operation
+  → Host 验证来源、权限、路线和抵达时间
+  → 事实进入接收方的 Visibility / Knowledge
+  → 接收方的 Attention 判断 BACKGROUND 或 REOPEN
+  → 接收方独立 Deliberation
+```
 
-## 源码与证据索引
+因此可以回答：谁发出、谁在当时有权发出、什么时候抵达、对方什么时候知道、哪条事实使对方重判。没有 free A2A、没有隐形共享 Memory，也没有“同意”自动成立：Agreement 必须由拥有相应 Agency 的主体和确定性世界过程共同产生。
 
-### 运行时边界
+## 用户真正获得的体验
 
-- [`chronicle/hermes.py`](../chronicle/hermes.py)：Profile materialization、归属 marker、Profile env/config、fresh Session、Profile 路由、Gateway multiplex 配置和 cleanup。
-- [`chronicle/volume_live.py`](../chronicle/volume_live.py)：读取 frozen Perspective、调用 Hermes、检查普通 Wake 的 Memory 不变、要求结构化提案并 fail closed。
-- [`chronicle/world_mcp.py`](../chronicle/world_mcp.py)：按 binding 和 Wake 身份授权，提供 Profile-specific World MCP、`logical_intent` 和 `commit_deliberation` staging。
-- [`chronicle/volume_runtime.py`](../chronicle/volume_runtime.py)：Host 的 staging、权限和 schema 校验、atomic moment commit、causal Ledger、boundary、Seal 和 cleanup。
-- [`hermes/chronicle-actor/config.yaml`](../hermes/chronicle-actor/config.yaml)：当前 actor distribution 的 multiplexed Gateway、Profile toolset 和 Memory 配置。
-- [`hermes/chronicle-actor/SOUL.md`](../hermes/chronicle-actor/SOUL.md)：主体只能依据自己的 Perspective 行动，不能使用后世知识、终端或其他主体上下文的协议边界。
+多主体的价值不在于同时看到更多 Agent 输出，而在于以下四件事可以同时成立：
 
-### 直接回归
+- **不同的人真的不同。** 差异来自不同的过去、已知事实、位置、资源、权威、承诺和当前判断，而不是换一段人格提示词。
+- **离席不会暂停世界。** 你暂时不代管一个主体时，其他主体和公共世界仍继续；你回来时，看到的是已经抵达的现实。
+- **等待是有意义的。** 大多数变化不会强迫主体每天重算；一个判断可以真正“等到某件事发生”。
+- **回看能还原因果。** 可以区分当时知道什么、后来什么才抵达、哪一次重判改变了方向，以及后果如何回到共同世界。
 
-- [`tests/test_v5_hermes.py`](../tests/test_v5_hermes.py)：所有 Lifetime Profile 的 materialization、marker、重复加载和 cleanup。
-- [`tests/test_v5_live_bridge.py`](../tests/test_v5_live_bridge.py)：每个主体独立 token、启动 reconcile、binding drift fail closed、fresh Session、结构化提案和“一次 Wake 一次写入”。
-- [`tests/test_v6_deliberation.py`](../tests/test_v6_deliberation.py)：HOLD/REVISE、单次 Deliberation、拒绝后幂等、重启 replay 和 atomic commit。
-- [`tests/test_v6_proof_layers.py`](../tests/test_v6_proof_layers.py)：Course 在 restart、controller switch 和 fresh context 下保持连续。
-- [`tests/test_live_runtime.py`](../tests/test_live_runtime.py)：live Profile/Gateway 生命周期、binding revoke、精确 cleanup 和未知资源 fail closed。
+最终感受应该是：
 
-### 真实业务证据
+> **这些人并不是每一天都重新被 AI 算一次；他们沿着已经作出的判断继续生活，只有现实变得足够不同时才重新想。**
 
-当前脱敏验收记录见 [`docs/ACCEPTANCE.md`](ACCEPTANCE.md)。最近一次隔离 real Hermes Volume 将六个真实主体、fresh Session、Human Course/Leave/re-entry、吴三桂的 `BACKGROUND → REOPEN → HOLD`、多尔衮和南京主体的独立判断、消息/Agreement/Operation、Archive、Seal、`REVOKED` bindings 与精确 cleanup 关联在同一个 Volume 中。
+## 明确不是什么
 
-该记录仍然只是一条受控 Provider 轨迹：它证明当前 Profile、transport、Host mutation boundary 和生命周期链可以一起运行，不宣称 Provider 稳定性 benchmark，也不代替真人产品反馈。
+- 不是一个通用的多 Agent 平台，也不是为了“显得高级”新增的第二套运行时。
+- 不是一个 Hermes Coordinator Profile。Host 会确定性地协调世界提交，但当前没有中央模型替所有主体路由、批准或综合决定。
+- 不是自由的 Agent-to-Agent 私聊；所有跨主体影响都必须经过真实可调用的 World MCP 和共享世界传输。
+- 不是 Planner、Memory、Attention、World Model、Director 或 Relationship 等平行 Agent 层。
+- 不是让 Profile 直接写事实、资源、协议结果或别人的支持；Profile 的结果在 Host 边界前永远只是提案。
+- 不是每个危局一个新 Profile；同一卷册中的 Lifetime 跨局势复用自己的 Profile，卷册结束后才由 Host 统一撤销 binding 并清理属于该卷册的资源。
+- 不是模型稳定性保证。一次真实 Provider 轨迹证明一条业务链可以运行，不等于不同 Provider、提示或重复运行都会选择同样的路径。
 
-## 当前判断边界
+## 源码与证据入口
 
-如果要修改 Profile、工具权限、消息传输或 Profile 暴露方式，先回到本说明的四个问题：
+下面的入口用来核对“图上的语义是否真的落在源码和运行证据里”，不是把实现细节倒灌给产品用户：
 
-1. 这个主体是否真的需要独立长期身份、上下文、权限或生命周期？
-2. 它如何通过真实传输和其他主体协作，而不是只在文档中“看起来能协作”？
-3. 哪些结果仍只是 Profile 提案，哪一步由 Host 确定性校验并提交？
-4. 能否在同一业务对象上关联 Profile identity、Session、causal Ledger、Archive/Seal 和精确 cleanup？
+- [`chronicle/volume_runtime.py`](../chronicle/volume_runtime.py)：唯一 Volume 世界时间、Knowledge admission、Attention 评估、Wake staging、Logical Moment 原子提交、消息抵达、Seal 和精确 cleanup。
+- [`chronicle/subject_attention.py`](../chronicle/subject_attention.py)：确定性、无模型的 `BACKGROUND / REOPEN` 判定。
+- [`chronicle/subject_continuity.py`](../chronicle/subject_continuity.py)：按主体构建 bounded Perspective，先给现实和已知事实，再给相关经验、Course、承诺和未知信息。
+- [`chronicle/volume_live.py`](../chronicle/volume_live.py)：同一 Lifetime 的 fresh Hermes Session、结构化提案、普通 Wake 的 Memory guard 和 fail-closed 行为。
+- [`chronicle/world_mcp.py`](../chronicle/world_mcp.py)：按 Worldline、binding、角色和 Wake 授权真实世界工具，并把 `logical_intent` / `commit_deliberation` 送回 Host staging。
+- [`chronicle/hermes.py`](../chronicle/hermes.py)：Profile materialization、归属 marker、Profile 路由、fresh Session、MCP 配置和 cleanup。
+- [`chronicle/gateway.py`](../chronicle/gateway.py)：任务独占 Gateway 的 owner、loopback、fingerprint 和精确生命周期边界。
+- [`hermes/chronicle-actor/config.yaml`](../hermes/chronicle-actor/config.yaml)：当前 Profile toolset 与 multiplexed Gateway 配置。
+- [`hermes/chronicle-actor/SOUL.md`](../hermes/chronicle-actor/SOUL.md)：主体只能依据自己的 Perspective 行动，不能使用后世知识、终端、文件系统或其他主体私有上下文。
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)：世界、权限、因果和生命周期的完整开发者说明。
+- [`docs/ACCEPTANCE.md`](ACCEPTANCE.md)：当前自动化、浏览器、隔离 real Hermes 运行和清理证据，以及没有伪造的真人反馈边界。
 
-若这四个问题答不清，不应再增加 Profile 或新的协调层；应先修正现有边界和证据。
+当前真实记录把六个主体、Human Course/Leave/re-entry、真实消息传输、吴三桂的 `BACKGROUND → REOPEN → HOLD`、其他主体的独立 HOLD/REVISE 判断、Archive、Seal、`REVOKED` bindings 和精确 cleanup 关联在同一个 Volume 中。它是受控的一条 Provider 轨迹，不是稳定性 benchmark；真人主观验收仍应保持明确的未收集状态。
+
+当需要新增 Profile、工具或协作路径时，先回答三个问题：
+
+1. 这是一个需要长期身份、独立知识或独立权限的主体，还是一次临时认知？
+2. 它如何通过真实的世界传输影响另一个主体，而不是只在 prompt 里声称“协作”？
+3. 哪一步仍是 Profile 提案，哪一步由 Host 按权限、因果和幂等规则原子提交？
+
+答不清时，不要再加协调层；先修正现有的因果边界和证据。

@@ -3808,16 +3808,18 @@ class VolumeRuntime:
         result = operation["result"]
         crisis_id = str(payload.get("crisis_id", ""))
         pack = self.pack.pack(crisis_id)
+        state = projection["crisis_instances"][crisis_id]
+        local_tick = int(state.get("local_tick", tick))
         request, code = pack.investigation_request(
             str(wake["actor_id"]),
             str(payload.get("target", "")),
             str(payload.get("method", "")),
             self._action_projection(projection),
-            tick,
+            local_tick,
         )
         if request is None or request.definition.id != result.get("definition_id"):
             raise VolumeRuntimeConflict(f"investigation became unavailable before commit: {code}")
-        state = projection["crisis_instances"][crisis_id]
+        expected_result_tick = tick + request.expected_result_tick - local_tick
         visible = (
             sorted(pack.participant_ids)
             if request.definition.visibility.value == "PUBLIC"
@@ -3831,7 +3833,7 @@ class VolumeRuntime:
             "target_id": request.target_id,
             "method": request.definition.method,
             "started_tick": tick,
-            "expected_result_tick": request.expected_result_tick,
+            "expected_result_tick": expected_result_tick,
             "status": "IN_PROGRESS",
             "visibility": request.definition.visibility.value,
             "crisis_id": crisis_id,
@@ -3864,16 +3866,18 @@ class VolumeRuntime:
         result = operation["result"]
         crisis_id = str(payload.get("crisis_id", ""))
         pack = self.pack.pack(crisis_id)
+        state = projection["crisis_instances"][crisis_id]
+        local_tick = int(state.get("local_tick", tick))
         request, code = pack.operation_request(
             str(wake["actor_id"]),
             str(payload.get("operation_definition_id", "")),
             list(payload.get("targets", [])),
             self._action_projection(projection),
-            tick,
+            local_tick,
         )
         if request is None or request.definition.id != result.get("definition_id"):
             raise VolumeRuntimeConflict(f"operation became unavailable before commit: {code}")
-        state = projection["crisis_instances"][crisis_id]
+        expected_complete_tick = tick + request.expected_complete_tick - local_tick
         visible = (
             sorted(pack.participant_ids)
             if request.definition.visibility.value == "PUBLIC"
@@ -3886,7 +3890,7 @@ class VolumeRuntime:
             "target_ids": list(request.target_ids),
             "target_map": dict(request.target_map),
             "started_tick": tick,
-            "expected_complete_tick": request.expected_complete_tick,
+            "expected_complete_tick": expected_complete_tick,
             "status": "IN_PROGRESS",
             "visibility": request.definition.visibility.value,
             "interruptibility": request.definition.interruptibility,

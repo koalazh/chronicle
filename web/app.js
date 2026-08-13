@@ -234,7 +234,9 @@ function deskPage() {
         : "此刻还没有事情要求你落笔。";
   const judgmentForm = needsJudgment ? `
         <form id="decision-form">
-          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断"></textarea>
+          <label class="draft-label" for="decision">参考草稿</label>
+          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断">${text(state.draftValue ?? state.draft?.draft ?? "")}</textarea>
+          <div class="draft-tools"><span id="draft-status">${text(state.draftStatus || "参考草稿 · 可直接修改")}</span><button class="quiet" type="button" data-action="draft-again">换个想法</button><button class="quiet" type="button" data-action="clear-draft">清空</button></div>
           <div class="decision-actions">
             <button class="primary wide" type="submit" data-judgment-action="${firstJudgment ? "CHANGE" : "CHANGE"}" ${state.busy ? "disabled" : ""}>${firstJudgment ? "留下这个判断" : "改主意"}</button>
             ${firstJudgment ? `<button class="secondary wide" type="submit" data-judgment-action="WAIT" ${state.busy ? "disabled" : ""}>暂时不定</button>` : `<button class="secondary wide" type="submit" data-judgment-action="KEEP" ${state.busy ? "disabled" : ""}>仍照这样办</button>`}
@@ -350,7 +352,64 @@ async function loadFollow() {
 
 async function loadDesk() {
   if (!state.active?.id || state.active.kind !== "VOLUME") return;
+  state.draftRequestToken += 1;
+  state.draft = null;
+  state.draftValue = null;
+  state.draftPristine = true;
+  state.draftStatus = "";
   state.desk = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/desk`);
+  if (["NEEDS_FIRST_JUDGMENT", "NEEDS_RECONSIDERATION"].includes(state.desk?.desk?.decision_state)) {
+    void requestDraft();
+  }
+}
+
+function updateDraftStatus(value) {
+  const status = document.querySelector("#draft-status");
+  if (status) status.textContent = value;
+}
+
+async function requestDraft(force = false) {
+  const token = ++state.draftRequestToken;
+  if (force && state.draftPristine) {
+    state.draftValue = "";
+    const textarea = document.querySelector("#decision");
+    if (textarea) textarea.value = "";
+  }
+  state.draftStatus = "正在准备参考草稿……";
+  updateDraftStatus(state.draftStatus);
+  try {
+    const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/assist/draft`, { timeoutMs: 15000, method: "POST", body: "{}" });
+    if (token !== state.draftRequestToken || state.page !== "desk") return;
+    if (!result.available || !result.suggestion?.draft) {
+      state.draftStatus = "参考草稿暂时不可用。";
+      updateDraftStatus(state.draftStatus);
+      return;
+    }
+    state.draft = result.suggestion;
+    const textarea = document.querySelector("#decision");
+    if (state.draftPristine && textarea && !textarea.value.trim()) {
+      textarea.value = result.suggestion.draft;
+      state.draftValue = result.suggestion.draft;
+      state.draftStatus = "参考草稿 · 可直接修改";
+    } else {
+      state.draftStatus = "参考草稿已准备好 · 查看";
+    }
+    updateDraftStatus(state.draftStatus);
+  } catch (_error) {
+    if (token !== state.draftRequestToken) return;
+    state.draftStatus = "参考草稿暂时不可用。";
+    updateDraftStatus(state.draftStatus);
+  }
+}
+
+function clearDraft() {
+  state.draftRequestToken += 1;
+  state.draftValue = "";
+  state.draftPristine = false;
+  state.draftStatus = "参考草稿已清空。";
+  const textarea = document.querySelector("#decision");
+  if (textarea) textarea.value = "";
+  updateDraftStatus(state.draftStatus);
 }
 
 async function loadArchive() {
@@ -499,6 +558,8 @@ root.addEventListener("click", (event) => {
   if (action === "continue-world") return run(continueWorld);
   if (action === "leave-life") return run(leaveLife);
   if (action === "reconsider") return run(reconsider);
+  if (action === "draft-again") return run(() => requestDraft(true));
+  if (action === "clear-draft") return clearDraft();
   if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId));
   if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId));
   if (action === "clear-archive") return clearArchive();
@@ -515,6 +576,12 @@ root.addEventListener("submit", (event) => {
   const value = event.target.querySelector("#decision")?.value.trim() || "";
   const action = event.submitter?.dataset.judgmentAction || "CHANGE";
   run(() => submitDecision(action, value));
+});
+
+root.addEventListener("input", (event) => {
+  if (event.target.id !== "decision") return;
+  state.draftValue = event.target.value;
+  state.draftPristine = false;
 });
 
 window.addEventListener("hashchange", () => {

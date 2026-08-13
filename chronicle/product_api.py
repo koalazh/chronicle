@@ -12,6 +12,7 @@ from .editorial import volume_attention
 from .hermes import HermesRuntimeError
 from .host import ChronicleHost
 from .models import WorldlineKind
+from .product_assist import draft_judgment
 from .product_projection import ProductProjection
 from .volume_live import HermesVolumeActorDriver
 from .volume_runtime import VolumeRuntimeConflict, VolumeRuntimeError
@@ -159,6 +160,26 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         ):
             return pending
         return None
+
+    def pending_human_wake(active: ChronicleHost, worldline_id: str) -> dict[str, Any] | None:
+        row = volume_row(active, worldline_id)
+        human_id = projection(active).lifetime_seat(
+            worldline_id, str(row.get("human_lifetime_id") or "")
+        )
+        pending = pending_for_human(active, worldline_id)
+        if pending is None:
+            return None
+        return next(
+            (
+                active.db.crisis_wake(wake_id)
+                for wake_id in pending.get("wake_ids", [])
+                if (
+                    wake := active.db.crisis_wake(str(wake_id))
+                ) is not None
+                and str(wake.get("actor_id", "")) == human_id
+            ),
+            None,
+        )
 
     async def continue_until_boundary(
         active: ChronicleHost, worldline_id: str
@@ -426,6 +447,31 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         except Exception as exc:
             raise classify_error(exc) from exc
 
+    @router.post("/worldlines/{worldline_id}/assist/draft")
+    async def assist_draft(worldline_id: str) -> dict[str, Any]:
+        active = active_host()
+        volume_row(active, worldline_id)
+        try:
+            wake = pending_human_wake(active, worldline_id)
+            perspective = (wake or {}).get("frozen_perspective", {})
+            context = perspective.get("context")
+            if not isinstance(context, dict):
+                return {"available": False}
+            stage = "REOPEN" if context.get("current_course") else "FIRST"
+            suggestion = await asyncio.to_thread(
+                draft_judgment,
+                active.config,
+                context,
+                stage,
+            )
+            if suggestion is None:
+                return {"available": False}
+            return {"available": True, "suggestion": suggestion}
+        except HTTPException:
+            raise
+        except Exception:
+            return {"available": False}
+
     @router.post("/worldlines/{worldline_id}/reconsider")
     async def reconsider(worldline_id: str) -> dict[str, Any]:
         active = active_host()
@@ -467,19 +513,9 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             if not human_id:
                 raise VolumeRuntimeConflict("请先进入一段人生")
             state = active.volume_runtime.worldline(worldline_id)
-            if pending_for_human(active, worldline_id) is None:
-                raise VolumeRuntimeConflict("当前时刻没有需要你处理的下一步")
-            human_wake = next(
-                (
-                    active.db.crisis_wake(wake_id)
-                    for wake_id in state["projection"]["pending_moment"]["wake_ids"]
-                    if (wake := active.db.crisis_wake(wake_id)) is not None
-                    and str(wake["actor_id"]) == human_id
-                ),
-                None,
-            )
+            human_wake = pending_human_wake(active, worldline_id)
             if human_wake is None:
-                raise VolumeRuntimeConflict("当前时刻没有可以交给你的下一步")
+                raise VolumeRuntimeConflict("当前时刻没有需要你处理的下一步")
             context = active.volume_runtime.lifetime_context(
                 worldline_id, human_id, wake_id=human_wake["id"]
             )

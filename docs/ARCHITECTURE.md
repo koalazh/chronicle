@@ -24,10 +24,28 @@ Host validation + atomic commit
           ↓
 append-only Ledger + Snapshot/Projection
           ↓
-public World / private Life Desk / Archive
+Product Projection (read-only view compiler)
+          ↓
+World / Life / Past
 ```
 
 Host 拥有现实：时间、来源、位置、路线、消息抵达、权限、资源、状态效果、幂等和最终提交。Lifetime 拥有主体性：解释可见上下文、等待、通信、更新计划、安排有限的下一步和选择长期经验。没有一个中央模型替所有 Lifetime 决定世界结局。
+
+## 产品层边界（本轮冻结）
+
+产品层只建立三个用户心智空间：
+
+| 空间 | 只回答什么 | 主要来源 |
+| --- | --- | --- |
+| 世界 | 现在仍没有定下来的问题、已经成为现实的公开结果、谁在其中 | authored Pack + current Snapshot + public-safe Ledger consequence |
+| 这一生 | 当前人物当时知道什么、已有判断是否仍生效、何时真正需要重新判断 | frozen bounded perspective + current Lifetime state |
+| 过去 | 这一卷最后成为什么、谁让哪些事情成为现实、某段人生如何判断 | sealed Snapshot + Ledger + Pack 的 deterministic projection |
+
+`chronicle/product_projection.py` 是只读 view compiler：它可以读取 Pack、Snapshot、Ledger 和窄的 Runtime read-only invariant，但不能写 DB、推进 World、创建 Wake、调用 Agent、预测结果或持久化 Product truth。无法可靠表达的事实必须少展示，不由 LLM 补写。
+
+`chronicle/product_api.py` 保留路由、编排、Runtime 调用、Assist 调用和错误分类；`chronicle/product_assist.py`（若启用）只提供两个 stateless、bounded、non-authoritative 能力：参考草稿和 0..1 个行动候选。Assist 不拥有 Profile、Session、Memory、MCP、World token、Ledger event 或确认权。
+
+产品不新增 V8、平行 Runtime、History model、Product Projection persistence、Agent dashboard、Human tool picker、Dynamic Knot、new Wake、new Attention、compatibility/replay runtime 或大型前端框架。前端不能复制 Runtime authority、presence、attention、message、boundary 或隐私规则。
 
 ## 核心对象
 
@@ -64,7 +82,7 @@ Memory
 - Belief 和 Plan 是主体状态，不能被公共 World 当成事实。
 - Memory 不是全量人生 dump，只保存明确值得长期保留的主体经验。
 
-产品读取遵守三道后端边界：公共 `/world` 只读 public projection；`/follow` 只读选定 Lifetime 的可见入口；`/desk` 只读当前 Human Lifetime 的 private context。Host 不依赖前端隐藏来做权限控制。
+产品读取遵守四道后端边界：公共 World 只读 public projection；Life threshold 只读选定 Lifetime 的可见入口；这一生只读当前 Human Lifetime 的 private context；Past 只读 sealed deterministic projection。Host 不依赖前端隐藏来做权限控制。
 
 ## Volume 生命周期
 

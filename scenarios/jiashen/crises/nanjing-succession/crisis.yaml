@@ -146,7 +146,7 @@ operations:
     required_assets: [court]
     preconditions:
       - {subject: court, states: [CONVENED]}
-      - {subject: nanjing-recognition, states: [PENDING]}
+      - {subject: nanjing-recognition, states: [PENDING, URGENT]}
     completion_effects:
       - {subject: court, state: DELIBERATING}
       - {subject: nanjing-recognition, state: DELIBERATING}

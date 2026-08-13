@@ -60,6 +60,23 @@ def test_canonicality_perturbation_changes_state_bound_affordance(host):
     assert base_ids != perturbed_ids
 
 
+def test_nanjing_urgent_pressure_keeps_the_first_procedure_affordance(host):
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    runtime.activate_crisis(worldline_id, "nanjing-succession")
+    state = runtime.worldline(worldline_id)["projection"]["crisis_instances"]["nanjing-succession"]
+    state["entities"]["nanjing-recognition"]["state"] = "URGENT"
+
+    operation_ids = {
+        item["id"]
+        for item in runtime.pack.pack("nanjing-succession").operation_affordances(
+            "han-zanzhou", {**copy.deepcopy(state), "positions": {}}, 7
+        )
+    }
+
+    assert "convene_recognition_assembly" in operation_ids
+
+
 def test_role_state_swap_attention_policy_does_not_use_seat_name():
     course = {
         "status": "IN_FORCE",

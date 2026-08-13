@@ -74,6 +74,32 @@ def test_live_volume_binding_owns_each_materialized_world_token(app_config, monk
     assert all(binding["token_hash"] == token_hash(tokens[seat]) for seat, binding in bindings.items())
 
 
+def test_live_crisis_activation_creates_checkpoint_wakes(app_config, monkeypatch):
+    config = replace(app_config, hermes_home=app_config.runtime_dir / "hermes-home-checkpoint")
+
+    def fake_materialize(_config, worldline_id, lifetimes, **_kwargs):
+        return {
+            str(lifetime["id"]): {
+                "profile": f"chronicle-{worldline_id}-{lifetime['id']}",
+                "world_token": f"token-{lifetime['id']}",
+                "world_server_name": f"chronicle-volume-world-{worldline_id}-{lifetime['id']}",
+            }
+            for lifetime in lifetimes
+        }
+
+    monkeypatch.setattr("chronicle.hermes.materialize_lifetime_profiles", fake_materialize)
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create(runtime_mode="live")
+    worldline_id = created["worldline"]["id"]
+
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    wakes = host.db.subject_wakes(worldline_id, tick=0)
+
+    assert {wake["actor_id"] for wake in wakes} == {"li-zicheng", "wu-sangui", "dorgon"}
+    assert {wake["wake_type"] for wake in wakes} == {"CHECKPOINT_DECISION"}
+    assert all(wake["source"] == "v6-checkpoint" for wake in wakes)
+
+
 def test_live_volume_startup_reconciles_profiles_bindings_and_gateway(
     app_config, monkeypatch
 ):

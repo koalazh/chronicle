@@ -30,6 +30,7 @@ from .deliberation import (
     normalize_deliberation,
 )
 from .models import CrisisInstanceStatus, Provenance, WorldlineKind, WorldlineStatus
+from .resolution import get_resolution_contract
 from .subject_attention import AttentionDecision, evaluate_attention
 from .subject_continuity import LifetimeContextBuilder
 from .volume_boundary import VolumeBoundaryPolicy
@@ -944,6 +945,28 @@ class VolumeRuntime:
             "resolution_contract_version": pack.crisis.resolution_contract.version,
             "resolution_seed": instance["resolution_seed"],
         }
+        checkpoint_wakes = []
+        if str(row.get("runtime_mode", "fixture")) == "live":
+            existing_checkpoint_actors = {
+                str(wake["actor_id"])
+                for wake in self.db.subject_wakes(worldline_id, tick=tick)
+                if wake["wake_type"] == "CHECKPOINT_DECISION"
+                and wake["status"] in {"QUEUED", "WAITING_HUMAN", "STAGED"}
+            }
+            checkpoint_wakes = [
+                {
+                    "id": f"{worldline_id}:checkpoint:{crisis_id}:{actor_id}",
+                    "actor_id": actor_id,
+                    "wake_type": "CHECKPOINT_DECISION",
+                    "tick": tick,
+                    "status": "QUEUED",
+                    "source": "v6-checkpoint",
+                    "trigger_event_id": checkpoint["id"],
+                    "result": {"crisis_id": crisis_id, "reason": "checkpoint"},
+                }
+                for actor_id in sorted(pack.participant_ids)
+                if actor_id not in existing_checkpoint_actors
+            ]
         try:
             self.db.commit_volume_moment(
                 worldline_id,
@@ -951,6 +974,7 @@ class VolumeRuntime:
                 current_tick=tick,
                 instance_creates=[] if existing is not None else [instance],
                 instance_updates=[instance_update] if existing is not None else [],
+                wake_creates=checkpoint_wakes,
                 snapshot=projection,
                 expected_current_tick=tick,
             )
@@ -1147,6 +1171,7 @@ class VolumeRuntime:
         field_events: list[dict[str, Any]] = []
         applied_pressures: list[dict[str, Any]] = []
         lifetime_updates: dict[str, dict[str, Any]] = {}
+        instance_updates: list[dict[str, Any]] = []
         wake_creates: list[dict[str, Any]] = []
         attention_admissions: dict[str, list[dict[str, Any]]] = {}
 
@@ -1588,8 +1613,53 @@ class VolumeRuntime:
                 )
                 events.append(pressure_event)
                 applied_pressures.append(pressure)
+                if applies:
+                    pack = self.pack.pack(crisis_id)
+                    visible_actor_ids = (
+                        sorted(pack.participant_ids)
+                        if str(pressure.get("visibility", "PUBLIC")) == "PUBLIC"
+                        else [
+                            str(actor_id)
+                            for actor_id in pressure.get("visible_actor_ids", [])
+                        ]
+                    )
+                    structural_shock = (
+                        str(pressure.get("kind", "")) == "EXOGENOUS"
+                        and str(pressure.get("visibility", "PUBLIC")) == "PUBLIC"
+                    )
+                    for actor_id in visible_actor_ids:
+                        admit_knowledge(
+                            actor_id,
+                            {
+                                "kind": "structural_pressure",
+                                "event_id": pressure_event["id"],
+                                "crisis_id": crisis_id,
+                                "pressure_id": pressure["id"],
+                                "title": pressure["title"],
+                                "description": pressure["description"],
+                                "assertion_ids": list(pressure.get("assertion_ids", [])),
+                                "received_tick": target,
+                            },
+                            {
+                                "event_id": pressure_event["id"],
+                                "event_type": "CRISIS_PRESSURE_APPLIED",
+                                "wake_type": "STRUCTURAL_PRESSURE",
+                                "wake_id": f"{worldline_id}:wake:{pressure_event['id']}:{actor_id}",
+                                "actor_id": "",
+                                "pressure_id": pressure["id"],
+                                "structural_shock": structural_shock,
+                            },
+                        )
 
         projection["tick"] = target
+        resolution_events, resolution_updates, resolution_admissions = (
+            self._resolve_ready_crises(worldline_id, target, projection, row)
+        )
+        events.extend(resolution_events)
+        instance_updates.extend(resolution_updates)
+        for actor_id, item, attention_event in resolution_admissions:
+            admit_knowledge(actor_id, item, attention_event)
+
         for actor_id in sorted(attention_admissions):
             lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
             if lifetime is None:
@@ -1626,7 +1696,23 @@ class VolumeRuntime:
             wake_types = {
                 str(admission.get("wake_type", "ATTENTION")) for admission in admissions
             }
-            wake_type = wake_types.pop() if len(wake_types) == 1 else "ATTENTION"
+            if attention.reason_code == "NO_CURRENT_COURSE" and wake_types.issubset(
+                {"STRUCTURAL_PRESSURE", "RESOLUTION"}
+            ):
+                continue
+            wake_type = next(
+                (
+                    candidate
+                    for candidate in (
+                        "OFFER_CHANGE",
+                        "UNEXPECTED_CONSEQUENCE",
+                        "STRUCTURAL_PRESSURE",
+                        "RESOLUTION",
+                    )
+                    if candidate in wake_types
+                ),
+                "ATTENTION" if len(wake_types) != 1 else next(iter(wake_types)),
+            )
             wake_id = (
                 str(admissions[0].get("wake_id", ""))
                 if len(admissions) == 1
@@ -1650,6 +1736,7 @@ class VolumeRuntime:
             events,
             current_tick=target,
             lifetime_updates=list(lifetime_updates.values()),
+            instance_updates=instance_updates,
             wake_creates=wake_creates,
             snapshot=projection,
             expected_current_tick=current,
@@ -3243,6 +3330,53 @@ class VolumeRuntime:
                             "agreement_id": operation["result"].get("agreement_id", ""),
                         }
                     )
+            if (
+                outcome.get("status") == "rejected"
+                and operation["tool_name"]
+                in {"communicate", "investigate", "manage_offer", "operate", "schedule_revisit"}
+            ):
+                unexpected = self._event(
+                    worldline_id,
+                    tick,
+                    "ATTENTION_EVALUATED",
+                    {
+                        "seat": lifetime["seat"],
+                        "decision": AttentionDecision.REOPEN.value,
+                        "reason_code": "OWN_CONSEQUENCE_UNEXPECTED",
+                        "trigger_event_ids": [events[-1]["id"]],
+                        "matched_dependency_ids": [],
+                        "unexpected_consequence": True,
+                    },
+                    seat_id=lifetime["seat"],
+                    provenance=Provenance.BRANCH_DERIVED.value,
+                    causal_parent_ids=[events[-1]["id"]],
+                    event_id=f"{events[-1]['id']}:unexpected-consequence",
+                    runtime_epoch=row["runtime_epoch"],
+                )
+                events.append(unexpected)
+                wake_creates.append(
+                    {
+                        "id": f"{worldline_id}:wake:{unexpected['id']}:{lifetime['seat']}",
+                        "actor_id": lifetime["seat"],
+                        "wake_type": "UNEXPECTED_CONSEQUENCE",
+                        "tick": tick,
+                        "status": (
+                            "WAITING_HUMAN"
+                            if lifetime["controller"] == "HUMAN"
+                            else "QUEUED"
+                        ),
+                        "source": "v6-attention",
+                        "trigger_event_id": unexpected["id"],
+                        "result": {
+                            "attention": {
+                                "decision": AttentionDecision.REOPEN.value,
+                                "reason_code": "OWN_CONSEQUENCE_UNEXPECTED",
+                                "trigger_event_ids": [events[-2]["id"]],
+                                "matched_dependency_ids": [],
+                            }
+                        },
+                    }
+                )
             operation_updates.append(
                 {"id": operation["id"], "status": "COMMITTED", "result": outcome}
             )
@@ -4149,6 +4283,225 @@ class VolumeRuntime:
             raise VolumeRuntimeConflict("Volume Worldline is sealed")
         return row
 
+    def _resolve_ready_crises(
+        self,
+        worldline_id: str,
+        tick: int,
+        projection: dict[str, Any],
+        row: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, dict[str, Any], dict[str, Any]]]]:
+        """Apply registered deterministic Resolution Contracts at a ready gate."""
+
+        events: list[dict[str, Any]] = []
+        instance_updates: list[dict[str, Any]] = []
+        admissions: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        active_crisis_ids = list(projection.get("active_crisis_ids", []))
+        all_prior_events = self.db.worldline_events(worldline_id)
+        for crisis_id in sorted(active_crisis_ids):
+            crisis = projection.get("crisis_instances", {}).get(crisis_id)
+            if not isinstance(crisis, dict) or crisis.get("status") not in {
+                CrisisInstanceStatus.ACTIVE.value,
+                CrisisInstanceStatus.RESOLUTION_PENDING.value,
+                CrisisInstanceStatus.AFTERMATH.value,
+            }:
+                continue
+            contract = get_resolution_contract(
+                str(crisis.get("resolution_contract_id", "")),
+                int(crisis.get("resolution_contract_version", 0)),
+            )
+            world = {
+                "entities": crisis.get("entities", {}),
+                "agreements": crisis.get("agreements", []),
+                "investigations": crisis.get("investigations", []),
+                "institutional_state": projection.get("institutional_state", {}),
+                "operations": crisis.get("operations", []),
+                "positions": projection.get("positions", {}),
+            }
+            readiness = contract.evaluate_gate(world)
+            if not readiness.ready:
+                continue
+            result = contract.resolve(world, str(crisis.get("resolution_seed", "")))
+            readiness_data = readiness.to_dict()
+            result_data = result.to_dict()
+            parent_event = next(
+                (
+                    event
+                    for event in reversed([*all_prior_events, *events])
+                    if str(event.get("payload", {}).get("crisis_id", "")) == crisis_id
+                ),
+                None,
+            )
+            parent_ids = [str(parent_event["id"])] if parent_event is not None else []
+            resolved = self._event(
+                worldline_id,
+                tick,
+                "CRISIS_RESOLVED",
+                {
+                    "crisis_id": crisis_id,
+                    "contract_id": result.contract_id,
+                    "contract_version": result.contract_version,
+                    "readiness": readiness_data,
+                    "result": result_data,
+                },
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=parent_ids,
+                event_id=f"{worldline_id}:crisis:{crisis_id}:resolved:{tick}",
+                runtime_epoch=row["runtime_epoch"],
+            )
+            events.append(resolved)
+
+            for effect in result.entity_effects:
+                entity_id = str(effect.entity_id)
+                if entity_id in crisis.get("entities", {}):
+                    entity = crisis["entities"][entity_id]
+                elif entity_id in projection.get("entities", {}):
+                    entity = projection["entities"][entity_id]
+                else:
+                    entity = None
+                if entity is None:
+                    current_state = str(projection.get("institutional_state", {}).get(entity_id, ""))
+                else:
+                    current_state = str(entity.get("state", ""))
+                if current_state == effect.state:
+                    continue
+                if entity is not None:
+                    entity["state"] = effect.state
+                else:
+                    projection.setdefault("institutional_state", {})[entity_id] = effect.state
+                events.append(
+                    self._event(
+                        worldline_id,
+                        tick,
+                        "ENTITY_STATE_CHANGED",
+                        {
+                            "crisis_id": crisis_id,
+                            "entity_id": entity_id,
+                            "before": current_state,
+                            "after": effect.state,
+                            "phase": "resolution",
+                            "description": effect.description,
+                            "visibility": sorted(crisis.get("participants", [])),
+                        },
+                        provenance=Provenance.BRANCH_DERIVED.value,
+                        causal_parent_ids=[resolved["id"]],
+                        event_id=f"{resolved['id']}:entity:{entity_id}",
+                        runtime_epoch=row["runtime_epoch"],
+                    )
+                )
+
+            for effect in result.agreement_effects:
+                agreement = next(
+                    (
+                        item
+                        for item in crisis.get("agreements", [])
+                        if str(item.get("id", "")) == str(effect.agreement_id)
+                    ),
+                    None,
+                )
+                if agreement is None:
+                    continue
+                before = str(agreement.get("status", ""))
+                agreement["status"] = effect.status
+                events.append(
+                    self._event(
+                        worldline_id,
+                        tick,
+                        "AGREEMENT_CHANGED",
+                        {
+                            "crisis_id": crisis_id,
+                            "agreement_id": str(effect.agreement_id),
+                            "before": before,
+                            "after": effect.status,
+                            "description": effect.description,
+                            "visibility": sorted(crisis.get("participants", [])),
+                        },
+                        provenance=Provenance.BRANCH_DERIVED.value,
+                        causal_parent_ids=[resolved["id"]],
+                        event_id=f"{resolved['id']}:agreement:{effect.agreement_id}",
+                        runtime_epoch=row["runtime_epoch"],
+                    )
+                )
+
+            settlement = self._event(
+                worldline_id,
+                tick,
+                "CRISIS_SETTLED",
+                {
+                    "crisis_id": crisis_id,
+                    "instance_id": self._instance_db_id(worldline_id, crisis_id),
+                    "global_tick": tick,
+                    "local_tick": tick - int(crisis.get("activation_tick", tick)),
+                    "reason": "resolution_contract",
+                    "contract_id": result.contract_id,
+                    "contract_version": result.contract_version,
+                    "outcome": result_data,
+                },
+                provenance=Provenance.BRANCH_DERIVED.value,
+                causal_parent_ids=[resolved["id"]],
+                event_id=f"{resolved['id']}:settled",
+                runtime_epoch=row["runtime_epoch"],
+            )
+            events.append(settlement)
+            report = {
+                "tick": tick,
+                "readiness": readiness_data,
+                "result": result_data,
+            }
+            crisis["status"] = CrisisInstanceStatus.SETTLED.value
+            crisis["phase"] = "SETTLED"
+            crisis["settled_tick"] = tick
+            crisis["resolution"] = {
+                "status": "SETTLED",
+                "readiness": readiness_data,
+                "result": result_data,
+            }
+            crisis.setdefault("resolution_reports", []).append(report)
+            crisis["settlement"] = {
+                "status": "SETTLED",
+                "reason": "resolution_contract",
+                "global_tick": tick,
+                "local_tick": tick - int(crisis.get("activation_tick", tick)),
+            }
+            projection["active_crisis_ids"] = [
+                item for item in projection.get("active_crisis_ids", []) if item != crisis_id
+            ]
+            instance_updates.append(
+                {
+                    "id": self._instance_db_id(worldline_id, crisis_id),
+                    "status": CrisisInstanceStatus.SETTLED.value,
+                    "phase": "SETTLED",
+                    "settled_tick": tick,
+                    "outcome": result_data,
+                }
+            )
+            for actor_id in result.immediate_actor_ids:
+                lifetime = self.db.worldline_lifetime(worldline_id, actor_id)
+                if lifetime is None:
+                    continue
+                admissions.append(
+                    (
+                        actor_id,
+                        {
+                            "kind": "crisis_resolution",
+                            "event_id": settlement["id"],
+                            "crisis_id": crisis_id,
+                            "summary": result.summary,
+                            "facts": list(result.factors),
+                            "received_tick": tick,
+                        },
+                        {
+                            "event_id": settlement["id"],
+                            "event_type": "CRISIS_SETTLED",
+                            "wake_type": "RESOLUTION",
+                            "wake_id": f"{worldline_id}:wake:{settlement['id']}:{actor_id}",
+                            "actor_id": "",
+                            "crisis_id": crisis_id,
+                            "structural_shock": True,
+                        },
+                    )
+                )
+        return events, instance_updates, admissions
+
     def _lifetime_for_actor(self, worldline_id: str, actor_id: str) -> dict[str, Any] | None:
         return self.db.worldline_lifetime_by_id(
             worldline_id, actor_id
@@ -4299,6 +4652,8 @@ class VolumeRuntime:
         }
         return {
             "crisis_id": crisis_id,
+            "resolution_contract_id": pack.crisis.resolution_contract.id,
+            "resolution_contract_version": pack.crisis.resolution_contract.version,
             "status": CrisisInstanceStatus.ACTIVE.value,
             "phase": "OPEN",
             "activation_tick": activation_tick,

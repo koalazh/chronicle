@@ -89,3 +89,24 @@ def test_v6_game_proof_modules_keep_fixture_boundaries_explicit():
     # Nanjing causal tests live in their phase-specific modules; this module only
     # adds the three game-shaped probes above and does not create a benchmark.
     assert PerfectWaitDriver.source == "fixture"
+
+
+def test_volume_runtime_settles_ready_crisis_through_registered_contract(host):
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+
+    advanced = None
+    while runtime.worldline(worldline_id)["worldline"]["current_tick"] < 5:
+        advanced = runtime.advance_one(worldline_id)
+    assert advanced is not None
+
+    event_types = {event["event_type"] for event in advanced["events"]}
+    instance = runtime.db.crisis_instance(f"{worldline_id}:crisis:before-shanhaiguan")
+    projection = runtime.worldline(worldline_id)["projection"]
+
+    assert {"CRISIS_RESOLVED", "CRISIS_SETTLED"} <= event_types
+    assert instance is not None
+    assert instance["status"] == "SETTLED"
+    assert instance["outcome"]["contract_id"] == "shanhaiguan-v1"
+    assert "before-shanhaiguan" not in projection["active_crisis_ids"]

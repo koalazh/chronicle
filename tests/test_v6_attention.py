@@ -231,3 +231,99 @@ def test_attention_policy_is_pure_and_requires_explicit_reopen_conditions():
 
     assert result.decision == AttentionDecision.BACKGROUND
     assert result.reason_code == "NO_REOPEN_CONDITION"
+
+
+def test_structural_pressure_reaches_attention_from_the_shared_volume(app_config):
+    runtime, worldline_id, _wu = _runtime(app_config, "structural-pressure")
+    pending = runtime.worldline(worldline_id)["projection"]["pending_moment"]
+    for wake_id in pending["wake_ids"]:
+        wake = runtime.db.crisis_wake(wake_id)
+        assert wake is not None
+        lifetime = runtime.db.worldline_lifetime(worldline_id, wake["actor_id"])
+        assert lifetime is not None
+        intent = (
+            {
+                "type": "update_plan",
+                "objective": "维持关口可控",
+                "steps": ["继续核验"],
+                "open_dependencies": [],
+            }
+            if wake["actor_id"] == "wu-sangui"
+            else {"type": "wait"}
+        )
+        runtime.stage_intent(
+            worldline_id,
+            lifetime["id"],
+            intent,
+            source="agent",
+            idempotency_key=f"v6-structural-pressure-wait-{wake_id}",
+            wake_id=wake_id,
+        )
+    runtime.commit_pending_moment(worldline_id)
+
+    while runtime.worldline(worldline_id)["worldline"]["current_tick"] < 5:
+        advanced = runtime.advance_one(worldline_id)
+
+    pressure = next(
+        event for event in advanced["events"] if event["event_type"] == "CRISIS_PRESSURE_APPLIED"
+    )
+    attention = _attention_event(runtime, worldline_id, "wu-sangui")
+    lifetime = runtime.db.worldline_lifetime(worldline_id, "wu-sangui")
+    assert lifetime is not None
+
+    assert attention["payload"]["decision"] == "REOPEN"
+    assert attention["payload"]["reason_code"] == "STRUCTURAL_WORLD_SHOCK"
+    assert pressure["id"] in attention["payload"]["trigger_event_ids"]
+    assert any(
+        item.get("kind") == "structural_pressure"
+        and item.get("event_id") == pressure["id"]
+        for item in lifetime["knowledge"]
+        if isinstance(item, dict)
+    )
+
+
+def test_rejected_world_action_reopens_own_consequence(app_config):
+    runtime, worldline_id, wu = _runtime(app_config, "own-consequence")
+    runtime.stage_actor_tool(
+        worldline_id,
+        wu["id"],
+        "schedule_revisit",
+        {"after_days": 0, "reason": ""},
+        idempotency_key="v6-own-consequence-rejected",
+    )
+
+    committed = runtime.commit_pending_moment(worldline_id)
+    attention = _attention_event(runtime, worldline_id, "wu-sangui")
+    wakes = [
+        wake
+        for wake in runtime.db.subject_wakes(worldline_id, tick=1)
+        if wake["source"] == "v6-attention"
+        and wake["wake_type"] == "UNEXPECTED_CONSEQUENCE"
+    ]
+
+    assert "INTENT_REJECTED" in {event["event_type"] for event in committed["events"]}
+    assert attention["payload"]["decision"] == "REOPEN"
+    assert attention["payload"]["reason_code"] == "OWN_CONSEQUENCE_UNEXPECTED"
+    assert len(wakes) == 1
+
+
+def test_attention_policy_reopens_for_each_non_course_source():
+    lifetime = {
+        "seat": "wu-sangui",
+        "plan": [{"course": "维持关口可控", "status": "IN_FORCE", "open_dependencies": []}],
+    }
+
+    structural = evaluate_attention(
+        lifetime,
+        [{"event_id": "pressure-1", "structural_shock": True}],
+        {"tick": 5},
+    )
+    unexpected = evaluate_attention(
+        lifetime,
+        [{"event_id": "consequence-1", "actor_id": "wu-sangui", "unexpected_consequence": True}],
+        {"tick": 5},
+    )
+
+    assert structural.reason_code == "STRUCTURAL_WORLD_SHOCK"
+    assert unexpected.reason_code == "OWN_CONSEQUENCE_UNEXPECTED"
+    assert structural.decision == unexpected.decision == AttentionDecision.REOPEN

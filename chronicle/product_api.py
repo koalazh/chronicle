@@ -1237,6 +1237,8 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             )
             if row["kind"] != WorldlineKind.VOLUME.value:
                 return result
+            if active.db.worldline_snapshot(worldline_id, int(row["current_tick"])) is None:
+                return result
             state = active.volume_runtime.worldline(worldline_id)
             current_tick = int(state["worldline"]["current_tick"])
             human_seat = lifetime_seat(active, worldline_id, request.lifetime_id)
@@ -1250,8 +1252,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 await asyncio.to_thread(
                     active.volume_runtime.freeze_pending_moment, worldline_id
                 )
-            if active.db.worldline_snapshot(worldline_id, int(row["current_tick"])) is None:
-                return result
             return {
                 "worldline": public_worldline(active.db.worldline(worldline_id) or {}),
                 "world": public_world(active, worldline_id),

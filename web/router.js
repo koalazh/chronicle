@@ -19,6 +19,11 @@ export function route() {
     state.page = "volume";
     return;
   }
+  if (page === "world" && state.active?.inhabited_lifetime_id) {
+    state.page = "desk";
+    state.notice = "请先交还当前 Life，再回到世界。";
+    return;
+  }
   if (productPages.has(page)) {
     state.page = page;
     return;
@@ -27,6 +32,10 @@ export function route() {
 }
 
 export function go(page) {
+  if (page === "world" && state.active?.inhabited_lifetime_id) {
+    state.notice = "请先交还当前 Life，再回到世界。";
+    page = "desk";
+  }
   location.hash = `#/${page}`;
 }
 

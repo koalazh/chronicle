@@ -194,6 +194,17 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
 
         while True:
             row = volume_row(active, worldline_id)
+            if row["status"] != "ACTIVE":
+                view = projection(active)
+                return {
+                    "worldline": view.public_worldline(row),
+                    "world": view.public_world(worldline_id),
+                    "pending_moment": None,
+                    "advanced": advanced_ticks > 0,
+                    "advanced_ticks": advanced_ticks,
+                    "continue_status": "past",
+                    "attention": volume_attention(events),
+                }
             state = active.volume_runtime.worldline(worldline_id)
             pending = state["projection"].get("pending_moment")
             if pending:
@@ -222,8 +233,20 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
 
             boundary = await asyncio.to_thread(active.volume_runtime.boundary, worldline_id)
             if boundary["boundary"].get("ready"):
-                stopped_at = "volume_boundary"
-                break
+                sealed = await asyncio.to_thread(
+                    active.volume_runtime.seal, worldline_id, "volume_boundary"
+                )
+                sealed_row = sealed["worldline"]
+                view = projection(active)
+                return {
+                    "worldline": view.public_worldline(sealed_row),
+                    "world": view.public_world(worldline_id),
+                    "pending_moment": None,
+                    "advanced": advanced_ticks > 0,
+                    "advanced_ticks": advanced_ticks,
+                    "continue_status": "volume_sealed",
+                    "attention": volume_attention(events),
+                }
             if advanced_ticks >= V6_CONTINUE_MAX_TICKS:
                 stopped_at = "safety_cap"
                 break
@@ -345,9 +368,11 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             return {"active": None}
         row = volume_row(active, str(row["id"]))
         view = projection(active)
+        handoff_required = bool(row.get("human_lifetime_id"))
         return {
             "active": view.public_worldline(row),
-            "world": view.public_world(str(row["id"])),
+            "world": None if handoff_required else view.public_world(str(row["id"])),
+            "world_access": "HANDOFF_REQUIRED" if handoff_required else "OPEN",
         }
 
     @router.get("/worldlines")
@@ -364,7 +389,9 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.get("/worldlines/{worldline_id}/world")
     async def world(worldline_id: str) -> dict[str, Any]:
         active = active_host()
-        volume_row(active, worldline_id)
+        row = volume_row(active, worldline_id)
+        if row["status"] == "ACTIVE" and row.get("human_lifetime_id"):
+            raise HTTPException(status_code=409, detail="请先交还当前 Life，再回到世界。")
         try:
             return projection(active).public_world(worldline_id)
         except Exception as exc:

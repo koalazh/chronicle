@@ -52,7 +52,7 @@ function judgmentHistoryMarkup(items) {
 function chrome(content, { compact = false } = {}) {
   const nav = [
     ["volume", "卷册"],
-    ["world", "世界"],
+    ...(state.active?.inhabited_lifetime_id ? [] : [["world", "世界"]]),
     ["archive", "封存"],
   ];
   return `
@@ -84,7 +84,7 @@ function volumeHomePage() {
         <p class="runtime-note">世界先行，人生随后；每一次进入，都是把下一步交还给你。</p>
         <div class="hero-actions">
           <button class="primary" data-action="${active ? "continue-volume" : "start-volume"}" ${state.busy ? "disabled" : ""}>${active ? "继续这一卷" : "开始这一卷"}</button>
-          ${active ? `<button class="secondary" data-page="world">查看世界</button>` : ""}
+          ${active ? `<button class="secondary" data-page="${state.active.inhabited_lifetime_id ? "desk" : "world"}">${state.active.inhabited_lifetime_id ? "回到书案" : "查看世界"}</button>` : ""}
         </div>
         ${active ? `<p class="continue-existing">当前卷册已展开至第 ${text(state.active.current_tick)} 个时刻。</p>` : ""}
       </div>
@@ -342,6 +342,10 @@ function render() {
 
 async function loadWorld() {
   if (!state.active?.id || state.active.kind !== "VOLUME") return;
+  if (state.active.inhabited_lifetime_id) {
+    state.page = "desk";
+    return loadDesk();
+  }
   state.world = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/world`);
 }
 
@@ -432,7 +436,10 @@ async function refreshActive() {
   state.active = payload.active;
   state.world = payload.world || null;
   state.desk = null;
-  if (state.active?.kind === "VOLUME") await loadWorld();
+  if (state.active?.inhabited_lifetime_id && state.page === "world") {
+    state.page = "desk";
+  }
+  if (state.active?.kind === "VOLUME" && !state.active.inhabited_lifetime_id) await loadWorld();
 }
 
 function applyWorldline(result) {
@@ -455,6 +462,13 @@ async function continueWorld() {
   if (!state.active?.id) return go("volume");
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/continue`, { method: "POST", body: "{}" });
   applyWorldline(result);
+  if (result.worldline?.status === "SEALED") {
+    state.selectedArchive = result.worldline.id;
+    state.notice = "这一卷已经走到边界。历史从这里进入过去。";
+    go("ending");
+    await loadPageData();
+    return;
+  }
   if (result.pending_moment && result.continue_status === "human_judgment" && state.active.inhabited_lifetime_id) {
     state.notice = "这一刻已经停在你的书案前。";
     go("desk");

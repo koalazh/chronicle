@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import sqlite3
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -46,6 +47,9 @@ class VolumeRuntimeError(ValueError):
 
 class VolumeRuntimeConflict(VolumeRuntimeError):
     """A V6 Volume operation conflicts with the current global state."""
+
+
+logger = logging.getLogger(__name__)
 
 
 VOLUME_CONTENT_VERSION = 2
@@ -534,7 +538,7 @@ class VolumeRuntime:
                 "Live Volume runtime is unavailable; reconcile it before continuing"
             )
         if row["status"] == WorldlineStatus.SEALED.value:
-            self._cleanup_profiles_after_seal(row)
+            cleanup_pending = self._try_cleanup_profiles_after_seal(row)
             event = next(
                 (
                     item
@@ -543,7 +547,12 @@ class VolumeRuntime:
                 ),
                 None,
             )
-            return {"worldline": self.db.worldline(worldline_id), "event": event, "idempotent": True}
+            return {
+                "worldline": self.db.worldline(worldline_id),
+                "event": event,
+                "idempotent": True,
+                "cleanup_pending": cleanup_pending,
+            }
         if row["status"] != WorldlineStatus.ACTIVE.value:
             raise VolumeRuntimeConflict("Volume Worldline cannot be sealed from its current state")
 
@@ -589,8 +598,27 @@ class VolumeRuntime:
             worldline_phase="ARCHIVED",
         )
         sealed = self.db.worldline(worldline_id) or {}
-        self._cleanup_profiles_after_seal(sealed)
-        return {"worldline": sealed, "event": committed, "boundary": boundary, "idempotent": False}
+        cleanup_pending = self._try_cleanup_profiles_after_seal(sealed)
+        sealed = self.db.worldline(worldline_id) or sealed
+        return {
+            "worldline": sealed,
+            "event": committed,
+            "boundary": boundary,
+            "idempotent": False,
+            "cleanup_pending": cleanup_pending,
+        }
+
+    def _try_cleanup_profiles_after_seal(self, row: dict[str, Any]) -> bool:
+        try:
+            self._cleanup_profiles_after_seal(row)
+        except VolumeRuntimeError as exc:
+            logger.warning(
+                "V6 Volume history sealed; runtime cleanup pending for %s: %s",
+                row.get("id"),
+                exc,
+            )
+            return True
+        return False
 
     def _cleanup_profiles_after_seal(self, row: dict[str, Any]) -> None:
         if row.get("runtime_mode") != "live":
@@ -619,6 +647,8 @@ class VolumeRuntime:
                 profiles,
                 server_names=server_names,
             )
+            if row.get("runtime_phase") == "CLEANUP_PENDING":
+                self.db.set_volume_runtime_state(str(row["id"]), "READY")
         except (GatewayRuntimeError, RuntimeError, OSError) as exc:
             error_code = getattr(exc, "code", "volume_cleanup_failed")
             self.db.set_volume_runtime_state(

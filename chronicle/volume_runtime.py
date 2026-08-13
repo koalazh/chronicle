@@ -2274,6 +2274,74 @@ class VolumeRuntime:
             "idempotent": existing is not None,
         }
 
+    def validate_world_action_candidate(
+        self,
+        worldline_id: str,
+        lifetime_id: str,
+        candidate: dict[str, Any] | None,
+        *,
+        wake_id: str = "",
+    ) -> dict[str, Any] | None:
+        """Read-only Host validation for one Human immediate-action candidate."""
+
+        if not isinstance(candidate, dict) or set(candidate) != {"tool", "arguments"}:
+            return None
+        tool_name = str(candidate.get("tool", "")).strip()
+        arguments = candidate.get("arguments")
+        if tool_name not in DELIBERATION_WORLD_TOOLS or not isinstance(arguments, dict):
+            return None
+        try:
+            row = self._active_worldline(worldline_id)
+            tick = int(row["current_tick"])
+            projection = self._snapshot_projection(worldline_id, tick)
+            pending = projection.get("pending_moment")
+            if not pending:
+                return None
+            lifetime = self._lifetime_for_actor(worldline_id, lifetime_id)
+            if lifetime is None or lifetime["controller"] != Controller.HUMAN.value:
+                return None
+            wake = self.db.crisis_wake(wake_id) if wake_id else self._pending_wake_for_lifetime(
+                worldline_id, pending, str(lifetime["seat"])
+            )
+            if wake is None or str(wake["id"]) not in {
+                str(item) for item in pending.get("wake_ids", [])
+            }:
+                return None
+            if wake["status"] not in {"QUEUED", "WAITING_HUMAN", "RUNNING", "STAGED"}:
+                return None
+            if tool_name not in set(lifetime.get("authority", [])):
+                return None
+            active_packs = self._active_packs_for_actor(worldline_id, lifetime["seat"], projection)
+            action_projection = self._action_projection(projection)
+            if tool_name == "communicate":
+                payload, result = self._prepare_volume_communication(
+                    worldline_id, lifetime, arguments, action_projection, tick
+                )
+            elif tool_name == "schedule_revisit":
+                payload, result = self._prepare_volume_revisit(lifetime, arguments, tick)
+            elif tool_name == "investigate":
+                payload, result = self._prepare_volume_investigation(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            elif tool_name == "operate":
+                payload, result = self._prepare_volume_operation(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            else:
+                payload, result = self._prepare_volume_offer(
+                    lifetime, arguments, active_packs, action_projection, tick
+                )
+            if result.get("status") != "accepted":
+                return None
+            return {
+                "tool": tool_name,
+                "arguments": copy.deepcopy(arguments),
+                "payload": copy.deepcopy(payload),
+                "result": copy.deepcopy(result),
+            }
+        except Exception:
+            return None
+
     def stage_deliberation(
         self,
         worldline_id: str,

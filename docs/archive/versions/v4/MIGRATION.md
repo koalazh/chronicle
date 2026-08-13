@@ -1,5 +1,7 @@
 # Chronicle V4 Migration Boundary
 
+> 历史归档。当前架构和运行边界见 [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md) 与 [`../../../OPERATIONS.md`](../../../OPERATIONS.md)。
+
 ## KEEP
 
 - `WorldService` 作为 Agent/Human 共用的确定性世界写入边界，继续把身份绑定在 Profile token、Run、Actor 与 Wake 上，而不是放进工具参数（`chronicle/world.py`）。

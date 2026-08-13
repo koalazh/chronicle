@@ -1,12 +1,14 @@
 # Chronicle V6 Acceptance Record
 
+> 历史归档。当前验收见 [`../../../ACCEPTANCE.md`](../../../ACCEPTANCE.md)；本文保留阶段矩阵和详细证据边界，不作为当前产品入口。
+
 > 状态：**COMPLETE — V5 baseline、V6 deterministic/product/browser gates 与隔离 real Hermes Volume 链均已执行；真人产品问卷仍保持未完成边界**
 >
 > 本文只记录实际执行、可复核且不含 Secret 的证据。fixture、自动化、浏览器、Doctor、Hermes readiness 与 real Hermes business chain 互不替代。
 
 ## V5 boundary retained
 
-V5 P0–P4 在 `docs/V5_ACCEPTANCE.md` 所列证据层为 PASS。V5 P5 仍为 `CANDIDATE`：缺少真人试玩逐题回答与正式 Completion Challenge。V6 不伪造回答，也不把 P5 改成 PASS。
+V5 P0–P4 在 [`../v5/ACCEPTANCE.md`](../v5/ACCEPTANCE.md) 所列证据层为 PASS。V5 P5 仍为 `CANDIDATE`：缺少真人试玩逐题回答与正式 Completion Challenge。V6 不伪造回答，也不把 P5 改成 PASS。
 
 ## Phase 0 baseline
 

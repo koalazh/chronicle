@@ -1,5 +1,7 @@
 # Chronicle V6 Migration Boundary
 
+> 历史归档。当前迁移和运行入口见 [`../../../OPERATIONS.md`](../../../OPERATIONS.md)；本文保留当时的阶段边界。
+
 本文档区分永久 World invariant 与 V5 Harness scaffold。它只记录 V6 迁移边界与实验结论，不建立 Harness Registry 或新的 framework。
 
 ## 原则

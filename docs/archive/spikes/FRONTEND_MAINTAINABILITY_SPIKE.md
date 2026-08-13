@@ -1,5 +1,7 @@
 # V4 前端可维护性 Spike
 
+> 历史归档。当前页面合同见 [`../../FRONTEND.md`](../../FRONTEND.md)；本文只保留一次性维护性分析。
+
 > 状态：已审计，采用渐进式 vanilla ES module 拆分；不是 React/Vite 重写的授权。
 
 ## 观察到的边界

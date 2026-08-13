@@ -1,5 +1,7 @@
 # Chronicle V6 最终修复与验收方案
 
+> 历史归档。本文记录已经完成的修复方案；当前产品文档和验收入口见 [`../../../README.md`](../../../README.md) 与 [`../../../ACCEPTANCE.md`](../../../ACCEPTANCE.md)。
+
 这份方案用于把当前 `bc0ae4e` 的 V6 候选实现修复到 `Chronicle-V6.md` 所要求的可验证完成状态。它不把已有 `COMPLETE` 标签当作证据，也不建立 V7、平行 Runtime、通用评测平台或新的 Agent 编排层。
 
 ## 1. 当前基线与判定原则

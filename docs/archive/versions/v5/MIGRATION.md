@@ -1,5 +1,7 @@
 # Chronicle V5 Migration Boundary
 
+> 历史归档。当前架构、运行和迁移入口见 [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md) 与 [`../../../OPERATIONS.md`](../../../OPERATIONS.md)。
+
 本文档是 V5 Phase 0 的迁移边界，不是第二套产品设计。它把
 `/Users/koala/study/note/work/product/历史模拟/Chronicle-V5.md` 中的
 KEEP / GENERALIZE / REPLACE / DEFER 固化为当前仓库可以逐阶段验证的约束。

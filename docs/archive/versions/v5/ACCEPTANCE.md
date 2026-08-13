@@ -1,5 +1,7 @@
 # Chronicle V5 Acceptance Record
 
+> 历史归档。当前验收见 [`../../../ACCEPTANCE.md`](../../../ACCEPTANCE.md)；本文只保留当时的候选证据和未完成边界。
+
 > 记录日期：2026-08-12
 > 分支：`dev_v5`
 > 状态：**CANDIDATE — P5 与完整 live V5 业务链已形成；正式 Completion Challenge 待执行**

@@ -1,6 +1,8 @@
 # V2 迁移归档：Branch 到 Worldline
 
-> 这是历史归档，不是 V3 产品入口。当前系统边界见 [V3 架构](../../ARCHITECTURE.md)，现场操作见 [运维与验收](../../OPERATIONS.md)。
+> 历史归档。当前入口见 [`../../../../README.md`](../../../../README.md)，当前架构见 [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md)。本文保留当时的版本语义，不作为当前产品规范。
+
+> 这是历史归档，不是当前产品入口。当前系统边界见 [架构](../../../ARCHITECTURE.md)，现场操作见 [运维](../../../OPERATIONS.md)。
 
 ## V2 当时解决的问题
 

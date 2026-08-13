@@ -1,5 +1,7 @@
 # Chronicle V6 实施记录
 
+> 历史归档。当前实现入口见 [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md)，当前验收见 [`../../../ACCEPTANCE.md`](../../../ACCEPTANCE.md)。
+
 ## 开始信息
 
 - start_commit: `13dcbe28ac781828f5553de918897ddd7f4e6e9e`
@@ -23,7 +25,7 @@
 
 完整 pytest 保留 4 条既有依赖/框架 warning：Starlette TestClient/httpx deprecation、Pydantic settings incomplete field definition，以及 FastAPI `on_event` deprecation 两条；本阶段不修改它们。
 
-根据 `docs/V5_ACCEPTANCE.md`，P0–P4 仅在各自所列证据层为 PASS；P5 是 `CANDIDATE`，仍缺真人试玩逐题回答与正式 Completion Challenge。V6 不改写这个事实。
+根据 [`../v5/ACCEPTANCE.md`](../v5/ACCEPTANCE.md)，P0–P4 仅在各自所列证据层为 PASS；P5 是 `CANDIDATE`，仍缺真人试玩逐题回答与正式 Completion Challenge。V6 不改写这个事实。
 
 ## Phase 1 Characterization + seam
 

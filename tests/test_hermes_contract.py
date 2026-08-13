@@ -81,13 +81,17 @@ def test_private_gateway_uses_the_configured_base_url_port(app_config):
 
 
 def test_mcp_commands_use_canonical_interpreter_path(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
     target = tmp_path / "python-real"
     target.touch()
-    alias = tmp_path / "python-alias"
+    canonical = bin_dir / "python"
+    canonical.symlink_to(target)
+    alias = bin_dir / "python3"
     alias.symlink_to(target)
     monkeypatch.setattr(sys, "executable", str(alias))
 
-    assert _python_executable() == str(target)
+    assert _python_executable() == str(canonical)
 
 
 @pytest.mark.asyncio

@@ -31,7 +31,11 @@ ACTOR_DISTRIBUTION = "hermes/chronicle-actor"
 def _python_executable() -> str:
     """Use one stable interpreter identity across Profile write/reconcile seams."""
 
-    return str(Path(sys.executable).resolve())
+    executable = Path(sys.executable)
+    environment_python = executable.parent / "python"
+    if executable.parent.name == "bin" and environment_python.exists():
+        return str(environment_python.absolute())
+    return str(executable.absolute())
 
 
 @dataclass(frozen=True)

@@ -222,6 +222,34 @@ function deskPage() {
   const life = state.desk.lifetime || {};
   const whyNow = desk.why_now || {};
   const reconsideration = desk.reconsideration || {};
+  const decisionState = desk.decision_state || "QUIET_NO_COURSE";
+  const needsJudgment = decisionState === "NEEDS_FIRST_JUDGMENT" || decisionState === "NEEDS_RECONSIDERATION";
+  const firstJudgment = decisionState === "NEEDS_FIRST_JUDGMENT";
+  const decisionCopy = firstJudgment
+    ? "这一次还没有形成要继续执行的方向。"
+    : decisionState === "NEEDS_RECONSIDERATION"
+      ? (reconsideration.voluntary ? "你主动重新考虑了这份判断。" : "现实已经改变了此前判断的基础。")
+      : decisionState === "COURSE_IN_FORCE"
+        ? "这个判断仍在生效。"
+        : "此刻还没有事情要求你落笔。";
+  const judgmentForm = needsJudgment ? `
+        <form id="decision-form">
+          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断"></textarea>
+          <div class="decision-actions">
+            <button class="primary wide" type="submit" data-judgment-action="${firstJudgment ? "CHANGE" : "CHANGE"}" ${state.busy ? "disabled" : ""}>${firstJudgment ? "留下这个判断" : "改主意"}</button>
+            ${firstJudgment ? `<button class="secondary wide" type="submit" data-judgment-action="WAIT" ${state.busy ? "disabled" : ""}>暂时不定</button>` : `<button class="secondary wide" type="submit" data-judgment-action="KEEP" ${state.busy ? "disabled" : ""}>仍照这样办</button>`}
+          </div>
+        </form>
+        <button class="secondary wide" data-action="leave-life" ${state.busy ? "disabled" : ""}>让他自己判断</button>
+  ` : decisionState === "COURSE_IN_FORCE" ? `
+        <button class="primary wide" data-action="continue-world" ${state.busy ? "disabled" : ""}>让时间继续</button>
+        <button class="secondary wide" data-action="reconsider" ${state.busy || !reconsideration.available ? "disabled" : ""}>重新考虑</button>
+        <button class="secondary wide" data-action="leave-life" ${state.busy ? "disabled" : ""}>交还给世界</button>
+  ` : `
+        <button class="primary wide" data-action="continue-world" ${state.busy ? "disabled" : ""}>让时间继续</button>
+        <button class="secondary wide" data-action="reconsider" ${state.busy || !reconsideration.available ? "disabled" : ""}>主动定一个方向</button>
+        <button class="secondary wide" data-action="leave-life" ${state.busy ? "disabled" : ""}>交还给世界</button>
+  `;
   return chrome(`
     <section class="run-header">
       <div><p class="kicker">Life Desk · ${text(life.location?.display_name || "位置未明")}</p><h1>${text(life.display_name)}</h1><p>你暂时拥有的是这段人生的下一步，不是这个人的全部。</p></div>
@@ -237,13 +265,9 @@ function deskPage() {
       </div>
       <aside class="decision-desk">
         <p class="kicker">下一步</p>
-        <h2>${text(reconsideration.prompt || "现在还这样办吗？")}</h2>
-        <p>${reconsideration.attention_open ? "现实已经改变了此前判断的基础。" : "此前的判断仍在生效；你也可以主动重新看看。"} 可以留下明确的一步，也可以保持等待。</p>
-        <form id="decision-form">
-          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断"></textarea>
-          <button class="primary wide" type="submit" ${state.busy ? "disabled" : ""}>落下这一笔</button>
-        </form>
-        <button class="secondary wide" data-action="continue-world" ${state.busy ? "disabled" : ""}>等待世界的下一刻</button>
+        <h2>${text(reconsideration.prompt || "此刻还没有事情要求你落笔。")}</h2>
+        <p>${text(decisionCopy)}</p>
+        ${judgmentForm}
       </aside>
     </section>
   `, { compact: false });
@@ -404,15 +428,27 @@ async function leaveLife() {
   await loadWorld();
 }
 
-async function submitDecision(value) {
-  const payload = value ? { text: value } : { intent: { type: "wait" } };
+async function submitDecision(action, value) {
+  const payload = { action, text: value };
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
   applyWorldline(result);
   state.desk = result.desk || state.desk;
-  state.notice = value ? "这一笔已经落入当前时刻。" : "你选择等待；这一笔已经落入当前时刻。";
+  state.notice = action === "WAIT" ? "你选择暂时不定；这一笔已经落入当前时刻。" : "这一笔已经落入当前时刻。";
+  await loadDesk();
+}
+
+async function reconsider() {
+  const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/reconsider`, {
+    method: "POST",
+    body: "{}",
+  });
+  applyWorldline(result);
+  state.desk = result.desk || state.desk;
+  state.notice = "你主动重新考虑了这份判断。";
+  go("desk");
   await loadDesk();
 }
 
@@ -462,6 +498,7 @@ root.addEventListener("click", (event) => {
   if (action === "continue-volume") return run(() => { go("world"); return loadPageData(); });
   if (action === "continue-world") return run(continueWorld);
   if (action === "leave-life") return run(leaveLife);
+  if (action === "reconsider") return run(reconsider);
   if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId));
   if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId));
   if (action === "clear-archive") return clearArchive();
@@ -476,7 +513,8 @@ root.addEventListener("submit", (event) => {
   if (event.target.id !== "decision-form") return;
   event.preventDefault();
   const value = event.target.querySelector("#decision")?.value.trim() || "";
-  run(() => submitDecision(value));
+  const action = event.submitter?.dataset.judgmentAction || "CHANGE";
+  run(() => submitDecision(action, value));
 });
 
 window.addEventListener("hashchange", () => {

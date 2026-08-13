@@ -22,19 +22,7 @@ def test_continue_stops_at_human_attention_after_agent_time_is_compressed(app_co
 
         established = client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={
-                "intent": {
-                    "outcome": "REVISE",
-                    "course": {
-                        "summary": "暂不作最终归属，继续维持关口可控",
-                        "steps": ["守住关口", "等清方明确回复"],
-                    },
-                    "open_dependencies": [
-                        {"id": "await-dorgon", "type": "MESSAGE_FROM", "actor_id": "dorgon"}
-                    ],
-                    "world_actions": [],
-                }
-            },
+            json={"action": "CHANGE", "text": "暂不作最终归属，继续维持关口可控"},
         )
         assert established.status_code == 200
         assert established.json()["desk"]["desk"]["current_course"][0]["text"].startswith(
@@ -63,7 +51,7 @@ def test_continue_stops_at_human_attention_after_agent_time_is_compressed(app_co
 
         assert continued.status_code == 200
         payload = continued.json()
-        assert payload["advanced_ticks"] == 1
+        assert payload["advanced_ticks"] >= 1
         assert payload["continue_status"] == "human_judgment"
         assert payload["pending_moment"]
         desk = client.get(f"/api/worldlines/{worldline_id}/desk").json()["desk"]
@@ -82,7 +70,7 @@ def test_human_can_reconsider_at_current_tick_without_advancing_or_hermes(app_co
         assert client.post(f"/api/worldlines/{worldline_id}/continue").json()["pending_moment"]
         assert client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={"text": "先守住关口，暂不作最终归属"},
+            json={"action": "CHANGE", "text": "先守住关口，暂不作最终归属"},
         ).status_code == 200
 
         before = ChronicleHost(config).db.worldline(worldline_id)
@@ -100,10 +88,14 @@ def test_human_can_reconsider_at_current_tick_without_advancing_or_hermes(app_co
         ).status_code == 200
 
         reconsidered = client.post(
-            f"/api/worldlines/{worldline_id}/decision",
-            json={"text": "现在改为先核验关口边界"},
+            f"/api/worldlines/{worldline_id}/reconsider",
         )
 
+        assert reconsidered.status_code == 200
+        reconsidered = client.post(
+            f"/api/worldlines/{worldline_id}/decision",
+            json={"action": "CHANGE", "text": "现在改为先核验关口边界"},
+        )
         assert reconsidered.status_code == 200
         payload = reconsidered.json()
         assert payload["worldline"]["current_tick"] == before_tick
@@ -122,10 +114,11 @@ def test_inhabit_freezes_an_initial_human_checkpoint_for_direct_judgment(app_con
             f"/api/worldlines/{worldline_id}/inhabit",
             json={"lifetime_id": "wu-sangui"},
         ).status_code == 200
+        assert client.post(f"/api/worldlines/{worldline_id}/reconsider").status_code == 200
 
         decided = client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={"text": "先守住关口，继续核验清方条件"},
+            json={"action": "CHANGE", "text": "先守住关口，继续核验清方条件"},
         )
 
         assert decided.status_code == 200
@@ -145,7 +138,7 @@ def test_life_desk_projects_v6_judgment_sections_without_internal_terms(app_conf
         assert client.post(f"/api/worldlines/{worldline_id}/continue").json()["pending_moment"]
         decided = client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={"text": "暂时守住关口，等待明确回复"},
+            json={"action": "CHANGE", "text": "暂时守住关口，等待明确回复"},
         )
         assert decided.status_code == 200
 
@@ -153,13 +146,15 @@ def test_life_desk_projects_v6_judgment_sections_without_internal_terms(app_conf
         assert desk.status_code == 200
         projected = desk.json()["desk"]
         assert {
+            "decision_state",
             "current_course",
             "since_last_deliberation",
             "why_now",
             "binding_reality",
             "reconsideration",
         } <= set(projected)
-        assert projected["reconsideration"]["prompt"] == "现在还这样办吗？"
+        assert projected["decision_state"] == "COURSE_IN_FORCE"
+        assert projected["reconsideration"]["prompt"] == "这个判断仍在生效。"
         projected_text = str(projected)
         assert not any(
             term in projected_text

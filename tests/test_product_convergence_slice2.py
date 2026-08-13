@@ -81,7 +81,7 @@ def test_voluntary_reconsideration_is_one_per_lifetime_and_tick(app_config):
         ]
         assert client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={"text": "先守住关口，等待可核验的消息"},
+            json={"action": "CHANGE", "text": "先守住关口，等待可核验的消息"},
         ).status_code == 200
 
         host = ChronicleHost(config)

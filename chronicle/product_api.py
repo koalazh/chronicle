@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,7 +38,9 @@ class ProductInhabitRequest(BaseModel):
 
 
 class ProductDecisionRequest(BaseModel):
-    intent: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["KEEP", "CHANGE", "WAIT"]
     text: str = Field(default="", max_length=4000)
 
 
@@ -424,6 +426,35 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         except Exception as exc:
             raise classify_error(exc) from exc
 
+    @router.post("/worldlines/{worldline_id}/reconsider")
+    async def reconsider(worldline_id: str) -> dict[str, Any]:
+        active = active_host()
+        row = volume_row(active, worldline_id)
+        try:
+            view = projection(active)
+            human_id = view.lifetime_seat(
+                worldline_id, str(row.get("human_lifetime_id") or "")
+            )
+            if not human_id:
+                raise VolumeRuntimeConflict("请先进入一段人生")
+            await asyncio.to_thread(
+                active.volume_runtime.open_voluntary_reconsideration,
+                worldline_id,
+                human_id,
+            )
+            state = active.volume_runtime.worldline(worldline_id)
+            return {
+                "worldline": view.public_worldline(state["worldline"]),
+                "world": view.public_world(worldline_id),
+                "desk": view.public_desk(
+                    worldline_id, pending_for_human(active, worldline_id)
+                ),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise classify_error(exc) from exc
+
     @router.post("/worldlines/{worldline_id}/decision")
     async def decision(worldline_id: str, request: ProductDecisionRequest) -> dict[str, Any]:
         active = active_host()
@@ -436,13 +467,6 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             if not human_id:
                 raise VolumeRuntimeConflict("请先进入一段人生")
             state = active.volume_runtime.worldline(worldline_id)
-            if not state["projection"].get("pending_moment"):
-                await asyncio.to_thread(
-                    active.volume_runtime.open_voluntary_reconsideration,
-                    worldline_id,
-                    human_id,
-                )
-                state = active.volume_runtime.worldline(worldline_id)
             if pending_for_human(active, worldline_id) is None:
                 raise VolumeRuntimeConflict("当前时刻没有需要你处理的下一步")
             human_wake = next(
@@ -456,13 +480,31 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
             )
             if human_wake is None:
                 raise VolumeRuntimeConflict("当前时刻没有可以交给你的下一步")
-            intent = dict(request.intent)
-            if request.text.strip():
+            context = active.volume_runtime.lifetime_context(
+                worldline_id, human_id, wake_id=human_wake["id"]
+            )
+            current_course = context.get("current_course")
+            if request.action == "KEEP":
+                if not current_course:
+                    raise VolumeRuntimeConflict("已有判断才能维持原来的打算")
+                proposal = {"outcome": "HOLD", "world_actions": []}
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_deliberation,
+                    worldline_id,
+                    human_id,
+                    proposal,
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
+            elif request.action == "CHANGE":
+                text = request.text.strip()
+                if not text:
+                    raise VolumeRuntimeConflict("改主意需要写下新的判断")
                 proposal = {
                     "outcome": "REVISE",
                     "course": {
-                        "summary": request.text.strip(),
-                        "steps": [request.text.strip()],
+                        "summary": text,
+                        "steps": [text],
                     },
                     "world_actions": [],
                 }
@@ -474,56 +516,17 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                     source="human",
                     wake_id=human_wake["id"],
                 )
-            elif intent.get("outcome") in {"HOLD", "REVISE"}:
-                await asyncio.to_thread(
-                    active.volume_runtime.stage_deliberation,
-                    worldline_id,
-                    human_id,
-                    intent,
-                    source="human",
-                    wake_id=human_wake["id"],
-                )
-            elif intent.get("type") == "update_plan":
-                await asyncio.to_thread(
-                    active.volume_runtime.stage_intent,
-                    worldline_id,
-                    human_id,
-                    intent,
-                    source="human",
-                    wake_id=human_wake["id"],
-                )
-            elif intent.get("type") == "message":
-                await asyncio.to_thread(
-                    active.volume_runtime.stage_intent,
-                    worldline_id,
-                    human_id,
-                    intent,
-                    source="human",
-                    wake_id=human_wake["id"],
-                )
             else:
-                lifetime = active.db.worldline_lifetime(worldline_id, human_id)
-                current_course = (
-                    list(lifetime.get("plan", []))[:1] if lifetime is not None else []
-                )
                 if current_course:
-                    await asyncio.to_thread(
-                        active.volume_runtime.stage_deliberation,
-                        worldline_id,
-                        human_id,
-                        {"outcome": "HOLD", "world_actions": []},
-                        source="human",
-                        wake_id=human_wake["id"],
-                    )
-                else:
-                    await asyncio.to_thread(
-                        active.volume_runtime.stage_intent,
-                        worldline_id,
-                        human_id,
-                        {"type": "wait"},
-                        source="human",
-                        wake_id=human_wake["id"],
-                    )
+                    raise VolumeRuntimeConflict("已有判断不能用暂时不定")
+                await asyncio.to_thread(
+                    active.volume_runtime.stage_intent,
+                    worldline_id,
+                    human_id,
+                    {"type": "wait"},
+                    source="human",
+                    wake_id=human_wake["id"],
+                )
             await asyncio.to_thread(resolve_agent_wakes, active, worldline_id)
             state = active.volume_runtime.worldline(worldline_id)
             if state["projection"].get("pending_moment"):

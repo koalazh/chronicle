@@ -87,7 +87,8 @@ def test_frontend_captures_the_human_judgment_before_busy_rerender():
     assert 'const value = event.target.querySelector("#decision")?.value.trim() || "";' in (
         submit_handler
     )
-    assert "run(() => submitDecision(value));" in submit_handler
+    assert 'const action = event.submitter?.dataset.judgmentAction || "CHANGE";' in submit_handler
+    assert "run(() => submitDecision(action, value));" in submit_handler
     assert 'document.querySelector("#decision")' not in decision_mutation
 
 

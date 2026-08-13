@@ -103,7 +103,7 @@ def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     if continued.json().get("pending_moment"):
         decided = client.post(
             f"/api/worldlines/{worldline_id}/decision",
-            json={"intent": {"type": "wait"}},
+            json={"action": "WAIT", "text": ""},
         )
         assert decided.status_code == 200
 

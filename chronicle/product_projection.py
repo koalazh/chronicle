@@ -1128,10 +1128,34 @@ class ProductProjection:
         context = self.active.volume_runtime.lifetime_context(
             worldline_id, lifetime_id, wake_id=attention_wake_id or None
         )
+        current_course = context.get("current_course")
+        voluntary = bool(
+            human_attention
+            and attention_wake_id
+            and (
+                wake := self.active.db.crisis_wake(attention_wake_id)
+            ) is not None
+            and wake.get("wake_type") == "VOLUNTARY_RECONSIDERATION"
+        )
+        if human_attention is not None:
+            decision_state = (
+                "NEEDS_RECONSIDERATION" if current_course else "NEEDS_FIRST_JUDGMENT"
+            )
+        else:
+            decision_state = "COURSE_IN_FORCE" if current_course else "QUIET_NO_COURSE"
+        prompt = {
+            "NEEDS_FIRST_JUDGMENT": "你准备怎样办？",
+            "NEEDS_RECONSIDERATION": (
+                "你主动重新考虑了这份判断。" if voluntary else "现在还这样办吗？"
+            ),
+            "COURSE_IN_FORCE": "这个判断仍在生效。",
+            "QUIET_NO_COURSE": "此刻还没有事情要求你落笔。",
+        }[decision_state]
         return {
             "worldline": self.public_worldline(row),
             "lifetime": self.public_lifetime(row, state["projection"], lifetime),
             "desk": {
+                "decision_state": decision_state,
                 "position": context.get("position", {}),
                 "arrivals": self.product_items(context.get("recent_knowledge", [])),
                 "known": self.product_items(context.get("relevant_evidence", [])),
@@ -1146,9 +1170,10 @@ class ProductProjection:
                 "why_now": self.desk_why_now(context),
                 "binding_reality": self.desk_binding_items(context),
                 "reconsideration": {
-                    "available": True,
+                    "available": human_attention is None,
                     "attention_open": human_attention is not None,
-                    "prompt": "现在还这样办吗？",
+                    "voluntary": voluntary,
+                    "prompt": prompt,
                 },
             },
         }

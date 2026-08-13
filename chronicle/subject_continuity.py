@@ -545,7 +545,7 @@ class LifetimeContextBuilder:
     def _uncertainty(
         self, projection: dict[str, Any], trigger: dict[str, Any], seat: str
     ) -> list[str]:
-        uncertainty = ["其他 Lifetime 的私有证据不会自动进入当前视角。"]
+        uncertainty = ["其他人的私下所知不会自动进入你眼前。"]
         if trigger:
             uncertainty.append("当前判断只建立在已冻结的触发和可见证据上。")
         if any(

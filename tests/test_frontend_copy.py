@@ -77,6 +77,20 @@ def test_frontend_keeps_a_small_mutation_lock_and_boot_error_state():
         assert required in source
 
 
+def test_frontend_captures_the_human_judgment_before_busy_rerender():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    submit_handler = source.split('root.addEventListener("submit"', 1)[1]
+    decision_mutation = source.split("async function submitDecision", 1)[1].split(
+        "async function openArchive", 1
+    )[0]
+
+    assert 'const value = event.target.querySelector("#decision")?.value.trim() || "";' in (
+        submit_handler
+    )
+    assert "run(() => submitDecision(value));" in submit_handler
+    assert 'document.querySelector("#decision")' not in decision_mutation
+
+
 def test_frontend_does_not_expose_internal_backend_errors():
     source = (ROOT / "web" / "api.js").read_text(encoding="utf-8")
 

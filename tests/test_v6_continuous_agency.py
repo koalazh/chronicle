@@ -143,5 +143,12 @@ def test_life_desk_projects_v6_judgment_sections_without_internal_terms(app_conf
         projected_text = str(projected)
         assert not any(
             term in projected_text
-            for term in ("Decision Horizon", "Attention Boundary", "Wake", "Hermes", "MCP")
+            for term in (
+                "Decision Horizon",
+                "Attention Boundary",
+                "Wake",
+                "Hermes",
+                "Lifetime",
+                "MCP",
+            )
         )

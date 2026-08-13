@@ -389,8 +389,7 @@ async function leaveLife() {
   await loadWorld();
 }
 
-async function submitDecision() {
-  const value = document.querySelector("#decision")?.value.trim() || "";
+async function submitDecision(value) {
   const payload = value ? { text: value } : { intent: { type: "wait" } };
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/decision`, {
     method: "POST",
@@ -461,7 +460,8 @@ root.addEventListener("click", (event) => {
 root.addEventListener("submit", (event) => {
   if (event.target.id !== "decision-form") return;
   event.preventDefault();
-  run(submitDecision);
+  const value = event.target.querySelector("#decision")?.value.trim() || "";
+  run(() => submitDecision(value));
 });
 
 window.addEventListener("hashchange", () => {

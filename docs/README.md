@@ -1,32 +1,41 @@
-# 文档入口
+# 文档总览
 
-这里的文档只回答“当前产品是什么、如何运行、如何验证”。历史实施过程、迁移边界和阶段性验收不会混入当前入口，而是统一放在 [`archive/`](archive/README.md) 中。
+先按你的目的选择入口。普通用户不需要阅读开发、运维、验收或历史研究材料。
 
-## 当前文档
+## 我只想体验产品
 
-| 目的 | 文档 |
+| 目的 | 入口 |
 | --- | --- |
-| 产品旅程、用户价值和可见边界 | [`PRODUCT.md`](../PRODUCT.md) |
-| Volume、Lifetime、Host、时钟和 Archive 的实现边界 | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
-| 页面状态、API 接缝、文案和响应式要求 | [`FRONTEND.md`](FRONTEND.md) |
-| 本地启动、隔离资源、Hermes、清理和检查命令 | [`OPERATIONS.md`](OPERATIONS.md) |
-| 当前验收结论、证据分层和已知边界 | [`ACCEPTANCE.md`](ACCEPTANCE.md) |
-| 史料来源、证据状态和 Perspective 规则 | [`HISTORY.md`](HISTORY.md) |
-| 南京定策的史料与内容契约 | [`NANJING_SUCCESSION_RESEARCH.md`](NANJING_SUCCESSION_RESEARCH.md) |
+| 最短启动步骤 | [README.md](../README.md) |
+| 了解这款产品想带来的体验 | [PRODUCT.md](../PRODUCT.md) |
+| 了解哪些内容已经验证、哪些还没有 | [ACCEPTANCE.md](ACCEPTANCE.md) |
 
-## 阅读顺序
+README 里的命令可以整段复制，不需要先理解项目内部名称。
 
-1. 先读根目录 [`README.md`](../README.md)，完成本地启动。
-2. 再读 [`PRODUCT.md`](../PRODUCT.md)，理解用户旅程和产品边界。
-3. 需要开发或排障时读架构、前端和运维文档。
-4. 需要核对“完成”时读 [`ACCEPTANCE.md`](ACCEPTANCE.md)，不要把单个测试、浏览器检查或一次模型运行扩大解释。
+## 我需要开发或维护
+
+| 目的 | 入口 | 读者 |
+| --- | --- | --- |
+| 理解世界如何推进、权限如何保持 | [ARCHITECTURE.md](ARCHITECTURE.md) | 开发者 |
+| 修改页面、文案或隐私边界 | [FRONTEND.md](FRONTEND.md) | 前端开发者 |
+| 启动、隔离、排障和清理运行资源 | [OPERATIONS.md](OPERATIONS.md) | 开发者 / 运维人员 |
+| 核对测试、浏览器和真实运行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) | 验收人员 |
+| 维护史料、来源和人物视野 | [HISTORY.md](HISTORY.md) | 内容研究 / 建模人员 |
+| 维护南京定策内容 | [NANJING_SUCCESSION_RESEARCH.md](NANJING_SUCCESSION_RESEARCH.md) | 内容研究 / 建模人员 |
+
+这些文档会使用代码和研究所需的内部名称；它们不要求普通用户阅读，也不应反过来成为产品页面的文案来源。
+
+## 历史材料
+
+阶段计划、迁移记录、旧验收和一次性分析统一放在 [archive/README.md](archive/README.md)。归档材料保留当时的名称和结论，只用于追溯，不覆盖当前文档。
 
 ## 文档维护规则
 
-- 当前文档描述现在的代码和产品，不用历史版本名称组织章节。
-- 阶段计划、迁移记录、旧验收和一次性 spike 进入归档后不再作为当前实现的规范来源。
-- 每条“已支持”“已通过”“已清理”都必须能在源码、测试、运行记录或可读工件中复核；真人主观反馈没有收集时必须明确写出。
-- 不在仓库保存 API key、Profile token、完整模型响应、private prompt 或临时运行数据库。
-- 文档链接以当前文件为准；移动历史文件时同时修正相对链接，并运行链接检查。
+- 直接用户文档优先使用自然语言；一个名词只有在用户确实需要它时才出现。
+- 代码名称、环境变量、接口路径、验收矩阵和内部生命周期只放在开发/运维/验收文档。
+- 每条“已支持”“已通过”“已清理”都必须能在源码、测试、运行记录或可读工件中复核；真人反馈没有收集时必须明确写出。
+- 当前文档描述现在的代码和产品；历史材料进入归档后不再作为规范来源。
+- 不在仓库保存密钥、完整模型响应、临时数据库或其他敏感运行材料。
+- 移动文档时同时修正相对链接，并运行链接检查。
 
-历史目录和保留理由见 [`archive/README.md`](archive/README.md)。
+历史目录和保留理由见 [archive/README.md](archive/README.md)。

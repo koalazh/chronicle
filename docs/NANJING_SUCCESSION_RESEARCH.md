@@ -1,5 +1,7 @@
 # 南都定策：历史策展与 Pack 契约
 
+> 读者：内容研究人员和建模人员。本文是史料与实现契约，不是用户指南，也不要求用户理解其中的内部名称。
+
 > 当前状态：Pack、Volume registry 与 `nanjing-succession-v1` deterministic resolver 已接入当前 Volume；确定性 API/fixture、浏览器回看和隔离真实业务链分别有证据。本文是内容与史料契约，不把单层证据扩大解释为全部产品体验。
 
 ## 危局边界

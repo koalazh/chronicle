@@ -1,5 +1,7 @@
 # 前端合同
 
+> 读者：前端开发者。本文是实现合同，不是用户指南；其中的接口名和内部状态名只用于代码、隐私和验收。
+
 本文描述当前页面应该让用户看到什么，以及前端和 Product API 的接缝。实现以 `web/index.html`、`web/app.js`、`web/api.js`、`web/router.js`、`web/state.js` 和 `web/styles.css` 为准。Profile、Wake、Session、Memory、Runtime 等词可以出现在工程诊断中，但不能成为普通用户界面的心智模型。
 
 ## 页面信息架构

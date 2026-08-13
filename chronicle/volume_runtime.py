@@ -3029,7 +3029,9 @@ class VolumeRuntime:
                 seat_id=lifetime["seat"],
                 provenance=Provenance.BRANCH_DERIVED.value,
                 causal_parent_ids=causal_parent_ids,
-                event_id=f"{pending['id']}:intent:{lifetime['seat']}:{stable_hash(intent)[:12]}",
+                event_id=(
+                    f"{pending['id']}:intent:{lifetime['seat']}:{stable_hash({'wake_id': wake['id'], 'intent': intent})[:12]}"
+                ),
                 runtime_epoch=row["runtime_epoch"],
             )
             events.append(intent_event)

@@ -98,6 +98,50 @@ def test_hold_is_a_first_class_atomic_deliberation_without_world_action(app_conf
     assert lifetime["plan"][0]["last_deliberated_event_id"] != before["last_deliberated_event_id"]
 
 
+def test_same_actor_multiple_wakes_have_distinct_intent_event_ids(app_config):
+    _config, runtime, worldline_id, wu = _runtime(app_config, "same-actor-wakes")
+    _establish_course(runtime, worldline_id, wu)
+    for suffix in ("checkpoint", "attention"):
+        runtime.db.create_subject_wake(
+            {
+                "id": f"{worldline_id}:v6-same-actor:{suffix}",
+                "worldline_id": worldline_id,
+                "actor_id": wu["seat"],
+                "wake_type": "OBSERVATION",
+                "tick": 1,
+                "status": "QUEUED",
+                "source": "v6-deliberation-test",
+                "trigger_event_id": f"{worldline_id}:{suffix}-trigger",
+            }
+        )
+    frozen = runtime.freeze_pending_moment(worldline_id)
+    wake_ids = [
+        item
+        for item in frozen["pending_moment"]["wake_ids"]
+        if ":v6-same-actor:" in item
+    ]
+    assert len(wake_ids) == 2
+    for index, wake_id in enumerate(wake_ids):
+        runtime.stage_deliberation(
+            worldline_id,
+            wu["id"],
+            {"outcome": "HOLD", "world_actions": []},
+            source="agent",
+            idempotency_key=f"v6-same-actor-{index}",
+            wake_id=wake_id,
+        )
+
+    committed = runtime.commit_pending_moment(worldline_id)
+    intent_ids = [
+        event["id"]
+        for event in committed["events"]
+        if event["event_type"] == "INTENT_COMMITTED"
+        and event["payload"]["seat"] == wu["seat"]
+    ]
+    assert len(intent_ids) == 2
+    assert len(set(intent_ids)) == 2
+
+
 def test_agent_revise_requires_visible_evidence_and_can_commit_one_action(app_config):
     _config, runtime, worldline_id, wu = _runtime(app_config, "revise")
     _establish_course(runtime, worldline_id, wu)

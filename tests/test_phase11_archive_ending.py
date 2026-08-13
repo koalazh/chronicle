@@ -203,6 +203,15 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     assert "events" not in payload
     assert "replay" not in payload
     assert "boundary" not in payload
+    assert not _keys(payload) & {
+        "controller",
+        "wake",
+        "field_events",
+        "pending_moment",
+        "moment",
+        "moments",
+    }
+    assert isinstance(payload["final_reality"], list)
     shi = payload["selected_life"]
     assert isinstance(shi["later_known"], list)
     assert all(item["happened_tick"] < item["known_tick"] for item in shi["later_known"])

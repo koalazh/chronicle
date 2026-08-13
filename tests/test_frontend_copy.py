@@ -145,3 +145,11 @@ def test_frontend_routes_only_formal_v6_pages():
         assert required in router
     for forbidden in ("ending", "crisis", "watch", "takeover", "compare", "settlement"):
         assert forbidden not in router.lower()
+
+
+def test_frontend_does_not_expose_a_seal_action_or_bypass_runtime_eligibility():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "/seal" not in source
+    assert "const canEnter = person.available || person.inhabited;" in source
+    assert '${canEnter ? "" : "disabled"}' in source

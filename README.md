@@ -232,3 +232,7 @@ V5 不是：
 ## License
 
 见 [`LICENSE`](LICENSE)。
+
+## V6 final verification boundary
+
+最新 r11 隔离 real Hermes Volume 已实际完成 Human Course/Leave/re-entry、跨主体 Attention/Deliberation、山海关与南京连续轨迹、Archive、Seal 和精确 cleanup；证据见 [`docs/V6_ACCEPTANCE.md`](docs/V6_ACCEPTANCE.md)。这是一条可复核的真实业务轨迹，不是 Provider 稳定性 benchmark；V5 P5 与 V6 真人问卷仍未收集，不能由自动化结果替代。

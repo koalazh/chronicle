@@ -199,3 +199,29 @@ V5 让同一人跨离席、Session 与重启继续存在；V6 让该人已形成
 - 建立 `V6Runtime`、`ContinuousAgencyEngine`、`NewWorldRuntime`、`NewAgentRuntime` 或 `V6Worldline`。
 - 用 LLM 判断 attention、世界效果或其他 Subject 的选择。
 - 把 V5 P5 的缺失真人验收伪造为 PASS。
+
+## Final repair delta — 2026-08-13
+
+第二轮审查后的修复保持在现有 Volume Runtime、Host、MCP 与前端边界内，未新增平行 Runtime、DSL、Registry 或 World Master。新增的语义提交为：
+
+- `8769013`：同一主体在同一 Logical Moment 收到 checkpoint 与 Attention Wake 时，`wake_id` 参与 intent event identity；两个合法 Wake 不再因同 seat/tick 冲突而破坏 atomic commit。
+- `d2de819`、`bbaf2e9`：迟激活 Crisis 的 Operation/Investigation 先按 Crisis `local_tick` 校验，再换算回 Volume global tick；起始与 commit revalidation 使用同一规则。
+- `67be2e2`：Nanjing 在 `URGENT` pressure 下仍保留首个合法召集程序；回归测试锁定该可达性。
+- `28f1be1`、`6e0cdd5`、`aab002c`：真实 deliberation schema、Course/dependency 前置与结构化 evidence 示例与当前冻结上下文一致，不猜测 `event_id` 或使用未允许的 dependency type。
+- `d356824`：初始 Human checkpoint 的 freeze 逻辑只在存在完整 Volume snapshot 时运行；缺少 snapshot 的旧最小 transition fixture 仍返回原 controller transition，不削弱 live Volume 的 fail-closed snapshot 合同。
+
+## Final isolated real Hermes acceptance — r11
+
+在最新源码上重新执行了独占临时 SQLite、Hermes Home、产品端口 `127.0.0.1:18786` 与 Gateway 端口 `127.0.0.1:18886` 的 real Hermes Volume。真实 Worldline 为 `worldline-f44420f2821e42b3`，未使用项目默认数据库、全局 Hermes Home、SQL 手工 mutation、直接消息注入或 acceptance-only `settle_crisis`。
+
+- 浏览器先建立吴三桂的非空中文 Course，Leave 后重新 Inhabit，Course 与历史判断持续存在；Archive 页面显示“已封存”，打开公共回看并明确选择吴三桂后可看到判断回看。
+- 六个真实 Hermes Subjects 都 materialize 并完成 fresh-session wake；最终 Ledger 有 `DELIBERATION_COMMITTED=25`、`ATTENTION_EVALUATED=32`、`DECISION_HORIZON_HELD=6`、`DECISION_HORIZON_REVISED=13`、`MESSAGE_DISPATCHED=8`、`MESSAGE_DELIVERED=8`、`OPERATION_STARTED=7`、`OPERATION_COMPLETED=7`、`AGREEMENT_CREATED=1` 和 `MOMENT_COMMITTED=13`。
+- 吴三桂的可复核序列为 `BACKGROUND → REOPEN → HOLD`：无关已知事实没有制造 cognition，山海关结构压力打开 Attention，新的 real Hermes Wake 保留原 Course 并 HOLD。多尔衮与李自成分别在自己的事实边界中 REVISE；南京中韩、史、马主体独立完成召集、潞王入场、军政 backing、Offer/Agreement 与潞王监国程序。
+- 同一 Volume 的三条 Crisis 均通过现有统一 Global/Local clock 与 deterministic resolution 到达结果：山海关 `WINDOW_EXPIRED_DEFERRED`（tick 5）、南京 `LU_RECOGNIZED`（tick 14）、南方 `JIANGBEI_COORDINATION`（tick 18）。不存在未结 Knot，boundary policy 返回 `structural_boundary` 后 Seal 成功。
+- Seal 回执为 `VOLUME_SEALED`，Worldline 为 `SEALED/ARCHIVED`，六条 bindings 为 `REVOKED`；Profile 目录为空，Gateway owner 文件与 `18786/18886` 监听均不存在。可恢复的完整临时证据目录已移入 `/Users/koala/.Trash/chronicle-v6-live.r11-complete-20260813`，没有进入 Git。
+
+上述是一条真实 Provider 轨迹，不是稳定性或统计 benchmark；没有保存 provider response、prompt、token 或 private Memory。真人产品五问仍为 `UNCOLLECTED`。
+
+## Final evidence boundary
+
+Phase 9 四组 ablation 现在均有可重跑的结果：`tests/test_v6_harness_ablation.py` 为 4 passed。one-action 与 authored-maneuver 证明生产约束应保留；prompt-complexity 与 fixed-pressure 在 Host/Pack 边界执行并证明约束/压力的 load-bearing 结果，未把它们升级为 Provider 成功率实验，因此协议提示、固定压力和所有永久安全 invariant 均保留。Phase 10 的 Perfect Wait、Canonicality perturbation、Role-State swap 为 deterministic probes；r11 提供同一 Volume 的 Shanhai/Nanjing real trajectory。它们共同满足 P9 的可复核分层证据，但不替代真人判断或多次 Provider benchmark。

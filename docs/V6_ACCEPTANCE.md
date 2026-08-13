@@ -192,3 +192,31 @@ Coding agent 不能替真人回答。V6 产品验收前提供给试玩者：
 5. 如果重新开始一条 Worldline，你最想改变的是哪个“判断”？
 
 尚未收集答案；这不是 PASS。
+
+## Final repair acceptance — r11 (2026-08-13)
+
+本节是对本文较早 `worldline-558ea78dc4154343` 记录的最新补充；较早记录保留为历史证据，不覆盖本次结果。r11 使用独占临时 SQLite、Hermes Home、产品端口 `127.0.0.1:18786` 和 Gateway `127.0.0.1:18886`，真实 Worldline 为 `worldline-f44420f2821e42b3`。
+
+### Real business chain
+
+- Human 在真实产品页面进入吴三桂，提交非空中文 Course，Leave 后再次进入；Course、判断历史和 `BACKGROUND/REOPEN/HOLD` 语义持续存在。
+- 六个真实 Hermes Lifetime Profile 完成 fresh-session wake。脱敏 Ledger 摘要：`DELIBERATION_COMMITTED=25`、`ATTENTION_EVALUATED=32`、`DECISION_HORIZON_HELD=6`、`DECISION_HORIZON_REVISED=13`、`MESSAGE_DISPATCHED=8`、`MESSAGE_DELIVERED=8`、`OPERATION_STARTED=7`、`OPERATION_COMPLETED=7`、`OFFER_PROPOSED=1`、`OFFER_ACCEPTED=1`、`AGREEMENT_CREATED=1`、`MOMENT_COMMITTED=13`。
+- 山海关 `WINDOW_EXPIRED_DEFERRED` 在 tick 5 结算；南京真实主体通过 `convene_recognition_assembly`、潞王入场、公开支持 Offer/Agreement 和 `formalize_lu_regency` 在 tick 14 结算为 `LU_RECOGNIZED`；南方随后经真实产品 Human Han 的两项操作与统一 local/global clock 在 tick 18 结算为 `JIANGBEI_COORDINATION`。
+- Seal 回执为 `VOLUME_SEALED`，boundary code 为 `structural_boundary`，Worldline 为 `SEALED/ARCHIVED`；六条 bindings 为 `REVOKED`。Profile 目录为空，Gateway owner 与 18786/18886 监听均不存在。完整临时目录已移动到 `/Users/koala/.Trash/chronicle-v6-live.r11-complete-20260813`，未进入 Git。
+
+### Browser read-back
+
+在产品端口重启后，浏览器实际打开 `/archive`，看到“已封存”和时刻 `18`；打开公共回看并选择吴三桂，页面显示其判断从“先守住山海关，等关外回信再决定出兵”到后续维持的回看。页面文本没有 Profile、Session、Memory、Wake、Runtime 等内部术语；Phase 11 已有 1440/1280/768/390 no-overflow、空 warn/error 日志证据，r11 补充了同一 real Volume 的 Archive read-back。
+
+### Final proof-gate matrix
+
+| Gate | Final status | Ground |
+| --- | --- | --- |
+| P6 Continuous Agency | PASS | deterministic restart/controller tests，加上 r11 的 Human Course、Leave/re-entry、Wu `BACKGROUND → REOPEN → HOLD` 与 fresh Session |
+| P7 Attention | PASS | r11 同一 Ledger 的 World/Knowledge/Attention/Deliberation trace；Wu 的无关事实没有 Wake，结构压力才打开 Wake |
+| P8 Bounded Agency | PASS | deterministic ownership/causal/transport/privacy/retry/restart tests，加上 real Offer/Agreement、独立主体与 revoked cleanup |
+| P9 Strong-Agent Game | PASS（分层证据） | Perfect Wait、Canonicality、Role-State deterministic probes；r11 同一真实 Volume 的 Shanhai/Nanjing continuous trajectory；不宣称 paired-model benchmark |
+
+Phase 9 的四项 ablation 当前均由 `tests/test_v6_harness_ablation.py` 执行并通过：one-action、authored maneuver、prompt-complexity Host boundary、fixed-pressure Pack/Host boundary。后两项的结论是保留协议提示与来源 pressure，不把 Host/Pack 结果写成 Provider 策略质量实验。
+
+最终工程状态仍不包含 V5 P5 或 V6 真人产品问卷的答案；这两项继续为 `CANDIDATE/UNCOLLECTED`，没有被 coding agent 代答。

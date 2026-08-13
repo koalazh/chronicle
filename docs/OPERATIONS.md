@@ -139,3 +139,7 @@ Phase 10 已有一条隔离浏览器流程，覆盖 V5 shell 的首页、World�
 每次 acceptance 记录只保留可复核且不含 Secret 的信息：commit、命令、退出码、validator 摘要、临时资源范围、Profile/Session 数量、事件类型、tick、状态和失败边界。不要保存 API key、Profile token、完整模型 response、private prompt 或原始 `runtime.env`。
 
 逐项矩阵和 P0–P5 当前结果见 [docs/V5_ACCEPTANCE.md](V5_ACCEPTANCE.md)。
+
+### 2026-08-13 final r11 cleanup record
+
+最新隔离 run 使用产品 `18786`、Gateway `18886` 和临时 Hermes Home/SQLite；Seal 后先核对 `VOLUME_SEALED`/`SEALED`/`ARCHIVED` 与六条 `REVOKED` bindings，再停止产品端并检查精确 owner。Profile 目录为空、owner 文件不存在、18786/18886 无监听；临时目录移动到 `/Users/koala/.Trash/chronicle-v6-live.r11-complete-20260813`，可恢复且未写入仓库。未知 Gateway `18851` 未被触碰。

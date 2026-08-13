@@ -167,3 +167,7 @@ V5 product router 的 live Agent Wake 现在由 `HermesVolumeActorDriver` 执行
 ## V5 不做的架构扩张
 
 当前架构不引入 generic history DSL、universal visualization DSL、Agent Director、Agent Team coordinator、free A2A mind-to-mind、relationship score/trust meter、Theory-of-Mind graph、skill extraction、cross-Lifetime skill sharing、cross-Worldline Profile sharing、daily forced tick、Agent observability dashboard、LLM World Master/Judge 或完整战斗模拟器。
+
+## V6 final live trace
+
+r11 的 `worldline-f44420f2821e42b3` 证明同一 `VOLUME` 根下的六个 Lifetime Profile、fresh Session、frozen Perspective、Attention、Deliberation、Operation、Offer/Agreement、Resolution、Archive 和 Seal 仍由上述同一 Host/Global Clock 链连接；未增加平行运行时。Seal 后 bindings `REVOKED`，Profile/MCP/Gateway cleanup 只针对该 Worldline。

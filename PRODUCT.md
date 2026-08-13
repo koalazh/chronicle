@@ -88,3 +88,7 @@ V5 代码已经提供 Volume/API/Archive 的确定性合同和前端 product she
 - [V5 验收记录](docs/V5_ACCEPTANCE.md)：逐条 acceptance evidence、P0–P5 和 blocker。
 - [V6 实施与验收](docs/V6_IMPLEMENTATION.md)、[V6 验收记录](docs/V6_ACCEPTANCE.md)：Phase 0–12 证据、真人验收边界和最终挑战记录。
 - [历史与视野](docs/HISTORY.md)：史料、争议、建模假设和信息盲区。
+
+## V6 final product evidence
+
+2026-08-13 的 r11 real Hermes Volume 在同一产品对象中留下了 Course、等待、结构性现实、HOLD/REVISE、公开后果与封存回看；吴三桂的 Archive 回看可见原判断持续到山海关压力后仍被重新检查。该记录只说明一次真实轨迹和产品边界，不把模型稳定性或真人主观体验写成自动化结论。

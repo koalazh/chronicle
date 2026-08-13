@@ -144,3 +144,19 @@ selected Lifetime replay 仍必须由用户显式选择；公共回看不会加�
 V6 迁移语义在一条隔离 real Hermes Volume 上完成复核：六个 Lifetime 的既有 Profile/binding 仍由 Volume Runtime 持有；Course、Knowledge、Attention、Deliberation、Human controller handoff、Archive 与 Seal 没有新增平行表或 Runtime。`worldline-558ea78dc4154343` 的消息抵达、背景事实、相关现实重开与 7 次真实 Deliberation 均落在同一 global clock 与 append-only Ledger 中。
 
 本次只使用临时 SQLite、Hermes Home 和 loopback Gateway；封存后 bindings 为 `REVOKED`，所属 Profiles、MCP entries、Gateway owner 与 `18882` 监听均清理。该记录证明当前迁移在真实 Volume 链上可运行；Provider 的跨运行稳定性和真人产品回答仍不是迁移结论。
+
+## Final repair migration boundary — 2026-08-13
+
+本轮没有新增 schema、Horizon 表、Runtime 或 Subject registry。修复只收敛到三条既有边界：
+
+1. 同一主体的多个同 tick Wake 以 exact `wake_id` 区分 intent event，保持一次 Wake 一次 proposal 与 atomic moment；
+2. 延迟激活 Crisis 的 Operation/Investigation 使用 Crisis local clock 做 precheck 和 revalidation，再投影到 Volume global clock；
+3. `URGENT` Nanjing pressure 不会把合法首个 procedure affordance 错误裁掉。
+
+### Phase 9 final ablation result
+
+`tests/test_v6_harness_ablation.py` 现有四项测试均通过。one-action 与 authored maneuver 保留；prompt-complexity 在 Host schema 层比较简化/完整 proposal，fixed-pressure 在 Pack/Host 层比较保留/移除来源 pressure，均显示删除会丢失安全或结构性边界。它们是 scaffold 是否可删除的 bounded 结论，不是 Provider 成功率、重试率或策略质量 benchmark；因此不删除协议提示、固定压力或永久 invariant。
+
+### Phase 12 final live boundary
+
+`worldline-f44420f2821e42b3` 的 r11 运行证明 Course、Knowledge、Attention、Deliberation、Offer/Agreement、Operation、Resolution、Archive、Seal 和 cleanup 在同一 Volume ledger 中协作。山海关、南京继统和南方整饬的 settlement 由现有统一时钟与 resolver gate 产生；迟激活南方 Action 的 local/global tick 转换已由 live operation 和 source-bound regression 同时验证。Seal 后六条 binding 为 `REVOKED`，所属 Profile 目录、Gateway owner 和任务端口均已清理。该证据仍只代表一次隔离 real Hermes 轨迹，真人问卷与跨运行稳定性保持未收集。

@@ -85,18 +85,30 @@ def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     assert inhabited.json()["world"]["current_life"]["inhabited"] is True
     desk = client.get(f"/api/worldlines/{worldline_id}/desk")
     assert desk.status_code == 200
-    assert {"arrivals", "known", "uncertainty", "current_plan", "active_obligations"} <= set(
-        desk.json()["desk"]
-    )
+    desk_fields = set(desk.json()["desk"])
+    assert {
+        "uncertainty",
+        "current_course",
+        "since_last_deliberation",
+        "why_now",
+        "binding_reality",
+        "reconsideration",
+    } <= desk_fields
+    assert not {
+        "arrivals",
+        "known",
+        "current_plan",
+        "active_obligations",
+        "position",
+        "role",
+    } & desk_fields
     desk_payload = desk.json()
     desk_text = str(desk_payload)
     assert "c002" not in desk_text
     assert "c003" not in desk_text
     assert "c010" not in desk_text
-    assert any(
-        item["text"].startswith("三种叙述均将吴三桂")
-        for item in desk_payload["desk"]["arrivals"]
-    )
+    assert desk_payload["desk"]["since_last_deliberation"] == []
+    assert any(item["text"].startswith("你现在在山海关") for item in desk_payload["desk"]["binding_reality"])
 
     continued = client.post(f"/api/worldlines/{worldline_id}/continue")
     assert continued.status_code == 200

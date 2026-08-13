@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 
-const productPages = new Set(["volume", "world", "follow", "desk", "archive", "ending"]);
+const productPages = new Set(["volume", "world", "follow", "desk", "archive"]);
 
 export function route() {
   const value = location.hash.replace(/^#\/?/, "");
@@ -21,7 +21,11 @@ export function route() {
   }
   if (page === "world" && state.active?.inhabited_lifetime_id) {
     state.page = "desk";
-    state.notice = "请先交还当前 Life，再回到世界。";
+    state.notice = "请先交还这一生，再回到世界。";
+    return;
+  }
+  if (page === "world" && state.active?.status !== "ACTIVE") {
+    state.page = "archive";
     return;
   }
   if (productPages.has(page)) {
@@ -33,8 +37,10 @@ export function route() {
 
 export function go(page) {
   if (page === "world" && state.active?.inhabited_lifetime_id) {
-    state.notice = "请先交还当前 Life，再回到世界。";
+    state.notice = "请先交还这一生，再回到世界。";
     page = "desk";
+  } else if (page === "world" && state.active?.status !== "ACTIVE") {
+    page = "archive";
   }
   location.hash = `#/${page}`;
 }

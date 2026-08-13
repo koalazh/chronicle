@@ -38,15 +38,18 @@ def test_frontend_uses_the_v6_product_language_and_ia():
         assert forbidden not in index
 
     for required in (
-        "Volume",
-        "World",
-        "Follow",
-        "Life Desk",
-        "Archive",
+        "甲申",
+        "世界",
+        "当前人物",
+        "过去",
         "开始这一卷",
         "继续这一卷",
-        "此刻哪里值得我去活？",
-        "进入这段人生",
+        "现在什么还没有定下来？",
+        "让世界继续",
+        "走近",
+        "接过这段人生",
+        "参考草稿",
+        "交还给世界",
         'data-action="inhabit"',
         'data-action="leave-life"',
         "/api/worldlines",
@@ -75,6 +78,13 @@ def test_frontend_keeps_a_small_mutation_lock_and_boot_error_state():
         'data-action="retry-boot"',
     ):
         assert required in source
+
+
+def test_frontend_notices_do_not_block_life_actions():
+    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert ".notice-stack" in styles
+    assert "pointer-events: none" in styles
 
 
 def test_frontend_captures_the_human_judgment_before_busy_rerender():
@@ -121,7 +131,7 @@ def test_frontend_does_not_render_internal_ids_as_product_copy():
         "item.observation",
         "archiveKindText",
         "archiveStatusText",
-        "卷册边界",
+        "这一卷最后成了什么？",
         "judgmentHistoryMarkup",
         "判断回看",
     ):
@@ -131,7 +141,7 @@ def test_frontend_does_not_render_internal_ids_as_product_copy():
 def test_frontend_routes_only_formal_v6_pages():
     router = (ROOT / "web" / "router.js").read_text(encoding="utf-8")
 
-    for required in ("volume", "world", "follow", "desk", "archive", "ending", "goFollow"):
+    for required in ("volume", "world", "follow", "desk", "archive", "goFollow"):
         assert required in router
-    for forbidden in ("crisis", "watch", "takeover", "compare", "settlement"):
+    for forbidden in ("ending", "crisis", "watch", "takeover", "compare", "settlement"):
         assert forbidden not in router.lower()

@@ -50,15 +50,16 @@ function judgmentHistoryMarkup(items) {
 }
 
 function chrome(content, { compact = false } = {}) {
+  const inLife = Boolean(state.active?.inhabited_lifetime_id);
+  const worldOpen = state.active?.status === "ACTIVE" && !inLife;
   const nav = [
-    ["volume", "卷册"],
-    ...(state.active?.inhabited_lifetime_id ? [] : [["world", "世界"]]),
-    ["archive", "封存"],
+    ...(worldOpen ? [["world", "世界"]] : inLife ? [["desk", "当前人物"]] : []),
+    ["archive", "过去"],
   ];
   return `
     <header class="topbar">
       <button class="brand" data-page="volume" aria-label="返回甲申卷册">
-        <span class="brand-seal">甲</span><span>甲申 · 活历史</span>
+        <span class="brand-seal">甲</span><span>甲申</span>
       </button>
       <nav class="main-nav" aria-label="主要页面">
         ${nav.map(([page, label]) => `<button data-page="${page}" aria-current="${state.page === page ? "page" : "false"}">${label}</button>`).join("")}
@@ -70,12 +71,12 @@ function chrome(content, { compact = false } = {}) {
 }
 
 function volumeHomePage() {
-  const active = state.active?.kind === "VOLUME";
+  const active = state.active?.kind === "VOLUME" && state.active.status === "ACTIVE";
   const volume = state.volume || {};
   return chrome(`
     <section class="volume-hero">
       <div class="hero-mast">
-        <p class="kicker">Volume · ${text(volume.native_period || "崇祯十七年")}</p>
+        <p class="kicker">甲申 · ${text(volume.native_period || "崇祯十七年")}</p>
         <h1>甲申</h1>
         <p class="hero-subtitle">${text(volume.subtitle || "崇祯十七年")}</p>
       </div>
@@ -106,42 +107,23 @@ function surfaceMarkup(knot) {
   return `<div class="surface-lines">${entities.map((entity) => `<span><strong>${text(entity.display_name || "相关对象")}</strong> · ${text(entity.state_label || "状态未明")}</span>`).join("")}</div>`;
 }
 
-function phaseText(value) {
-  return { OPEN: "正在收紧", AFTERMATH: "余波仍在", RESOLUTION_PENDING: "结果将至", SETTLED: "已经留下结果" }[value] || "正在收紧";
-}
-
 function archiveKindText(value) {
   return value === "VOLUME" ? "卷册" : "历史记录";
 }
 
 function archiveStatusText(value) {
-  return { SEALED: "已封存", ACTIVE: "展开中", ARCHIVED: "已归档" }[value] || "已封存";
+  return { SEALED: "已经成为过去", ACTIVE: "展开中", ARCHIVED: "已经成为过去" }[value] || "已经成为过去";
 }
 
-function knotMarkup(knot, index) {
+function questionMarkup(question) {
   return `
-    <article class="knot-card">
-      <div class="folio">${String(index + 1).padStart(2, "0")}</div>
-      <div>
-        <p class="kicker">${text(phaseText(knot.phase))}</p>
-        <h3>${text(knot.title)}</h3>
-        <p>${text(knot.subtitle)}</p>
-        ${surfaceMarkup(knot)}
-      </div>
-    </article>
-  `;
-}
-
-function questionMarkup(question, index) {
-  return `
-    <article class="knot-card">
-      <div class="folio">${String(index + 1).padStart(2, "0")}</div>
+    <article class="question-entry">
       <div>
         <p class="kicker">尚未定下</p>
         <h3>${text(question.title)}</h3>
         <p>${text(question.subtitle)}</p>
         ${surfaceMarkup(question)}
-        <div class="people-grid question-people">${(question.participants || []).map(personMarkup).join("")}</div>
+        <div class="people-inline">${(question.participants || []).map(personMarkup).join("")}</div>
       </div>
     </article>
   `;
@@ -155,14 +137,14 @@ function realityMarkup(items) {
 function personMarkup(person) {
   const canEnter = person.available || person.inhabited;
   return `
-    <article class="person-card">
+    <article class="person-entry">
       <div>
         <span class="column-label">${person.inhabited ? "当前在席" : canEnter ? "可以接近" : "暂不适合"}</span>
-        <h3>${text(person.display_name)}</h3>
+        <strong>${text(person.display_name)}</strong>
         <p>${text(person.location?.display_name || "位置未明")}</p>
         <small>${text((person.availability_reasons || []).join(" · ") || "这段人生尚未进入可见的未决处")}</small>
       </div>
-      <button class="${canEnter ? "secondary" : "quiet"}" data-action="follow" data-lifetime-id="${text(person.id)}" ${canEnter ? "" : "disabled"}>${person.inhabited ? "回到书案" : "跟随这段人生"}</button>
+      <button class="${canEnter ? "secondary" : "quiet"}" data-action="follow" data-lifetime-id="${text(person.id)}" ${canEnter ? "" : "disabled"}>${person.inhabited ? "回到这一生" : "走近"}</button>
     </article>
   `;
 }
@@ -173,23 +155,22 @@ function worldPage() {
   return chrome(`
     <section class="run-header">
       <div>
-        <p class="kicker">World · ${text(world.volume?.native_period || "甲申")}</p>
-        <h1>此刻哪里值得我去活？</h1>
+        <p class="kicker">甲申 · ${text(world.volume?.native_period || "崇祯十七年")}</p>
+        <h1>现在什么还没有定下来？</h1>
         <p>第 ${text(world.tick)} 个时刻 · ${text(world.volume?.subtitle || "崇祯十七年")}</p>
       </div>
-      <div class="run-actions"><span class="day-count">${text(world.open_questions?.length || 0)}<small>件未决</small></span></div>
     </section>
     <section class="world-section">
-      <div class="section-heading"><span>现在还没有定下的事</span><h2>谁正在这些问题里</h2></div>
-      <div class="knot-grid">${(world.open_questions || []).map(questionMarkup).join("") || `<p class="empty-copy">眼前没有新的事情需要你介入。</p>`}</div>
+      <div class="section-heading"><span>未决的事</span><h2>谁正在这些事情里</h2></div>
+      <div class="question-list">${(world.open_questions || []).map(questionMarkup).join("") || `<p class="empty-copy">眼前没有新的事情需要你介入。</p>`}</div>
     </section>
     <section class="world-section">
       <div class="section-heading"><span>已经成为现实</span><h2>世界留下了什么</h2></div>
       ${realityMarkup(world.present_reality)}
     </section>
     <div class="continue-bar">
-      <div><span>世界还在向前</span><small>下一次推进只落在已有的真实触发上。</small></div>
-      <button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>继续看下去</button>
+      <div><span>让世界继续</span><small>下一次推进只落在已经存在的真实触发上。</small></div>
+      <button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>让世界继续</button>
     </div>
   `);
 }
@@ -201,23 +182,23 @@ function followPage() {
   const inhabited = state.active?.inhabited_lifetime_id === life.id;
   return chrome(`
     <section class="actor-title">
-      <p class="kicker">Follow · ${text(life.location?.display_name || "位置未明")}</p>
+      <p class="kicker">这一生 · ${text(life.location?.display_name || "位置未明")}</p>
       <h1>${text(life.display_name)}</h1>
-      <p>这里只记录外部可见的行动、位置与结果，不替你打开这段人生的内里。</p>
+      <p>先看这段人生如何走到这里；真正需要判断时，再接过它的下一步。</p>
       <div class="hero-actions">
-        ${inhabited ? `<button class="primary" data-page="desk">回到书案</button>` : `<button class="primary" data-action="inhabit" data-lifetime-id="${text(life.id)}" ${life.available && !state.busy ? "" : "disabled"}>进入这段人生</button>`}
-        <button class="secondary" data-page="world">返回世界</button>
+        ${inhabited ? `<button class="primary" data-page="desk">回到书案</button>` : `<button class="primary" data-action="inhabit" data-lifetime-id="${text(life.id)}" ${life.available && !state.busy ? "" : "disabled"}>接过这段人生</button>`}
+        <button class="secondary" data-page="${inhabited ? "desk" : "world"}">${inhabited ? "回到书案" : "返回世界"}</button>
       </div>
     </section>
     <section class="follow-trace">
-      <div class="section-heading"><span>外部轨迹</span><h2>这段人生如何走到这里</h2></div>
+      <div class="section-heading"><span>公开轨迹</span><h2>这段人生如何走到这里</h2></div>
       <ol class="trace-list">${(follow.trace || []).map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind)}</strong>${event.declaration ? `<p>${text(event.declaration)}</p>` : ""}</div></li>`).join("") || `<li class="empty-copy">还没有可见轨迹。</li>`}</ol>
     </section>
   `);
 }
 
 function deskPage() {
-  if (!state.desk) return chrome(`<div class="empty-page inline"><p class="kicker">Life Desk</p><h1>还没有接过一段人生。</h1><button class="secondary" data-page="world">回到世界</button></div>`, { compact: true });
+  if (!state.desk) return chrome(`<div class="empty-page inline"><p class="kicker">这一生</p><h1>还没有接过一段人生。</h1><button class="secondary" data-page="world">回到世界</button></div>`, { compact: true });
   const desk = state.desk.desk || {};
   const life = state.desk.lifetime || {};
   const whyNow = desk.why_now || {};
@@ -238,7 +219,7 @@ function deskPage() {
           <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断">${text(state.draftValue ?? state.draft?.draft ?? "")}</textarea>
           <div class="draft-tools"><span id="draft-status">${text(state.draftStatus || "参考草稿 · 可直接修改")}</span><button class="quiet" type="button" data-action="draft-again">换个想法</button><button class="quiet" type="button" data-action="clear-draft">清空</button></div>
           <div class="decision-actions">
-            <button class="primary wide" type="submit" data-judgment-action="${firstJudgment ? "CHANGE" : "CHANGE"}" ${state.busy ? "disabled" : ""}>${firstJudgment ? "留下这个判断" : "改主意"}</button>
+            <button class="primary wide" type="submit" data-judgment-action="CHANGE" ${state.busy ? "disabled" : ""}>${firstJudgment ? "留下这个判断" : "改主意"}</button>
             ${firstJudgment ? `<button class="secondary wide" type="submit" data-judgment-action="WAIT" ${state.busy ? "disabled" : ""}>暂时不定</button>` : `<button class="secondary wide" type="submit" data-judgment-action="KEEP" ${state.busy ? "disabled" : ""}>仍照这样办</button>`}
           </div>
         </form>
@@ -254,15 +235,14 @@ function deskPage() {
   `;
   return chrome(`
     <section class="run-header">
-      <div><p class="kicker">Life Desk · ${text(life.location?.display_name || "位置未明")}</p><h1>${text(life.display_name)}</h1><p>你暂时拥有的是这段人生的下一步，不是这个人的全部。</p></div>
-      <div class="run-actions"><button class="secondary" data-action="leave-life" ${state.busy ? "disabled" : ""}>离开这段人生</button></div>
+      <div><p class="kicker">这一生 · ${text(life.location?.display_name || "位置未明")}</p><h1>${text(life.display_name)}</h1><p>你接过的是这段人生的下一步，不是这个人的全部。</p></div>
     </section>
     <section class="desk-layout">
       <div class="desk-main">
-        <div class="desk-surface"><div class="section-heading"><span>此前</span><h2>你准备这样办</h2></div>${listMarkup(desk.current_course || desk.current_plan, "desk-list")}</div>
-        <div class="desk-surface"><div class="section-heading"><span>自那以后</span><h2>真正进入你所知的变化</h2></div>${listMarkup(desk.since_last_deliberation || desk.arrivals, "desk-list")}</div>
+        <div class="desk-surface"><div class="section-heading"><span>此前</span><h2>你准备这样办</h2></div>${listMarkup(desk.current_course, "desk-list")}</div>
+        <div class="desk-surface"><div class="section-heading"><span>自那以后</span><h2>后来进入你所知的变化</h2></div>${listMarkup(desk.since_last_deliberation, "desk-list")}</div>
         ${whyNow.open ? `<div class="known-strip"><span>为什么现在重新问你</span><p>${text(whyNow.text || "现实改变了此前判断的基础。")}</p>${listMarkup(whyNow.facts, "desk-list")}</div>` : ""}
-        <div class="desk-surface"><div class="section-heading"><span>不能忽略</span><h2>已经不能当作没发生的事</h2></div>${listMarkup(desk.binding_reality || desk.active_obligations, "desk-list")}</div>
+        <div class="desk-surface"><div class="section-heading"><span>不能忽略</span><h2>已经不能当作没发生的事</h2></div>${listMarkup(desk.binding_reality, "desk-list")}</div>
         <div class="known-strip"><span>仍然没有答案</span>${listMarkup(desk.uncertainty, "desk-list")}</div>
       </div>
       <aside class="decision-desk">
@@ -284,10 +264,10 @@ function archivePage() {
     const selectedLife = detail.selected_life;
     return chrome(`
       <section class="actor-title">
-        <p class="kicker">卷册边界 · ${text(detail.volume?.native_period || "甲申")}</p>
-        <h1>这一卷已经成为过去。</h1>
+        <p class="kicker">过去 · ${text(detail.volume?.native_period || "甲申")}</p>
+        <h1>这一卷最后成了什么？</h1>
         <p>${text(ending.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
-        <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回封存卷册</button></div>
+        <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回过去</button></div>
       </section>
       <section class="world-section archive-reality">
         <div class="section-heading"><span>最后成为现实</span><h2>这一卷最后留下了什么</h2></div>
@@ -299,7 +279,7 @@ function archivePage() {
       </section>
       <section class="world-section">
         <div class="section-heading"><span>人生回看</span><h2>从一段人生回看</h2></div>
-        <div class="people-grid">${(detail.lives || []).map((person) => `<article class="person-card"><div><span class="column-label">${text(person.display_name)}</span><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
+        <div class="people-inline archive-people">${(detail.lives || []).map((person) => `<article class="person-entry archive-person"><div><strong>${text(person.display_name)}</strong><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
         ${state.selectedReplayLifetime && selectedLife ? `
           <section class="judgment-history-section">
             <div class="section-heading"><span>判断回看</span><h3>${text(selectedLife.display_name)} 的判断如何变化</h3></div>
@@ -313,21 +293,12 @@ function archivePage() {
   }
   return chrome(`
     <section class="actor-title">
-      <p class="kicker">Archive</p><h1>封存卷册</h1>
-      <p>封存只发生在整卷历史到达边界之后。当前卷册仍在展开时，世界与人生都保持可回到的状态。</p>
+      <p class="kicker">过去</p><h1>已经成为过去的卷册</h1>
+      <p>只有整卷历史走到边界，公共现实与各段人生才会在这里留下可回看的过去。</p>
     </section>
     <section class="archive-list">
-      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(archiveKindText(row.kind))}</span><h2>${text(row.volume_title || state.volume?.title || "封存卷册")}</h2><p>${text(archiveStatusText(row.status))}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p><button class="secondary" data-action="open-archive" data-worldline-id="${text(row.id)}">打开回看</button></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经封存的卷册。</p>${state.active ? `<button class="secondary" data-page="world">返回世界</button>` : ""}</div>`}
+      ${rows.length ? rows.map((row) => `<article class="archive-row"><div><span>${text(archiveKindText(row.kind))}</span><h2>${text(row.volume_title || state.volume?.title || "甲申")}</h2><p>${text(archiveStatusText(row.status))}</p></div><div><span>时刻</span><p>${text(row.current_tick ?? "—")}</p><button class="secondary" data-action="open-archive" data-worldline-id="${text(row.id)}">打开回看</button></div></article>`).join("") : `<div class="empty-page inline"><p class="empty-copy">当前还没有已经成为过去的卷册。</p>${state.active ? `<button class="secondary" data-page="${state.active.inhabited_lifetime_id ? "desk" : "world"}">${state.active.inhabited_lifetime_id ? "回到这一生" : "返回世界"}</button>` : ""}</div>`}
     </section>
-  `, { compact: true });
-}
-
-function endingPage() {
-  if (state.archiveDetail) {
-    return chrome(`<section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷已经走到边界。</h1><p class="empty-copy">${text(state.archiveDetail.ending?.message || "公共历史与各段人生已经被封存。")}</p><button class="secondary" data-page="archive">打开 Archive</button></section>`, { compact: true });
-  }
-  return chrome(`
-    <section class="empty-page inline"><p class="kicker">卷册边界</p><h1>这一卷仍未走到边界。</h1><p class="empty-copy">局部结果会先留在世界中；整卷封存与后知事实将在卷册真正结束时出现。</p><button class="secondary" data-page="world">返回世界</button></section>
   `, { compact: true });
 }
 
@@ -336,7 +307,7 @@ function render() {
     root.innerHTML = `<div class="boot-state"><span>甲申</span>${state.error ? `<p>卷册暂时打不开</p><small>${text(state.error)}</small><button class="secondary" data-action="retry-boot">重新打开</button>` : `<p>正在打开卷册</p>`}</div>`;
     return;
   }
-  const pages = { volume: volumeHomePage, world: worldPage, follow: followPage, desk: deskPage, archive: archivePage, ending: endingPage };
+  const pages = { volume: volumeHomePage, world: worldPage, follow: followPage, desk: deskPage, archive: archivePage };
   root.innerHTML = (pages[state.page] || volumeHomePage)();
 }
 
@@ -345,6 +316,10 @@ async function loadWorld() {
   if (state.active.inhabited_lifetime_id) {
     state.page = "desk";
     return loadDesk();
+  }
+  if (state.active.status !== "ACTIVE") {
+    state.page = "archive";
+    return loadArchive();
   }
   state.world = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/world`);
 }
@@ -428,7 +403,6 @@ async function loadPageData() {
   if (state.page === "follow") await loadFollow();
   if (state.page === "desk") await loadDesk();
   if (state.page === "archive") await loadArchive();
-  if (state.page === "ending" && state.selectedArchive) await loadArchive();
 }
 
 async function refreshActive() {
@@ -465,7 +439,7 @@ async function continueWorld() {
   if (result.worldline?.status === "SEALED") {
     state.selectedArchive = result.worldline.id;
     state.notice = "这一卷已经走到边界。历史从这里进入过去。";
-    go("ending");
+    go("archive");
     await loadPageData();
     return;
   }

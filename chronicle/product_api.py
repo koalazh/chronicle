@@ -391,7 +391,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         active = active_host()
         row = volume_row(active, worldline_id)
         if row["status"] == "ACTIVE" and row.get("human_lifetime_id"):
-            raise HTTPException(status_code=409, detail="请先交还当前 Life，再回到世界。")
+            raise HTTPException(status_code=409, detail="请先交还这一生，再回到世界。")
         try:
             return projection(active).public_world(worldline_id)
         except Exception as exc:

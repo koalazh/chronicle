@@ -1156,13 +1156,7 @@ class ProductProjection:
             "lifetime": self.public_lifetime(row, state["projection"], lifetime),
             "desk": {
                 "decision_state": decision_state,
-                "position": context.get("position", {}),
-                "arrivals": self.product_items(context.get("recent_knowledge", [])),
-                "known": self.product_items(context.get("relevant_evidence", [])),
                 "uncertainty": self.product_items(context.get("known_uncertainty", [])),
-                "current_plan": self.product_items(context.get("current_plan", [])),
-                "active_obligations": self.product_items(context.get("active_obligations", [])),
-                "role": context.get("role", {}),
                 "current_course": self.desk_course_items(context),
                 "since_last_deliberation": self.product_items(
                     (context.get("since_last_deliberation") or {}).get("facts", [])

@@ -105,7 +105,7 @@ def test_active_life_requires_handoff_before_realtime_world_read(app_config):
         active = client.get("/api/worldlines/active")
 
         assert blocked.status_code == 409
-        assert blocked.json()["detail"] == "请先交还当前 Life，再回到世界。"
+        assert blocked.json()["detail"] == "请先交还这一生，再回到世界。"
         assert active.status_code == 200
         assert active.json()["world"] is None
         assert active.json()["world_access"] == "HANDOFF_REQUIRED"

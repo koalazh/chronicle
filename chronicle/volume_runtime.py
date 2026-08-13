@@ -4499,6 +4499,11 @@ class VolumeRuntime:
                 "and cannot be resumed with the current runtime."
             )
 
+    def assert_content_compatible(self, row: dict[str, Any]) -> None:
+        """Check content identity for a read without changing runtime state."""
+
+        self._assert_content_compatible(row)
+
     def _transition_controller(
         self,
         worldline_id: str,
@@ -4522,7 +4527,58 @@ class VolumeRuntime:
             raise VolumeRuntimeConflict(str(exc)) from exc
 
     def _assert_presence_allowed(self, worldline_id: str, target_seat: str) -> None:
-        """Prevent switching into another participant while a knot is unresolved."""
+        """Enforce the same read-only eligibility contract used by Product."""
+
+        eligibility = self.presence_eligibility(worldline_id, target_seat)
+        if eligibility["allowed"]:
+            return
+        messages = {
+            "ANOTHER_LIFETIME_HELD": "another Lifetime is already inhabited; leave it first",
+            "NO_CURRENT_QUESTION": "this Lifetime is not part of a current unresolved question",
+            "ACTIVE_CRISIS_PRESENCE_LOCK": (
+                "this active Crisis Instance already has another inhabited Participant; "
+                "settle it before switching sides"
+            ),
+            "LIFETIME_NOT_ACTIVE": "Lifetime is not active",
+            "WORLDLINE_NOT_ACTIVE": "Volume Worldline is sealed",
+        }
+        raise VolumeRuntimeConflict(
+            messages.get(str(eligibility["reason_code"]), "this Lifetime is not currently available")
+        )
+
+    def presence_eligibility(
+        self, worldline_id: str, lifetime_id: str
+    ) -> dict[str, Any]:
+        """Return truthful, read-only eligibility for entering one Lifetime."""
+
+        row = self.db.worldline(worldline_id)
+        if row is None or row["kind"] != WorldlineKind.VOLUME.value:
+            raise VolumeRuntimeError("VOLUME Worldline not found")
+        self._assert_content_compatible(row)
+        target = self.db.worldline_lifetime_by_id(worldline_id, lifetime_id)
+        if target is None:
+            target = self.db.worldline_lifetime(worldline_id, lifetime_id)
+        if target is None:
+            raise VolumeRuntimeError("Lifetime not found")
+
+        target_id = str(target["id"])
+        target_seat = str(target["seat"])
+        base = {
+            "allowed": False,
+            "reason_code": "",
+            "lifetime_id": target_id,
+            "seat": target_seat,
+        }
+        if row["status"] != WorldlineStatus.ACTIVE.value:
+            return {**base, "reason_code": "WORLDLINE_NOT_ACTIVE"}
+
+        current_id = str(row.get("human_lifetime_id") or "")
+        if current_id in {target_id, target_seat}:
+            return {**base, "allowed": True, "reason_code": "ALREADY_INHABITED"}
+        if current_id:
+            return {**base, "reason_code": "ANOTHER_LIFETIME_HELD"}
+        if target.get("status") != "ACTIVE":
+            return {**base, "reason_code": "LIFETIME_NOT_ACTIVE"}
 
         active_statuses = {"ACTIVE", "RESOLUTION_PENDING", "AFTERMATH"}
         active_instances = [
@@ -4530,8 +4586,39 @@ class VolumeRuntime:
             for instance in self.db.crisis_instances(worldline_id)
             if instance["status"] in active_statuses
         ]
-        if not active_instances:
-            return
+        participant_crisis_ids = [
+            str(instance["crisis_id"])
+            for instance in active_instances
+            if target_seat in set(self.pack.pack(instance["crisis_id"]).participant_ids)
+        ]
+        projection_record = self.db.worldline_snapshot(
+            worldline_id, int(row["current_tick"])
+        )
+        if projection_record is None:
+            raise VolumeRuntimeError("Volume Worldline snapshot is missing")
+        active_instance_ids = {str(instance["crisis_id"]) for instance in active_instances}
+        for reference in self.pack.volume.crises:
+            if reference.id in active_instance_ids or target_seat not in set(
+                reference.participants or self.pack.pack(reference.id).participant_ids
+            ):
+                continue
+            instance = next(
+                (
+                    item
+                    for item in self.db.crisis_instances(worldline_id)
+                    if str(item["crisis_id"]) == reference.id
+                ),
+                None,
+            )
+            if instance is None or instance["status"] != CrisisInstanceStatus.DORMANT.value:
+                continue
+            if self._envelope_decision(
+                worldline_id, reference.id, projection_record["projection"]
+            )["status"] == "ELIGIBLE":
+                participant_crisis_ids.append(reference.id)
+        if not participant_crisis_ids:
+            return {**base, "reason_code": "NO_CURRENT_QUESTION"}
+
         inhabited_seats = {
             str(event.get("payload", {}).get("seat") or event.get("seat_id") or "")
             for event in self.db.worldline_events(worldline_id)
@@ -4539,14 +4626,21 @@ class VolumeRuntime:
         }
         for instance in active_instances:
             participants = set(self.pack.pack(instance["crisis_id"]).participant_ids)
-            if target_seat not in participants:
+            if str(instance["crisis_id"]) not in participant_crisis_ids:
                 continue
             prior_other = (inhabited_seats & participants) - {target_seat}
             if prior_other:
-                raise VolumeRuntimeConflict(
-                    "this active Crisis Instance already has another inhabited Participant; "
-                    "settle it before switching sides"
-                )
+                return {
+                    **base,
+                    "reason_code": "ACTIVE_CRISIS_PRESENCE_LOCK",
+                    "blocking_crisis_id": str(instance["crisis_id"]),
+                }
+        return {
+            **base,
+            "allowed": True,
+            "reason_code": "AVAILABLE",
+            "current_crisis_ids": participant_crisis_ids,
+        }
 
     def _controller_response(self, result: dict[str, Any]) -> dict[str, Any]:
         lifetime = result["lifetime"]

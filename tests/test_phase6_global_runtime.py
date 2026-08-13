@@ -143,7 +143,11 @@ def test_active_crisis_presence_protects_one_unresolved_knot(host):
     host.volume_runtime.leave(worldline_id)
 
     runtime.settle_crisis(worldline_id, "before-shanhaiguan")
-    host.volume_runtime.inhabit(worldline_id, wu["id"])
+    eligibility = host.volume_runtime.presence_eligibility(worldline_id, wu["id"])
+    assert eligibility["allowed"] is False
+    assert eligibility["reason_code"] == "NO_CURRENT_QUESTION"
+    with pytest.raises(VolumeRuntimeConflict, match="not part of a current"):
+        host.volume_runtime.inhabit(worldline_id, wu["id"])
 
 
 def test_global_clock_queues_offscreen_wake_without_inventing_agent_intent(host):

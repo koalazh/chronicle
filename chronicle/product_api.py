@@ -22,6 +22,7 @@ V6_CONTINUE_MAX_WALL_SECONDS = 30.0
 V6_MEANINGFUL_BOUNDARY_EVENTS = frozenset(
     {"CRISIS_ACTIVATED", "CRISIS_CHECKPOINT_ENTERED", "CRISIS_SETTLED"}
 )
+PRODUCT_CONTENT_MISMATCH = "这份卷册由不同版本的内容创建，当前版本无法可靠回放。"
 
 
 class ProductWorldlineRequest(BaseModel):
@@ -64,6 +65,10 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 status_code=503,
                 detail="Live Volume runtime is unavailable; reconcile it before continuing",
             )
+        try:
+            active.volume_runtime.assert_content_compatible(row)
+        except VolumeRuntimeConflict as exc:
+            raise HTTPException(status_code=409, detail=PRODUCT_CONTENT_MISMATCH) from exc
         return row
 
     def public_worldline(row: dict[str, Any]) -> dict[str, Any]:
@@ -210,21 +215,21 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         lifetime_id = str(lifetime["seat"])
         definition = active.volume_runtime.pack.lifetimes.get(lifetime_id)
         current_location = str(projection.get("positions", {}).get(lifetime_id, ""))
-        active_ids = set(projection.get("active_crisis_ids", []))
-        participant_ids = {
-            participant_id
-            for crisis_id in active_ids
-            for participant_id in projection.get("crisis_instances", {})
-            .get(crisis_id, {})
-            .get("participants", [])
+        eligibility = active.volume_runtime.presence_eligibility(
+            str(row["id"]), lifetime_id
+        )
+        reason_copy = {
+            "AVAILABLE": "此刻有未决之事把他推到前台。",
+            "ALREADY_INHABITED": "你正在这段人生里。",
+            "ANOTHER_LIFETIME_HELD": "你已经从另一个人的位置进入过这一件事。",
+            "ACTIVE_CRISIS_PRESENCE_LOCK": "你已经从另一个人的位置进入过这一件事。",
+            "NO_CURRENT_QUESTION": "此刻还没有未决之事把他推到前台。",
+            "LIFETIME_NOT_ACTIVE": "这段人生暂时无法进入。",
+            "WORLDLINE_NOT_ACTIVE": "这一卷已经走到过去。",
         }
-        reasons: list[str] = []
-        if definition and (definition.initial_knowledge or definition.genesis_context):
-            reasons.append("有过去")
-        if lifetime_id in participant_ids:
-            reasons.append("有杠杆")
-        if active_ids:
-            reasons.append("有未决")
+        reasons = [
+            reason_copy.get(str(eligibility["reason_code"]), "此刻还没有可以进入的未决之事。")
+        ]
         return {
             "id": lifetime_id,
             "display_name": (definition.display_name if definition else "一段人生"),
@@ -232,7 +237,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 "id": current_location,
                 "display_name": location_name(active, current_location),
             },
-            "available": bool(active_ids and lifetime_id in participant_ids),
+            "available": bool(eligibility["allowed"]),
             "availability_reasons": reasons,
             "inhabited": lifetime_id
             == lifetime_seat(active, str(row["id"]), str(row.get("human_lifetime_id") or "")),
@@ -1168,6 +1173,7 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
         row = active.db.active_volume_worldline()
         if row is None:
             return {"active": None}
+        row = volume_row(active, str(row["id"]))
         return {
             "active": public_worldline(row),
             "world": public_world(active, row["id"]),
@@ -1176,13 +1182,12 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
     @router.get("/worldlines")
     async def worldlines() -> dict[str, Any]:
         active = active_host()
-        return {
-            "worldlines": [
-                public_worldline(row)
-                for row in active.db.worldlines(status="SEALED")
-                if row["kind"] == WorldlineKind.VOLUME.value
-            ]
-        }
+        sealed: list[dict[str, Any]] = []
+        for row in active.db.worldlines(status="SEALED"):
+            if row["kind"] != WorldlineKind.VOLUME.value:
+                continue
+            sealed.append(public_worldline(volume_row(active, str(row["id"]))))
+        return {"worldlines": sealed}
 
     @router.get("/worldlines/{worldline_id}/world")
     async def world(worldline_id: str) -> dict[str, Any]:

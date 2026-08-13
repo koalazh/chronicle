@@ -63,6 +63,9 @@ class GatewayController:
                     return owner
                 self._stop_verified(owner)
                 return self._start(run_id, runtime_epoch)
+            if self._owner_process_matches(owner):
+                self._stop_verified(owner)
+                return self._start(run_id, runtime_epoch)
             if (
                 owner.get("config_fingerprint") != self.config_fingerprint()
                 and self._owner_process_is_live(owner)
@@ -211,17 +214,24 @@ class GatewayController:
         return False
 
     def _owner_matches(self, owner: dict[str, Any], run_id: str, runtime_epoch: str) -> bool:
+        if (
+            owner.get("run_id") != run_id
+            or owner.get("runtime_epoch") != runtime_epoch
+            or owner.get("config_fingerprint") != self.config_fingerprint()
+            or not self._owner_process_matches(owner)
+        ):
+            return False
+        return True
+
+    def _owner_process_matches(self, owner: dict[str, Any]) -> bool:
         try:
             pid = int(owner["pid"])
         except (KeyError, TypeError, ValueError):
             return False
         if (
             owner.get("version") != 1
-            or owner.get("run_id") != run_id
-            or owner.get("runtime_epoch") != runtime_epoch
             or not self._same_path(owner.get("root"), self.config.root)
             or not self._same_path(owner.get("hermes_home"), self.config.hermes_home)
-            or owner.get("config_fingerprint") != self.config_fingerprint()
             or not self._process_alive(pid)
             or owner.get("process_start_marker") != self._process_start_marker(pid)
         ):

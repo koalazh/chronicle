@@ -7,8 +7,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from chronicle.config import OPENAI_CODEX_BASE_URL
 from chronicle.hermes import (
     _python_executable,
+    _sync_profile_config,
+    _sync_profile_env,
     _write_gateway_env,
 )
 from chronicle.world_mcp import mcp
@@ -50,6 +53,40 @@ def test_mcp_commands_use_canonical_interpreter_path(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "executable", str(alias))
 
     assert _python_executable() == str(canonical)
+
+
+def test_oauth_profile_config_uses_codex_provider_without_api_key(app_config):
+    profile_home = app_config.hermes_home / "profiles" / "oauth-profile"
+    profile_home.mkdir(parents=True)
+    (profile_home / "config.yaml").write_text("{}\n", encoding="utf-8")
+    oauth_config = replace(
+        app_config,
+        llm_auth_mode="oauth",
+        llm_base_url=OPENAI_CODEX_BASE_URL,
+        llm_api_key="",
+        llm_model="gpt-5.6-luna",
+        llm_api_mode="responses",
+    )
+
+    _sync_profile_env(profile_home, "profile-key", oauth_config)
+    _sync_profile_config(
+        profile_home,
+        oauth_config,
+        Path(__file__).parents[1] / "hermes" / "chronicle-actor" / "config.yaml",
+    )
+
+    profile = yaml.safe_load((profile_home / "config.yaml").read_text(encoding="utf-8"))
+    assert profile["model"]["provider"] == "openai-codex"
+    assert profile["providers"] == {
+        "openai-codex": {
+            "base_url": OPENAI_CODEX_BASE_URL,
+            "model": "gpt-5.6-luna",
+            "api_mode": "codex_responses",
+        }
+    }
+    profile_env = (profile_home / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=" not in profile_env
+    assert "CHRONICLE_LLM_API_KEY=" not in profile_env
 
 
 @pytest.mark.asyncio

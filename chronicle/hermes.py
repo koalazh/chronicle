@@ -17,7 +17,12 @@ from urllib.parse import urlparse
 import httpx
 import yaml
 
-from .config import AppConfig, generate_secret
+from .config import (
+    LLM_AUTH_MODE_OAUTH,
+    OPENAI_CODEX_BASE_URL,
+    AppConfig,
+    generate_secret,
+)
 
 ACTOR_DISTRIBUTION = "hermes/chronicle-actor"
 
@@ -224,6 +229,21 @@ def _run_cli(config: AppConfig, args: list[str], timeout: float = 30) -> subproc
     )
 
 
+def codex_oauth_status(config: AppConfig) -> tuple[bool, str]:
+    """Check Hermes-managed Codex OAuth without exposing credentials."""
+
+    try:
+        result = _run_cli(config, ["auth", "status", "openai-codex"], timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"OAuth status unavailable: {type(exc).__name__}."
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout or result.stderr).lower()
+    if result.returncode == 0 and "openai-codex: logged in" in output:
+        return True, "Hermes openai-codex OAuth is authenticated."
+    if "logged out" in output:
+        return False, "Hermes openai-codex OAuth is not authenticated."
+    return False, "Hermes openai-codex OAuth status could not be verified."
+
+
 def cli_version(config: AppConfig) -> str:
     try:
         result = _run_cli(config, ["--version"])
@@ -365,14 +385,28 @@ def _sync_profile_env(
         {
             "API_SERVER_KEY": profile_key,
             "API_SERVER_ENABLED": "false",
-            "OPENAI_API_KEY": config.llm_api_key,
-            "OPENAI_BASE_URL": config.llm_base_url,
             "OPENAI_MODEL": config.llm_model,
-            "CHRONICLE_LLM_API_KEY": config.llm_api_key,
-            "CHRONICLE_LLM_BASE_URL": config.llm_base_url,
             "CHRONICLE_LLM_MODEL": config.llm_model,
+            "CHRONICLE_LLM_AUTH_MODE": config.llm_auth_mode,
         }
     )
+    if config.llm_auth_mode == LLM_AUTH_MODE_OAUTH:
+        for key in (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "CHRONICLE_LLM_API_KEY",
+            "CHRONICLE_LLM_BASE_URL",
+        ):
+            values.pop(key, None)
+    else:
+        values.update(
+            {
+                "OPENAI_API_KEY": config.llm_api_key,
+                "OPENAI_BASE_URL": config.llm_base_url,
+                "CHRONICLE_LLM_API_KEY": config.llm_api_key,
+                "CHRONICLE_LLM_BASE_URL": config.llm_base_url,
+            }
+        )
     values.update(extra or {})
     _write_profile_env(profile_home, values)
 
@@ -390,10 +424,27 @@ def _sync_profile_config(
         raise RuntimeError(f"{profile_home.name} is missing config.yaml")
     values = yaml.safe_load(template.read_text(encoding="utf-8")) or {}
     values.setdefault("model", {})["default"] = config.llm_model
-    provider = values.setdefault("providers", {}).setdefault("chronicle-openai", {})
-    provider["base_url"] = config.llm_base_url
-    provider["model"] = config.llm_model
-    provider["api_mode"] = config.llm_api_mode
+    provider_name = config.llm_provider
+    values["model"]["provider"] = provider_name
+    providers = values.setdefault("providers", {})
+    for stale_provider in ("chronicle-openai", "openai-codex"):
+        providers.pop(stale_provider, None)
+    provider = {
+        "base_url": (
+            OPENAI_CODEX_BASE_URL
+            if config.llm_auth_mode == LLM_AUTH_MODE_OAUTH
+            else config.llm_base_url
+        ),
+        "model": config.llm_model,
+        "api_mode": (
+            "codex_responses"
+            if config.llm_auth_mode == LLM_AUTH_MODE_OAUTH
+            else config.llm_api_mode
+        ),
+    }
+    if config.llm_auth_mode != LLM_AUTH_MODE_OAUTH:
+        provider["key_env"] = "OPENAI_API_KEY"
+    providers[provider_name] = provider
     if world_tools:
         values.setdefault("agent", {})["max_turns"] = 8
         values.setdefault("platform_toolsets", {})["api_server"] = [

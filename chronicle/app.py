@@ -14,9 +14,18 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .config import AppConfig, is_loopback_host, load_config, write_runtime_env
+from .config import (
+    LLM_AUTH_MODE_API_KEY,
+    LLM_AUTH_MODE_OAUTH,
+    OPENAI_CODEX_BASE_URL,
+    AppConfig,
+    is_loopback_host,
+    load_config,
+    write_runtime_env,
+)
 from .crisis import CrisisPack, CrisisValidationError, VolumePack
 from .doctor import doctor
+from .hermes import codex_oauth_status
 from .host import ChronicleHost
 from .product_api import build_product_router
 from .subject_continuity import SubjectContinuityError
@@ -26,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 class SetupRequest(BaseModel):
-    base_url: str = Field(max_length=2048)
+    auth_mode: Literal["api_key", "oauth"] = LLM_AUTH_MODE_API_KEY
+    base_url: str = Field(default="", max_length=2048)
     api_key: str = Field(default="", max_length=4096)
     model: str = Field(max_length=256)
     api_mode: Literal["chat_completions", "responses"] = "chat_completions"
@@ -114,12 +124,22 @@ def create_app(
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
                     values[key] = value
+        auth_mode = values.get("CHRONICLE_LLM_AUTH_MODE", base_config.llm_auth_mode).strip().lower()
+        if auth_mode == LLM_AUTH_MODE_OAUTH:
+            base_url = OPENAI_CODEX_BASE_URL
+            api_key = ""
+            api_mode = "responses"
+        else:
+            base_url = values.get("CHRONICLE_LLM_BASE_URL", base_config.llm_base_url).rstrip("/")
+            api_key = values.get("CHRONICLE_LLM_API_KEY", base_config.llm_api_key)
+            api_mode = values.get("CHRONICLE_LLM_API_MODE", base_config.llm_api_mode)
         return replace(
             base_config,
-            llm_base_url=values.get("CHRONICLE_LLM_BASE_URL", base_config.llm_base_url).rstrip("/"),
-            llm_api_key=values.get("CHRONICLE_LLM_API_KEY", base_config.llm_api_key),
+            llm_auth_mode=auth_mode,
+            llm_base_url=base_url,
+            llm_api_key=api_key,
             llm_model=values.get("CHRONICLE_LLM_MODEL", base_config.llm_model),
-            llm_api_mode=values.get("CHRONICLE_LLM_API_MODE", base_config.llm_api_mode),
+            llm_api_mode=api_mode,
             llm_reasoning_effort=values.get(
                 "CHRONICLE_LLM_REASONING_EFFORT", base_config.llm_reasoning_effort
             ),
@@ -202,6 +222,8 @@ def create_app(
         hermes_ready = readiness["status"] == "READY"
         return {
             "setup_required": not active.llm_configured,
+            "auth_mode": active.llm_auth_mode,
+            "provider": active.llm_provider,
             "base_url": active.llm_base_url,
             "model": active.llm_model,
             "api_mode": active.llm_api_mode,
@@ -250,7 +272,16 @@ def create_app(
 
     @app.post("/api/setup/test")
     async def setup_test(request: SetupRequest) -> dict[str, Any]:
-        if not request.base_url or not request.model:
+        if not request.model:
+            return {"ok": False, "message": "Model is required."}
+        if request.auth_mode == LLM_AUTH_MODE_OAUTH:
+            authenticated, detail = codex_oauth_status(current_config())
+            return {
+                "ok": authenticated,
+                "message": detail,
+                "model": request.model,
+            }
+        if not request.base_url:
             return {"ok": False, "message": "Base URL and model are required."}
         if not request.api_key:
             return {"ok": False, "message": "An API key is required for the connection test."}
@@ -289,22 +320,35 @@ def create_app(
     async def setup_configure(request: SetupRequest) -> dict[str, Any]:
         active = current_config()
         assert_archivist_open(host())
-        if not request.base_url or not request.model:
-            raise HTTPException(status_code=400, detail="Base URL and model are required")
-        url_error = _provider_url_error(request.base_url)
-        if url_error:
-            raise HTTPException(status_code=400, detail=url_error)
-        existing = active.llm_api_key
-        api_key = request.api_key or existing
-        if not api_key:
-            raise HTTPException(status_code=400, detail="API key is required")
-        values = {
-            "CHRONICLE_LLM_BASE_URL": request.base_url.rstrip("/"),
-            "CHRONICLE_LLM_API_KEY": api_key,
-            "CHRONICLE_LLM_MODEL": request.model,
-            "CHRONICLE_LLM_API_MODE": request.api_mode,
-            "CHRONICLE_LLM_REASONING_EFFORT": request.reasoning_effort,
-        }
+        if not request.model:
+            raise HTTPException(status_code=400, detail="Model is required")
+        if request.auth_mode == LLM_AUTH_MODE_OAUTH:
+            values = {
+                "CHRONICLE_LLM_AUTH_MODE": LLM_AUTH_MODE_OAUTH,
+                "CHRONICLE_LLM_BASE_URL": OPENAI_CODEX_BASE_URL,
+                "CHRONICLE_LLM_API_KEY": "",
+                "CHRONICLE_LLM_MODEL": request.model,
+                "CHRONICLE_LLM_API_MODE": "responses",
+                "CHRONICLE_LLM_REASONING_EFFORT": request.reasoning_effort,
+            }
+        else:
+            if not request.base_url:
+                raise HTTPException(status_code=400, detail="Base URL and model are required")
+            url_error = _provider_url_error(request.base_url)
+            if url_error:
+                raise HTTPException(status_code=400, detail=url_error)
+            existing = active.llm_api_key
+            api_key = request.api_key or existing
+            if not api_key:
+                raise HTTPException(status_code=400, detail="API key is required")
+            values = {
+                "CHRONICLE_LLM_AUTH_MODE": LLM_AUTH_MODE_API_KEY,
+                "CHRONICLE_LLM_BASE_URL": request.base_url.rstrip("/"),
+                "CHRONICLE_LLM_API_KEY": api_key,
+                "CHRONICLE_LLM_MODEL": request.model,
+                "CHRONICLE_LLM_API_MODE": request.api_mode,
+                "CHRONICLE_LLM_REASONING_EFFORT": request.reasoning_effort,
+            }
         try:
             write_runtime_env(active, values)
         except ValueError as exc:
@@ -312,6 +356,8 @@ def create_app(
         configured = current_config()
         return {
             "configured": True,
+            "auth_mode": configured.llm_auth_mode,
+            "provider": configured.llm_provider,
             "model": configured.llm_model,
             "api_mode": configured.llm_api_mode,
             "reasoning_effort": configured.llm_reasoning_effort,

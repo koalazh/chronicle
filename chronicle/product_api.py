@@ -1127,23 +1127,37 @@ def build_product_router(host_factory: Callable[[], ChronicleHost]) -> APIRouter
                 detail="正式卷册需要真实运行模式；fixture 只在开发模式开放。",
             )
         try:
-            created = await asyncio.to_thread(
-                active.volume_runtime.create,
-                runtime_mode="live" if request.live else "fixture",
-            )
-            await asyncio.to_thread(
-                active.volume_runtime.reconcile_crisis_envelopes,
-                created["worldline"]["id"],
-            )
-            if request.live:
+            existing = active.db.active_volume_worldline()
+            if existing is not None:
+                resumable = request.live and existing.get("runtime_mode") == "live" and existing.get(
+                    "runtime_phase"
+                ) in {"BOOTSTRAPPING", "RECONCILING", "FAILED"}
+                if not resumable:
+                    raise VolumeRuntimeConflict("an active Volume Worldline already exists")
                 await asyncio.to_thread(
                     active.volume_runtime.ensure_live_runtime,
-                    created["worldline"]["id"],
+                    str(existing["id"]),
                 )
+                worldline_id = str(existing["id"])
+            else:
+                created = await asyncio.to_thread(
+                    active.volume_runtime.create,
+                    runtime_mode="live" if request.live else "fixture",
+                )
+                worldline_id = str(created["worldline"]["id"])
+                await asyncio.to_thread(
+                    active.volume_runtime.reconcile_crisis_envelopes,
+                    worldline_id,
+                )
+                if request.live:
+                    await asyncio.to_thread(
+                        active.volume_runtime.ensure_live_runtime,
+                        worldline_id,
+                    )
             return {
-                "worldline": public_worldline(active.db.worldline(created["worldline"]["id"]) or {}),
-                "world": public_world(active, created["worldline"]["id"]),
-                "lifetimes": public_lifetimes(active, created["worldline"]["id"]),
+                "worldline": public_worldline(active.db.worldline(worldline_id) or {}),
+                "world": public_world(active, worldline_id),
+                "lifetimes": public_lifetimes(active, worldline_id),
             }
         except Exception as exc:
             raise classify_error(exc) from exc

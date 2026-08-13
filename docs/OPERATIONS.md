@@ -65,8 +65,68 @@ fixture 只能替代模型输出；它仍必须走 Host、Global Tick、message 
 
 1. 独立 SQLite 数据库和独立 Hermes Home；
 2. loopback Gateway 与本卷册专属 Profile/binding；
-3. 可访问的模型 Provider、受控 API key 和明确的模型名；
+3. 下面两种认证方式之一，以及明确的模型名；
 4. `chronicle doctor` 返回 `READY`，并通过 Profile 路由、key isolation、toolset 和 fresh Session 检查。
+
+配置文件的职责不同，不能用一个文件代替另一个：
+
+- 根目录 `.env` 是 Chronicle 的基础配置来源；
+- `.chronicle/runtime.env` 是 Chronicle Web 配置保存的运行配置，并覆盖基础配置；
+- `.chronicle/hermes-home/.env` 是 Hermes Gateway/Profile/MCP 的运行环境；
+- OAuth token 由 Hermes 存在同一个 Hermes Home 的 credential store 中，不能通过写入 `.env` 生成，也不应把 token 写进仓库文件。
+
+因此，“模型和认证模式已写入 `.env`”只表示 Chronicle 知道要走哪条路径；它不等于 OAuth 已经完成登录。
+
+### 4.1 API key
+
+`.env` 中保持默认模式并填写兼容 OpenAI API 的 Provider：
+
+```dotenv
+CHRONICLE_LLM_AUTH_MODE=api_key
+CHRONICLE_LLM_BASE_URL=https://your-provider.example/v1
+CHRONICLE_LLM_API_KEY=your-api-key
+CHRONICLE_LLM_MODEL=your-model
+CHRONICLE_LLM_API_MODE=chat_completions
+```
+
+### 4.2 Hermes OAuth
+
+OAuth 模式不把模型 API key 写入 Profile env。先在与 Chronicle 相同的 Hermes Home 中完成一次 Hermes 的 Codex 登录：
+
+```bash
+HERMES_HOME="$PWD/.chronicle/hermes-home" \
+  hermes auth add openai-codex --type oauth
+
+HERMES_HOME="$PWD/.chronicle/hermes-home" \
+  hermes auth status openai-codex
+```
+
+看到 `openai-codex: logged in` 后，不需要在每次启动前重复登录。后续直接运行：
+
+```bash
+uv run chronicle start --host 127.0.0.1 --port 8711
+```
+
+再在另一个终端检查：
+
+```bash
+uv run chronicle doctor
+```
+
+`HERMES_HOME=...` 是给 Hermes CLI 指定项目级 credential store；`CHRONICLE_HERMES_HOME` 是 Chronicle 的应用配置名，Hermes CLI 不会自动把它当作 `HERMES_HOME` 读取。
+
+在根目录 `.env` 中设置，或通过 Chronicle Web 配置写入 `.chronicle/runtime.env`：
+
+```dotenv
+CHRONICLE_LLM_AUTH_MODE=oauth
+CHRONICLE_LLM_MODEL=gpt-5.6-luna
+CHRONICLE_LLM_API_MODE=responses
+CHRONICLE_LLM_REASONING_EFFORT=max
+```
+
+Chronicle 会把每个 Lifetime Profile 配置为 Hermes 内置的 `openai-codex` provider 和 `codex_responses`，OAuth 状态由该 Hermes Home 管理；`CHRONICLE_LLM_API_KEY` 和 `CHRONICLE_LLM_BASE_URL` 在此模式下不会作为模型凭据使用。
+
+如果服务可以打开但真实 Profile 调用失败，先看 `doctor`：`llm_config=true, llm_auth=false` 表示运行参数已经配置，但这个项目 Hermes Home 没有有效 OAuth token。ChatGPT/Codex 客户端的登录态不会自动成为 Hermes credential；OAuth 登录只需首次完成一次，除非 token 被注销或失效。
 
 `doctor`、Gateway health、Profile route 或一次 chat 只能证明前置能力。它们不能单独证明 Human↔Hermes continuity、跨主体因果、消息抵达、结算或 Archive。
 

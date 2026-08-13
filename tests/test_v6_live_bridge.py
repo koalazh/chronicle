@@ -282,6 +282,32 @@ def test_failed_live_reconcile_blocks_reads_and_mutations(
     assert sealed.status_code == 503
 
 
+def test_failed_live_volume_can_be_resumed_by_create_request(app_config, monkeypatch):
+    config = replace(app_config, dev=False)
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute(
+            "UPDATE worldlines SET runtime_mode = 'live', runtime_phase = 'FAILED' WHERE id = ?",
+            (worldline_id,),
+        )
+    resumed: list[str] = []
+
+    def fake_ensure(runtime, target):
+        resumed.append(target)
+        return runtime.db.set_volume_runtime_state(target, "READY")
+
+    monkeypatch.setattr("chronicle.volume_runtime.VolumeRuntime.ensure_live_runtime", fake_ensure)
+
+    client = TestClient(create_app(config))
+    response = client.post("/api/worldlines", json={"live": True})
+
+    assert response.status_code == 200
+    assert response.json()["worldline"]["id"] == worldline_id
+    assert resumed == [worldline_id]
+
+
 def test_volume_mcp_requires_exact_wake_when_one_lifetime_has_duplicate_wakes(
     app_config, monkeypatch, tmp_path: Path
 ):

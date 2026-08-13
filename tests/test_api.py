@@ -56,3 +56,25 @@ def test_setup_writes_a_server_side_masked_runtime(app_config, monkeypatch):
     assert response.json()["api_key"] == "••••••••••••"
     assert response.json()["runtime_file_mode"] == "0o600"
     assert client.get("/api/config").json()["setup_required"] is False
+
+
+def test_setup_configures_oauth_without_an_api_key(app_config):
+    client = TestClient(create_app(app_config))
+
+    response = client.post(
+        "/api/setup/configure",
+        json={
+            "auth_mode": "oauth",
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "max",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["auth_mode"] == "oauth"
+    assert response.json()["provider"] == "openai-codex"
+    assert response.json()["api_key"] == ""
+    config = client.get("/api/config").json()
+    assert config["setup_required"] is False
+    assert config["auth_mode"] == "oauth"
+    assert config["provider"] == "openai-codex"

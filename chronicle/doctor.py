@@ -12,6 +12,7 @@ from .crisis import VolumePack
 from .db import ChronicleDB, content_hash, stable_hash
 from .hermes import (
     cli_version,
+    codex_oauth_status,
     lifetime_world_server_name,
     probe,
     probe_mcp_tools,
@@ -119,8 +120,17 @@ def doctor(config: AppConfig) -> dict[str, Any]:
     add(
         "llm_config",
         runtime_ready,
-        "base URL, key and model configured" if runtime_ready else "setup required",
+        (
+            f"{config.llm_auth_mode} mode and model configured"
+            if runtime_ready
+            else "setup required"
+        ),
     )
+    if config.llm_auth_mode == "oauth":
+        oauth_ready, oauth_detail = codex_oauth_status(config)
+        add("llm_auth", oauth_ready, oauth_detail)
+    else:
+        add("llm_auth", True, "API key mode uses the configured provider key")
 
     if live_volume and hermes_ok and profiles:
         api_probe = probe(config, profiles)
@@ -170,6 +180,8 @@ def doctor(config: AppConfig) -> dict[str, Any]:
             "database": str(config.database_path),
             "hermes_home": str(config.hermes_home),
             "llm_configured": config.llm_configured,
+            "llm_auth_mode": config.llm_auth_mode,
+            "llm_provider": config.llm_provider,
             "profiles": profiles,
             "active_volume": str(active["id"]) if active else None,
         },

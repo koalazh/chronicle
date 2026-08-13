@@ -11,6 +11,11 @@ from typing import Mapping
 
 from dotenv import load_dotenv
 
+OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+LLM_AUTH_MODE_API_KEY = "api_key"
+LLM_AUTH_MODE_OAUTH = "oauth"
+LLM_AUTH_MODES = frozenset({LLM_AUTH_MODE_API_KEY, LLM_AUTH_MODE_OAUTH})
+
 
 def project_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -29,6 +34,14 @@ def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _llm_auth_mode(value: str | None) -> str:
+    mode = (value or LLM_AUTH_MODE_API_KEY).strip().lower()
+    if mode not in LLM_AUTH_MODES:
+        choices = ", ".join(sorted(LLM_AUTH_MODES))
+        raise ValueError(f"CHRONICLE_LLM_AUTH_MODE must be one of: {choices}")
+    return mode
 
 
 def is_loopback_host(value: str) -> bool:
@@ -53,6 +66,7 @@ class AppConfig:
     host: str
     port: int
     dev: bool
+    llm_auth_mode: str
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -62,7 +76,13 @@ class AppConfig:
 
     @property
     def llm_configured(self) -> bool:
+        if self.llm_auth_mode == LLM_AUTH_MODE_OAUTH:
+            return bool(self.llm_model)
         return bool(self.llm_base_url and self.llm_api_key and self.llm_model)
+
+    @property
+    def llm_provider(self) -> str:
+        return "openai-codex" if self.llm_auth_mode == LLM_AUTH_MODE_OAUTH else "chronicle-openai"
 
     @property
     def runtime_env_path(self) -> Path:
@@ -95,6 +115,16 @@ def load_config(root: Path | None = None, environ: Mapping[str, str] | None = No
     hermes_home = Path(env.get("CHRONICLE_HERMES_HOME", str(root / ".chronicle" / "hermes-home")))
     if not hermes_home.is_absolute():
         hermes_home = root / hermes_home
+    llm_auth_mode = _llm_auth_mode(env.get("CHRONICLE_LLM_AUTH_MODE"))
+    llm_model = env.get("CHRONICLE_LLM_MODEL", "").strip()
+    if llm_auth_mode == LLM_AUTH_MODE_OAUTH:
+        llm_base_url = OPENAI_CODEX_BASE_URL
+        llm_api_key = ""
+        llm_api_mode = "responses"
+    else:
+        llm_base_url = env.get("CHRONICLE_LLM_BASE_URL", "").rstrip("/")
+        llm_api_key = env.get("CHRONICLE_LLM_API_KEY", "")
+        llm_api_mode = env.get("CHRONICLE_LLM_API_MODE", "chat_completions").strip() or "chat_completions"
     return AppConfig(
         root=root,
         database_path=_path_from_database_url(db_url, root),
@@ -106,10 +136,11 @@ def load_config(root: Path | None = None, environ: Mapping[str, str] | None = No
         host=env.get("CHRONICLE_HOST", "127.0.0.1"),
         port=int(env.get("CHRONICLE_PORT", "8711")),
         dev=_bool(env.get("CHRONICLE_DEV")),
-        llm_base_url=env.get("CHRONICLE_LLM_BASE_URL", "").rstrip("/"),
-        llm_api_key=env.get("CHRONICLE_LLM_API_KEY", ""),
-        llm_model=env.get("CHRONICLE_LLM_MODEL", ""),
-        llm_api_mode=env.get("CHRONICLE_LLM_API_MODE", "chat_completions"),
+        llm_auth_mode=llm_auth_mode,
+        llm_base_url=llm_base_url,
+        llm_api_key=llm_api_key,
+        llm_model=llm_model,
+        llm_api_mode=llm_api_mode,
         llm_reasoning_effort=env.get("CHRONICLE_LLM_REASONING_EFFORT", ""),
         llm_timeout=float(env.get("CHRONICLE_LLM_TIMEOUT", "180")),
     )

@@ -77,6 +77,38 @@ def test_nanjing_urgent_pressure_keeps_the_first_procedure_affordance(host):
     assert "convene_recognition_assembly" in operation_ids
 
 
+def test_volume_operation_uses_crisis_local_tick_after_late_activation(host):
+    runtime = host.volume_runtime
+    worldline_id = runtime.create()["worldline"]["id"]
+    state = runtime._crisis_state(
+        "southern-consolidation",
+        runtime.pack.pack("southern-consolidation"),
+        activation_tick=14,
+    )
+    state["local_tick"] = 1
+    state["status"] = "ACTIVE"
+    projection = runtime.worldline(worldline_id)["projection"]
+    projection["active_crisis_ids"] = ["southern-consolidation"]
+    projection["crisis_instances"]["southern-consolidation"] = state
+    lifetime = runtime.db.worldline_lifetime(worldline_id, "han-zanzhou")
+    assert lifetime is not None
+
+    _payload, result = runtime._prepare_volume_operation(
+        lifetime,
+        {
+            "operation_definition_id": "draft-jiangbei-mandate",
+            "targets": ["jiangbei-mandate"],
+            "description": "将督师安排推进到公开文书。",
+        },
+        [("southern-consolidation", runtime.pack.pack("southern-consolidation"))],
+        runtime._action_projection(projection),
+        15,
+    )
+
+    assert result["status"] == "accepted"
+    assert result["expected_complete_tick"] == 16
+
+
 def test_role_state_swap_attention_policy_does_not_use_seat_name():
     course = {
         "status": "IN_FORCE",

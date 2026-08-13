@@ -2669,8 +2669,10 @@ class VolumeRuntime:
         if not question or len(question) > 1200:
             return payload, {"status": "rejected", "code": "invalid_question"}
         for crisis_id, pack in active_packs:
+            crisis_state = projection.get("crisis_instances", {}).get(crisis_id, {})
+            local_tick = int(crisis_state.get("local_tick", tick))
             request, code = pack.investigation_request(
-                lifetime["seat"], target, method, projection, tick
+                lifetime["seat"], target, method, projection, local_tick
             )
             if request is not None:
                 return (
@@ -2679,7 +2681,7 @@ class VolumeRuntime:
                         "status": "accepted",
                         "investigation_id": f"investigation-{uuid.uuid4().hex[:16]}",
                         "definition_id": request.definition.id,
-                        "expected_result_tick": request.expected_result_tick,
+                        "expected_result_tick": tick + request.expected_result_tick - local_tick,
                     },
                 )
             if code == "investigation_method_required" and not method:
@@ -2705,8 +2707,10 @@ class VolumeRuntime:
         if not description:
             return payload, {"status": "rejected", "code": "missing_description"}
         for crisis_id, pack in active_packs:
+            crisis_state = projection.get("crisis_instances", {}).get(crisis_id, {})
+            local_tick = int(crisis_state.get("local_tick", tick))
             request, code = pack.operation_request(
-                lifetime["seat"], definition_id, targets, projection, tick
+                lifetime["seat"], definition_id, targets, projection, local_tick
             )
             if request is not None:
                 return (
@@ -2715,7 +2719,7 @@ class VolumeRuntime:
                         "status": "accepted",
                         "operation_id": f"operation-{uuid.uuid4().hex[:16]}",
                         "definition_id": request.definition.id,
-                        "expected_complete_tick": request.expected_complete_tick,
+                        "expected_complete_tick": tick + request.expected_complete_tick - local_tick,
                         "target_map": request.target_map,
                         "input_state": request.input_state,
                     },

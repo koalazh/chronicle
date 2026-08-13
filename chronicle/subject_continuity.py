@@ -362,12 +362,13 @@ class LifetimeContextBuilder:
             overlay = pack.actor_by_id.get(seat)
             scoped_projection = copy.deepcopy(state)
             scoped_projection["positions"] = copy.deepcopy(projection.get("positions", {}))
+            local_tick = int(state.get("local_tick", tick))
             subject_affordances = {
                 "operations": pack.operation_affordances(
-                    seat, scoped_projection, tick
+                    seat, scoped_projection, local_tick
                 ),
                 "investigations": pack.investigation_affordances(
-                    seat, scoped_projection, tick
+                    seat, scoped_projection, local_tick
                 ),
                 "offer_terms": pack.offer_term_affordances(seat),
             }

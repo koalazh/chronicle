@@ -177,7 +177,8 @@ class HermesVolumeActorDriver:
                     "每次直接调用 chronicle-world 工具都必须带 wake_id，且逐字等于本次用户 payload 顶层的 wake_id；"
                     "wake_id 是内部 Wake 边界，不是 UI 字段，不得省略、改写或猜测。"
                     "REVISE 必须在 course.evidence_event_ids 引用冻结视角中可见的 event_id；没有证据时保持 HOLD。"
-                    "belief_updates 也只能引用冻结视角中可见的 evidence event_id。"
+                    "belief_updates 的每一项必须使用 subject、assessment、confidence、evidence_event_ids 四个字段；"
+                    "禁止使用 belief、text 或其他别名，且 evidence_event_ids 只能引用冻结视角中可见的 event_id。"
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
                     "如果工具返回 rejected 或错误，立即结束本次回答，不要改用第二个工具。"
                     "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
@@ -209,7 +210,14 @@ class HermesVolumeActorDriver:
                                 "evidence_event_ids": "required for Agent REVISE",
                             },
                             "open_dependencies": "typed list",
-                            "belief_updates": "optional evidence-backed list",
+                            "belief_updates": [
+                                {
+                                    "subject": "事实或判断对象",
+                                    "assessment": "基于当前证据的判断",
+                                    "confidence": "low|medium|high 或 0..1",
+                                    "evidence_event_ids": ["冻结视角中的 event_id"],
+                                }
+                            ],
                             "world_actions": "zero or one {tool, arguments}",
                         },
                         "commit_deliberation_tool_call": {

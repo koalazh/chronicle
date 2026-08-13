@@ -42,6 +42,14 @@ def test_live_wake_prompt_declares_required_logical_intent_arguments(app_config)
     assert "subject_affordances" in system_message["content"]
     assert "targets 的 options 的实体 id" in system_message["content"]
     assert "terms 必须是" in system_message["content"]
+    assert "subject、assessment、confidence、evidence_event_ids" in system_message["content"]
+    assert "禁止使用 belief、text 或其他别名" in system_message["content"]
+    assert payload["deliberation_schema"]["belief_updates"][0] == {
+        "subject": "事实或判断对象",
+        "assessment": "基于当前证据的判断",
+        "confidence": "low|medium|high 或 0..1",
+        "evidence_event_ids": ["冻结视角中的 event_id"],
+    }
     assert "wake_id" in system_message["content"]
     assert "立即结束本次回答" in system_message["content"]
 

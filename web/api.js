@@ -1,3 +1,5 @@
+import { state } from "./state.js";
+
 const INTERNAL_ERROR_MESSAGES = new Map([
   ["there are no due Subject Wakes to freeze", "当前这一刻没有需要你处理的下一步。"],
   ["freeze the current logical moment before staging intent", "当前这一刻还没有可以落笔的下一步。"],
@@ -20,6 +22,7 @@ export function userFacingErrorMessage(detail, status) {
 export async function api(path, options = {}) {
   const { timeoutMs = 180000, ...requestOptions } = options;
   const controller = new AbortController();
+  if (state.activity && !state.activity.controller) state.activity.controller = controller;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
@@ -38,5 +41,6 @@ export async function api(path, options = {}) {
     return payload;
   } finally {
     clearTimeout(timeout);
+    if (state.activity?.controller === controller) state.activity.controller = null;
   }
 }

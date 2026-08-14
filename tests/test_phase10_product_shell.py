@@ -45,6 +45,7 @@ def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config
     }
     assert payload["world"]["present_reality"] == []
     assert payload["world"]["current_life"] is None
+    assert payload["world"]["continuation"] == {"status": "available"}
     assert "lifetimes" not in payload
     assert not {"active_knots", "people", "public_facts"} & set(payload["world"])
 
@@ -122,6 +123,24 @@ def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     left = client.post(f"/api/worldlines/{worldline_id}/leave")
     assert left.status_code == 200
     assert left.json()["worldline"]["inhabited_lifetime_id"] == ""
+
+
+def test_product_world_reports_when_no_automatic_trigger_remains(app_config):
+    config = replace(app_config, dev=True)
+    with TestClient(create_app(config)) as client:
+        worldline_id = client.post("/api/worldlines", json={"live": False}).json()[
+            "worldline"
+        ]["id"]
+        result = None
+        for _ in range(4):
+            result = client.post(f"/api/worldlines/{worldline_id}/continue").json()
+            if result["continue_status"] == "no_future_trigger":
+                break
+
+        assert result is not None
+        assert result["continue_status"] == "no_future_trigger"
+        world = client.get(f"/api/worldlines/{worldline_id}/world").json()
+        assert world["continuation"] == {"status": "no_future_trigger"}
 
 
 def test_v6_product_shell_continues_after_agent_handoff(app_config):

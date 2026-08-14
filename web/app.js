@@ -56,6 +56,33 @@ function judgmentHistoryMarkup(items) {
     </li>`).join("")}</ol>`;
 }
 
+const ACTIVITY_COPY = {
+  start: ["正在展开这一卷", "先把第一幅世界铺到你面前。"],
+  continue: ["历史正在向前展开", "正在寻找下一个有意义的时刻。"],
+  decision: ["这一笔正在落入当前时刻", "正在核对判断与现实之间能发生的下一步。"],
+  reconsider: ["正在重新打开这份判断", "正在把新的现实带回书案。"],
+  leave: ["正在把这段人生交还给世界", "已经发生的事会保留，世界随后继续向前。"],
+  inhabit: ["正在把这一段人生交到你面前", "正在把当前需要判断的下一步交到你面前。"],
+  follow: ["正在寻找这段人生", "正在打开它可以被看见的公开轨迹。"],
+  draft: ["正在准备一份参考草稿", "这只是可修改的参考，不会替你落笔。"],
+  archive: ["正在打开过去", "正在整理可以公开回看的历史。"],
+};
+
+function activityMarkup() {
+  const activity = state.activity;
+  if (!activity) return "";
+  const copy = ACTIVITY_COPY[activity.kind] || ["正在展开这一页", "请稍候，当前操作还没有得到确定回音。"];
+  const reconciling = activity.phase === "reconciling";
+  const action = reconciling
+    ? `<button class="quiet activity-action" data-action="reconcile-activity">核对当前卷册</button>`
+    : `<button class="quiet activity-action" data-action="cancel-activity">停止等待并核对</button>`;
+  return `<section class="activity-banner ${reconciling ? "reconciling" : ""}" role="status" aria-live="polite" aria-busy="true">
+    <span class="activity-stamp" aria-hidden="true">卷</span>
+    <div class="activity-copy"><span class="column-label">正在进行</span><strong>${text(reconciling ? "请求结果尚未确认" : copy[0])}</strong><p>${text(activity.pendingText || (reconciling ? "这一笔可能已经改变卷册，先核对当前状态，不要重复提交。" : copy[1]))}</p></div>
+    ${action}
+  </section>`;
+}
+
 function chrome(content, { compact = false } = {}) {
   const inLife = Boolean(state.active?.inhabited_lifetime_id);
   const worldOpen = state.active?.status === "ACTIVE" && !inLife;
@@ -72,7 +99,7 @@ function chrome(content, { compact = false } = {}) {
         ${nav.map(([page, label]) => `<button data-page="${page}" aria-current="${state.page === page ? "page" : "false"}">${label}</button>`).join("")}
       </nav>
     </header>
-    <main class="main${compact ? " compact" : ""}">${content}</main>
+    <main class="main${compact ? " compact" : ""}">${activityMarkup()}${content}</main>
     ${(state.notice || state.error) ? `<div class="notice-stack" aria-live="polite">${state.notice ? `<p class="notice">${text(state.notice)}</p>` : ""}${state.error ? `<p class="notice error">${text(state.error)}</p>` : ""}</div>` : ""}
   `;
 }
@@ -161,6 +188,9 @@ function worldPage() {
   const world = state.world;
   const questions = world.open_questions || [];
   const reality = world.present_reality || [];
+  const continuationStatus = world.continuation?.status || state.lastContinueStatus || "";
+  const stalled = continuationStatus === "no_future_trigger"
+    && questions.length > 0;
   const worldSections = [
     questions.length ? `
       <section class="world-section">
@@ -182,9 +212,9 @@ function worldPage() {
       </div>
     </section>
     ${worldSections || `<p class="empty-copy world-empty">眼前没有新的事情需要你介入。</p>`}
-    <div class="continue-bar">
-      <div><span>让世界继续</span><small>下一次推进只落在已经存在的真实触发上。</small></div>
-      <button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>让世界继续</button>
+    <div class="continue-bar${stalled ? " paused" : ""}">
+      <div><span>${stalled ? "世界暂时停在这里" : "让世界继续"}</span><small>${stalled ? "当前没有下一处已经发生的触发。走近一段人生，在书案主动定一个方向。" : "下一次推进只落在已经存在的真实触发上。"}</small></div>
+      ${stalled ? `<div class="continue-actions"><button class="secondary" data-action="focus-people">走近一段人生</button><button class="quiet" data-action="continue-world" ${state.busy ? "disabled" : ""}>重新检查</button></div>` : `<button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>让世界继续</button>`}
     </div>
   `);
 }
@@ -437,12 +467,32 @@ function applyWorldline(result) {
   state.world = result.world || state.world;
 }
 
+function continueNotice(result) {
+  const ticks = Number(result.advanced_ticks || 0);
+  if (result.continue_status === "no_future_trigger") {
+    return ticks > 0
+      ? `世界已经向前走了 ${ticks} 个时刻；眼下没有下一处已经发生的触发。走近一段人生，在书案主动定一个方向。`
+      : "世界暂时没有下一处已经发生的触发。不是页面卡住；走近一段人生，在书案主动定一个方向。";
+  }
+  if (result.continue_status === "safety_cap") {
+    return `世界已经向前走了 ${ticks || 1} 个时刻，先停在这里整理这一段变化。`;
+  }
+  if (result.continue_status === "knot_boundary") {
+    return ticks > 0
+      ? `世界已经向前走了 ${ticks} 个时刻，停在一处仍需被看见的未决处。`
+      : "世界停在一处仍需被看见的未决处。";
+  }
+  return result.advanced ? "世界已经走到下一个有意义的时刻。" : "此刻没有需要推进的新事件。";
+}
+
 async function startVolume() {
   const result = await api("/api/worldlines", {
     method: "POST",
     body: JSON.stringify({ live: !state.config?.dev }),
   });
   applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
   state.notice = "这一卷已经展开。先看世界，或接过其中一段人生。";
   go("world");
   await loadPageData();
@@ -452,6 +502,8 @@ async function continueWorld() {
   if (!state.active?.id) return go("volume");
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/continue`, { method: "POST", body: "{}" });
   applyWorldline(result);
+  state.lastContinueStatus = result.continue_status || "";
+  state.lastContinueAdvancedTicks = Number(result.advanced_ticks || 0);
   if (result.worldline?.status === "SEALED") {
     state.selectedArchive = result.worldline.id;
     state.notice = "这一卷已经走到边界。历史从这里进入过去。";
@@ -464,7 +516,7 @@ async function continueWorld() {
     go("desk");
     await loadDesk();
   } else {
-    state.notice = result.advanced ? "世界已经走到下一个有意义的时刻。" : "此刻没有需要推进的新事件。";
+    state.notice = continueNotice(result);
     if (state.page === "desk") await loadDesk();
     else await loadWorld();
   }
@@ -476,6 +528,8 @@ async function inhabit(lifetimeId) {
     body: JSON.stringify({ lifetime_id: lifetimeId }),
   });
   applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
   state.selectedLifetime = lifetimeId;
   state.notice = "你接过了这段人生的下一步。";
   go("desk");
@@ -485,6 +539,8 @@ async function inhabit(lifetimeId) {
 async function leaveLife() {
   const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/leave`, { method: "POST", body: "{}" });
   applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
   state.desk = null;
   state.notice = "你已经离开书案，世界继续向前。";
   go("world");
@@ -498,6 +554,8 @@ async function submitDecision(action, value) {
     body: JSON.stringify(payload),
   });
   applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
   state.desk = result.desk || state.desk;
   state.notice = action === "WAIT" ? "你选择暂时不定；这一笔已经落入当前时刻。" : "这一笔已经落入当前时刻。";
   await loadDesk();
@@ -509,6 +567,8 @@ async function reconsider() {
     body: "{}",
   });
   applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
   state.desk = result.desk || state.desk;
   state.notice = "你主动重新考虑了这份判断。";
   go("desk");
@@ -536,17 +596,75 @@ function clearArchive() {
   render();
 }
 
-async function run(action) {
+function unknownRequest(error) {
+  return error?.name === "AbortError" || !error?.status || error.status >= 500;
+}
+
+function cancelActivity() {
+  const activity = state.activity;
+  if (!activity) return;
+  activity.phase = "reconciling";
+  activity.pendingText = "已停止等待，正在核对当前卷册；这次请求可能已经留下了变化。";
+  if (activity.controller) {
+    activity.controller.abort();
+    render();
+    return;
+  }
+  void reconcileActivity();
+}
+
+async function reconcileActivity() {
+  if (!state.activity || state.activity.reconciling) return;
+  state.activity.phase = "reconciling";
+  state.activity.reconciling = true;
+  state.activity.pendingText = "正在重新读取当前卷册，请以最新页面为准。";
+  state.error = "";
+  state.busy = true;
+  render();
+  try {
+    await refreshActive();
+    if (state.active?.status === "SEALED") {
+      state.selectedArchive = state.active.id;
+      state.page = "archive";
+    } else if (!state.active) {
+      state.page = "volume";
+    } else {
+      route();
+    }
+    await loadPageData();
+    state.notice = "已经重新读取当前卷册；请按当前页面确认下一步，不要重复提交。";
+    state.activity = null;
+  } catch (error) {
+    state.activity.reconciling = false;
+    state.error = error?.name === "AbortError" ? "核对当前卷册等待过久，请稍后再试。" : (error?.message || "当前卷册暂时无法核对。 ");
+  } finally {
+    state.busy = Boolean(state.activity);
+    render();
+  }
+}
+
+async function run(action, activity = null) {
   if (state.busy) return;
   state.busy = true;
   state.error = "";
+  state.activity = activity ? { ...activity, phase: "running", pendingText: "" } : null;
   render();
+  let keepActivity = false;
   try {
     await action();
   } catch (error) {
-    state.error = error?.name === "AbortError" ? "请求等待过久，请稍后重试。" : (error?.message || "这一页暂时没有回应。 ");
+    if (state.activity && unknownRequest(error)) {
+      state.activity.phase = "reconciling";
+      state.activity.pendingText = "请求结果尚未确认。请核对当前卷册后再决定是否继续。";
+      keepActivity = true;
+      state.error = "";
+    } else {
+      state.error = error?.name === "AbortError" ? "请求等待过久，请稍后重试。" : (error?.message || "这一页暂时没有回应。 ");
+    }
   } finally {
+    if (!keepActivity) state.activity = null;
     state.busy = false;
+    if (state.activity) state.busy = true;
     render();
   }
 }
@@ -555,23 +673,30 @@ root.addEventListener("click", (event) => {
   const page = event.target.closest("[data-page]")?.dataset.page;
   if (page) return go(page);
   const action = event.target.closest("[data-action]")?.dataset.action;
-  if (!action || state.busy) return;
+  if (!action) return;
+  if (action === "cancel-activity") return cancelActivity();
+  if (action === "reconcile-activity") return void reconcileActivity();
+  if (action === "focus-people") {
+    document.querySelector(".people-inline")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  if (state.busy) return;
   if (action === "retry-boot") return run(boot);
-  if (action === "start-volume") return run(startVolume);
-  if (action === "continue-volume") return run(() => { go("world"); return loadPageData(); });
-  if (action === "continue-world") return run(continueWorld);
-  if (action === "leave-life") return run(leaveLife);
-  if (action === "reconsider") return run(reconsider);
-  if (action === "draft-again") return run(() => requestDraft(true));
+  if (action === "start-volume") return run(startVolume, { kind: "start" });
+  if (action === "continue-volume") return run(() => { go("world"); return loadPageData(); }, { kind: "continue" });
+  if (action === "continue-world") return run(continueWorld, { kind: "continue" });
+  if (action === "leave-life") return run(leaveLife, { kind: "leave" });
+  if (action === "reconsider") return run(reconsider, { kind: "reconsider" });
+  if (action === "draft-again") return run(() => requestDraft(true), { kind: "draft" });
   if (action === "clear-draft") return clearDraft();
-  if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId));
-  if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId));
+  if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId), { kind: "archive" });
+  if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId), { kind: "archive" });
   if (action === "clear-archive") return clearArchive();
   if (action === "follow") {
     state.selectedLifetime = event.target.closest("[data-lifetime-id]").dataset.lifetimeId;
-    return run(() => { goFollow(state.selectedLifetime); return loadFollow(); });
+    return run(() => { goFollow(state.selectedLifetime); return loadFollow(); }, { kind: "follow" });
   }
-  if (action === "inhabit") return run(() => inhabit(event.target.closest("[data-lifetime-id]").dataset.lifetimeId));
+  if (action === "inhabit") return run(() => inhabit(event.target.closest("[data-lifetime-id]").dataset.lifetimeId), { kind: "inhabit" });
 });
 
 root.addEventListener("submit", (event) => {
@@ -579,7 +704,7 @@ root.addEventListener("submit", (event) => {
   event.preventDefault();
   const value = event.target.querySelector("#decision")?.value.trim() || "";
   const action = event.submitter?.dataset.judgmentAction || "CHANGE";
-  run(() => submitDecision(action, value));
+  run(() => submitDecision(action, value), { kind: "decision" });
 });
 
 root.addEventListener("input", (event) => {
@@ -590,6 +715,7 @@ root.addEventListener("input", (event) => {
 
 window.addEventListener("hashchange", () => {
   route();
+  render();
   run(loadPageData);
 });
 

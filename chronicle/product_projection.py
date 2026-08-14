@@ -344,7 +344,34 @@ class ProductProjection:
             "open_questions": open_questions,
             "present_reality": self.durable_reality(projection),
             "current_life": people_by_id.get(current_life_id) if current_life_id else None,
+            "continuation": self.continuation_state(worldline_id, state),
         }
+
+    def continuation_state(
+        self, worldline_id: str, state: dict[str, Any] | None = None
+    ) -> dict[str, str]:
+        """Expose the current read-only continuation state without scheduling work."""
+
+        state = state or self.volume_state(worldline_id)
+        row = state["worldline"]
+        if row.get("status") != "ACTIVE":
+            return {"status": "past"}
+        projection = state["projection"]
+        if projection.get("pending_moment"):
+            return {"status": "attention"}
+        current_tick = int(row["current_tick"])
+        if any(
+            wake["status"] in {"QUEUED", "WAITING_HUMAN", "STAGED"}
+            and int(wake["tick"]) <= current_tick
+            for wake in self.active.db.subject_wakes(worldline_id)
+        ):
+            return {"status": "attention"}
+        if self.active.volume_runtime.next_tick(worldline_id) is not None:
+            return {"status": "available"}
+        boundary = self.active.volume_runtime.boundary(worldline_id)["boundary"]
+        if boundary.get("ready"):
+            return {"status": "ready_to_seal"}
+        return {"status": "no_future_trigger"}
 
     def public_follow(self, worldline_id: str, lifetime_id: str) -> dict[str, Any]:
         state = self.volume_state(worldline_id)

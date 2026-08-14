@@ -81,6 +81,31 @@ def test_frontend_keeps_a_small_mutation_lock_and_boot_error_state():
         assert required in source
 
 
+def test_frontend_makes_long_operations_visible_and_recoverable():
+    source = _frontend_source()
+    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+    for required in (
+        "activity-banner",
+        "aria-busy=\"true\"",
+        "停止等待并核对",
+        "核对当前卷册",
+        "cancelActivity",
+        "reconcileActivity",
+        "state.activity.controller",
+        "lastContinueStatus",
+        "world.continuation?.status",
+        "no_future_trigger",
+        "世界暂时停在这里",
+        "走近一段人生",
+        "主动定一个方向",
+        "focus-people",
+    ):
+        assert required in source
+    assert ".activity-banner" in styles
+    assert "ink-breathe" in styles
+
+
 def test_frontend_notices_do_not_block_life_actions():
     styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
 
@@ -99,7 +124,7 @@ def test_frontend_captures_the_human_judgment_before_busy_rerender():
         submit_handler
     )
     assert 'const action = event.submitter?.dataset.judgmentAction || "CHANGE";' in submit_handler
-    assert "run(() => submitDecision(action, value));" in submit_handler
+    assert 'run(() => submitDecision(action, value), { kind: "decision" });' in submit_handler
     assert 'document.querySelector("#decision")' not in decision_mutation
 
 

@@ -25,7 +25,7 @@ Volume Home
 
 ### World
 
-World 展示当前卷册时刻、仍在收紧的公共 knot、公开位置、可接近的人生和公开理由，以及是否已有一段正在 inhabited 的人生。
+World 展示当前卷册时刻、仍在收紧的公共 knot、公开位置、可接近的人生和公开理由，以及是否已有一段正在 inhabited 的人生。它还要明确当前是否仍有可自动推进的触发；没有时，应引导用户走近一段人生，在书案主动定一个方向。
 
 它不展示全局 Ledger、其他 Lifetime 的私有 Plan/Belief、未送达消息、模型输出或内部工具调用。局部 settlement 可以显示为已经留下 Meaning，但不能画成 Volume 已经结束。
 
@@ -43,7 +43,7 @@ Follow 是接近一段人生前的公共观察页。它回答“这段人生现�
 - `current_plan` 和 `active_obligations`；
 - `position` 与 `role`。
 
-决定区只有一个有限 intent 入口：写下准备承担的下一步，或者点击等待。提交前先读取 textarea 内容，再进入 `busy` 状态；重绘不能把非空输入变成沉默。提交中所有 mutation button disabled，不能在同一请求尚未结束时 double-submit。
+决定区只有一个有限 intent 入口：写下准备承担的下一步，或者点击等待。提交前先读取 textarea 内容，再进入 `busy` 状态；重绘不能把非空输入变成沉默。提交中所有 mutation button disabled，不能在同一请求尚未结束时 double-submit；页面必须持续显示当前进行中的卷册状态，并为结果未确认的请求提供核对入口。
 
 Leave 是显式动作，文案说明“把这段人生交还给世界”。它不会伪装成结束卷册，也不会制造一个“主体离线”的技术面板。
 
@@ -66,7 +66,7 @@ Leave 是显式动作，文案说明“把这段人生交还给世界”。它�
 | --- | --- | --- |
 | 打开首页 | `GET /api/worldlines/active` | Volume metadata、active world |
 | 开始卷册 | `POST /api/worldlines` with `live` | worldline、world、lifetimes |
-| 查看世界 | `GET /api/worldlines/{id}/world` | public world |
+| 查看世界 | `GET /api/worldlines/{id}/world` | public world、continuation status |
 | 查看人生入口 | `GET /api/worldlines/{id}/follow/{lifetime_id}` | selected follow |
 | 进入人生 | `POST /api/worldlines/{id}/inhabit` | world with inhabited lifetime |
 | 打开书案 | `GET /api/worldlines/{id}/desk` | private current Life Desk |

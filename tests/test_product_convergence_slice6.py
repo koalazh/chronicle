@@ -36,6 +36,8 @@ def test_product_decision_requires_explicit_action_and_reconsider(app_config):
         assert opened.status_code == 200
         assert opened.json()["desk"]["desk"]["decision_state"] == "NEEDS_FIRST_JUDGMENT"
         assert opened.json()["desk"]["desk"]["reconsideration"]["prompt"] == "你准备怎样办？"
+        assert opened.json()["desk"]["desk"]["reconsideration"]["voluntary"] is False
+        assert "你主动重新考虑了这份判断。" not in str(opened.json()["desk"])
 
         assert client.post(
             f"/api/worldlines/{worldline_id}/decision",

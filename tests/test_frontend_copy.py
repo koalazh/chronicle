@@ -47,7 +47,7 @@ def test_frontend_uses_the_v6_product_language_and_ia():
         "现在什么还没有定下来？",
         "让世界继续",
         "走近",
-        "接过这段人生",
+        "接过这一次判断",
         "参考草稿",
         "交还给世界",
         'data-action="inhabit"',
@@ -61,6 +61,7 @@ def test_frontend_uses_the_v6_product_language_and_ia():
         "aria-live",
     ):
         assert required in source or required in index
+    assert "接过这段人生" not in source
 
 
 def test_frontend_keeps_a_small_mutation_lock_and_boot_error_state():
@@ -134,8 +135,22 @@ def test_frontend_does_not_render_internal_ids_as_product_copy():
         "这一卷最后成了什么？",
         "judgmentHistoryMarkup",
         "判断回看",
+        "consequenceMarkup",
+        "item.actor?.display_name",
     ):
         assert required in source
+
+
+def test_frontend_world_and_reconsideration_copy_are_state_bounded():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "world.open_questions || []" in source
+    assert "world.present_reality || []" in source
+    assert "worldSections ||" in source
+    assert "眼前没有新的事情需要你介入。" in source
+    assert "reconsideration.voluntary && hasCourse" in source
+    assert "voluntaryReconsideration ? \"你主动重新考虑了这份判断。\"" in source
+    assert "current_course" in source
 
 
 def test_frontend_routes_only_formal_v6_pages():

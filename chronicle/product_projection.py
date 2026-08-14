@@ -11,6 +11,40 @@ from .volume_runtime import VolumeRuntimeError
 
 VolumeRow = Callable[[ChronicleHost, str], dict[str, Any]]
 
+PUBLIC_REPLAY_LIMIT = 4
+PUBLIC_CONSEQUENCE_TYPES = frozenset(
+    {
+        "OPERATION_COMPLETED",
+        "ENTITY_STATE_CHANGED",
+        "AGREEMENT_CREATED",
+        "MESSAGE_DELIVERED",
+    }
+)
+PRIVATE_CONSEQUENCE_TYPES = PUBLIC_CONSEQUENCE_TYPES | frozenset(
+    {
+        "DECISION_DEPENDENCY_DUE",
+        "INVESTIGATION_COMPLETED",
+        "OBSERVATION_OBTAINED",
+    }
+)
+CONSEQUENCE_TYPE_COPY = {
+    "OPERATION_COMPLETED": ("ACTION", "行动"),
+    "ENTITY_STATE_CHANGED": ("REALITY", "现实"),
+    "AGREEMENT_CREATED": ("AGREEMENT", "约定"),
+    "MESSAGE_DELIVERED": ("PUBLIC_RECORD", "公共记录"),
+    "DECISION_DEPENDENCY_DUE": ("DEADLINE", "期限"),
+    "INVESTIGATION_COMPLETED": ("INVESTIGATION", "调查"),
+    "OBSERVATION_OBTAINED": ("OBSERVATION", "观察"),
+}
+HISTORY_BEAT_TYPES = {
+    "行动": "ACTION",
+    "现实": "REALITY",
+    "外部现实": "EXTERNAL_REALITY",
+    "约定": "AGREEMENT",
+    "公共记录": "PUBLIC_RECORD",
+    "结果": "OUTCOME",
+}
+
 
 class ProductProjection:
     """Compile read-only Runtime state into the current product view contract."""
@@ -320,29 +354,11 @@ class ProductProjection:
         if lifetime is None:
             raise HTTPException(status_code=404, detail="Lifetime not found")
         public = self.public_lifetime(state["worldline"], state["projection"], lifetime)
-        labels = {
-            "CRISIS_ACTIVATED": "一处局势开始收紧",
-            "CRISIS_CHECKPOINT_ENTERED": "进入一个未决节点",
-            "MESSAGE_DISPATCHED": "发出一项公开声明",
-            "MESSAGE_DELIVERED": "收到一项外部消息",
-            "CRISIS_SETTLED": "一处局势留下结果",
-        }
-        trace = []
-        for event in self.active.db.worldline_events(worldline_id):
-            event_type = str(event["event_type"])
-            if event_type not in labels:
-                continue
-            payload = event.get("payload", {})
-            if event_type not in {
-                "CRISIS_ACTIVATED",
-                "CRISIS_CHECKPOINT_ENTERED",
-                "CRISIS_SETTLED",
-            } and event.get("seat_id") not in {None, lifetime_id}:
-                continue
-            item = {"id": event["id"], "tick": int(event["tick"]), "kind": labels[event_type]}
-            if event_type == "MESSAGE_DISPATCHED" and payload.get("sender") == lifetime_id:
-                item["declaration"] = self.public_copy(payload.get("content", ""))
-            trace.append(item)
+        trace = [
+            item
+            for event in self.active.db.worldline_events(worldline_id)
+            if (item := self.public_replay_event(event)) is not None
+        ][-PUBLIC_REPLAY_LIMIT:]
         return {
             "worldline": self.public_worldline(state["worldline"]),
             "lifetime": public,
@@ -353,6 +369,10 @@ class ProductProjection:
         identifier = str(actor_id or "")
         if not identifier:
             return ""
+        if identifier == "public-record":
+            return "公开记录"
+        if identifier == "external-reality":
+            return "外部现实"
         pack = self.active.volume_runtime.pack
         lifetime = pack.lifetimes.get(identifier)
         if lifetime is not None:
@@ -385,6 +405,9 @@ class ProductProjection:
         "LIFETIME_LEFT": "这段人生暂时交还世界",
         "PLAN_UPDATED": "计划发生变化",
         "BELIEF_UPDATED": "一个判断留下证据",
+        "DECISION_DEPENDENCY_DUE": "此前等待的期限已经到来",
+        "INVESTIGATION_COMPLETED": "一项调查完成",
+        "OBSERVATION_OBTAINED": "一项观察进入所知",
         "OPERATION_COMPLETED": "一项行动完成",
         "ENTITY_STATE_CHANGED": "现实发生变化",
         "AGREEMENT_CREATED": "一项约定形成",
@@ -415,6 +438,14 @@ class ProductProjection:
             operation_name = str(operation.get("display_name") or "一项行动")
             actor = self.actor_name(operation.get("actor_id"))
             return f"{actor}{operation_name}已经完成。" if actor else f"{operation_name}已经完成。"
+        if event_type == "INVESTIGATION_COMPLETED":
+            investigation = payload.get("investigation", {})
+            actor = self.actor_name(investigation.get("actor_id"))
+            return f"{actor}完成了一项调查。" if actor else "一项调查完成。"
+        if event_type == "OBSERVATION_OBTAINED":
+            observation = payload.get("observation", {})
+            content = observation.get("content") if isinstance(observation, dict) else observation
+            return self.public_copy(content or self.replay_labels[event_type])
         if event_type == "ENTITY_STATE_CHANGED":
             description = payload.get("description")
             if description:
@@ -449,42 +480,80 @@ class ProductProjection:
             return self.public_copy(payload.get("assessment") or self.replay_labels[event_type])
         return self.replay_labels.get(event_type, "一项世界事实发生了变化")
 
-    def public_replay_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
-        event_type = str(event["event_type"])
+    def replay_crisis_id(self, event: dict[str, Any]) -> str:
+        event_type = str(event.get("event_type", ""))
         payload = event.get("payload", {})
-        if event_type == "CRISIS_PRESSURE_APPLIED":
-            visibility = str(payload.get("pressure", {}).get("visibility", ""))
-            if visibility not in {"PUBLIC", "SHARED"}:
-                return None
-        if event_type in {"MESSAGE_DISPATCHED", "MESSAGE_DELIVERED"}:
-            if str(payload.get("source", "")) != "historical_field":
-                return None
-        if event_type not in {
-            "WORLDLINE_CREATED",
-            "WORLD_INITIALIZED",
-            "LIFETIME_GENESIS_ESTABLISHED",
-            "CRISIS_ACTIVATED",
-            "CRISIS_CHECKPOINT_ENTERED",
-            "CRISIS_PRESSURE_APPLIED",
-            "FIELD_EVENT_APPLIED",
-            "MESSAGE_DISPATCHED",
-            "MESSAGE_DELIVERED",
-            "LIFETIME_INHABITED",
-            "LIFETIME_LEFT",
-            "CRISIS_SETTLED",
-            "MOMENT_COMMITTED",
-            "VOLUME_SEALED",
-        }:
-            return None
-        item = {
+        if event_type == "OPERATION_COMPLETED":
+            operation = payload.get("operation", {})
+            return str(operation.get("crisis_id") or payload.get("crisis_id") or "")
+        if event_type == "AGREEMENT_CREATED":
+            agreement = payload.get("agreement", {})
+            return str(agreement.get("crisis_id") or payload.get("crisis_id") or "")
+        return str(payload.get("crisis_id", ""))
+
+    def replay_actor_ids(self, event: dict[str, Any]) -> list[str]:
+        event_type = str(event.get("event_type", ""))
+        payload = event.get("payload", {})
+        if event_type == "OPERATION_COMPLETED":
+            operation = payload.get("operation", {})
+            actor_id = (
+                operation.get("actor_id")
+                or event.get("seat_id")
+                or payload.get("actor_id")
+            )
+            return [str(actor_id)] if actor_id else []
+        if event_type == "AGREEMENT_CREATED":
+            parties = payload.get("agreement", {}).get("parties", [])
+            if isinstance(parties, list) and parties:
+                return [str(item) for item in parties if item]
+            actor_id = event.get("seat_id") or payload.get("actor_id")
+            return [str(actor_id)] if actor_id else []
+        if event_type == "MESSAGE_DELIVERED":
+            return [str(payload.get("from") or payload.get("sender") or "public-record")]
+        actor_id = event.get("seat_id") or payload.get("actor_id")
+        if actor_id:
+            return [str(actor_id)]
+        if event_type == "ENTITY_STATE_CHANGED":
+            return ["external-reality"]
+        return []
+
+    def replay_actors(self, event: dict[str, Any]) -> list[dict[str, str]]:
+        actors = []
+        for actor_id in dict.fromkeys(self.replay_actor_ids(event)):
+            display_name = self.actor_name(actor_id)
+            if display_name:
+                actors.append({"id": actor_id, "display_name": display_name})
+        return actors
+
+    def replay_item(self, event: dict[str, Any]) -> dict[str, Any]:
+        event_type = str(event["event_type"])
+        type_code, kind = CONSEQUENCE_TYPE_COPY.get(
+            event_type, ("WORLD_FACT", "世界事实")
+        )
+        actors = self.replay_actors(event)
+        return {
             "id": str(event["id"]),
             "tick": int(event["tick"]),
-            "kind": self.replay_labels.get(event_type, "世界事实"),
+            "type": type_code,
+            "kind": kind,
             "text": self.replay_event_text(event),
+            "actor": actors[0] if actors else None,
+            "actors": actors,
         }
-        if event_type == "CRISIS_SETTLED":
-            item["meaning"] = True
-        return item
+
+    def public_consequence_visible(self, event: dict[str, Any]) -> bool:
+        event_type = str(event.get("event_type", ""))
+        if event_type not in PUBLIC_CONSEQUENCE_TYPES:
+            return False
+        payload = event.get("payload", {})
+        if event_type == "MESSAGE_DELIVERED":
+            return str(payload.get("source", "")) == "historical_field"
+        return self._public_event_visibility(event, self.replay_crisis_id(event))
+
+    def public_replay_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
+        if not self.public_consequence_visible(event):
+            return None
+        return self.replay_item(event)
 
     def lifetime_replay_event(
         self, event: dict[str, Any], lifetime_id: str
@@ -494,20 +563,16 @@ class ProductProjection:
             return public
         payload = event.get("payload", {})
         event_type = str(event["event_type"])
+        if event_type not in PRIVATE_CONSEQUENCE_TYPES:
+            return None
         visible = event.get("seat_id") == lifetime_id
         visible = visible or payload.get("sender") == lifetime_id
         visible = visible or payload.get("recipient") == lifetime_id
         explicit_visibility = payload.get("visibility")
         visible = visible or isinstance(explicit_visibility, list) and lifetime_id in explicit_visibility
-        if not visible or event_type not in self.replay_labels:
+        if not visible:
             return None
-        return {
-            "id": str(event["id"]),
-            "tick": int(event["tick"]),
-            "kind": self.replay_labels[event_type],
-            "text": self.replay_event_text(event),
-            "private_to_lifetime": True,
-        }
+        return {**self.replay_item(event), "private_to_lifetime": True}
 
     def judgment_course_text(self, course: Any) -> str:
         if not isinstance(course, dict):
@@ -604,7 +669,11 @@ class ProductProjection:
         }
         for message_id, dispatch in dispatches.items():
             delivery = deliveries.get(message_id)
-            if delivery is not None and int(dispatch.get("tick", 0)) < int(delivery.get("tick", 0)):
+            if (
+                delivery is not None
+                and int(dispatch.get("tick", 0)) < int(delivery.get("tick", 0))
+                and self.lifetime_replay_event(delivery, lifetime_id) is not None
+            ):
                 later_known.append((int(delivery["tick"]), self.judgment_event_text(delivery)))
         later_known.sort(key=lambda item: item[0])
 
@@ -646,7 +715,10 @@ class ProductProjection:
                     continue
                 for event_id in attention.get("payload", {}).get("new_known_event_ids", []):
                     admitted = event_by_id.get(str(event_id))
-                    if admitted is None:
+                    if (
+                        admitted is None
+                        or self.lifetime_replay_event(admitted, lifetime_id) is None
+                    ):
                         continue
                     value = self.judgment_event_text(admitted)
                     if value not in facts:
@@ -657,7 +729,7 @@ class ProductProjection:
                 if value not in facts:
                     facts.append(value)
 
-            consequences: list[str] = []
+            consequences: list[dict[str, Any]] = []
             for candidate in events:
                 candidate_tick = int(candidate.get("tick", 0))
                 candidate_type = str(candidate.get("event_type", ""))
@@ -669,8 +741,14 @@ class ProductProjection:
                 if public is None:
                     continue
                 value = str(public.get("text") or "").strip()
-                if value and value not in consequences:
-                    consequences.append(value)
+                if value and not any(item.get("text") == value for item in consequences):
+                    consequences.append(
+                        {
+                            key: public[key]
+                            for key in ("type", "kind", "text", "actor", "actors")
+                            if key in public
+                        }
+                    )
                 if len(consequences) >= 4:
                     break
 
@@ -686,7 +764,7 @@ class ProductProjection:
                         horizon, previous_course, attention_events
                     ),
                     "new_facts": [{"text": value} for value in facts[:4]],
-                    "consequences": [{"text": value} for value in consequences],
+                    "consequences": consequences,
                 }
             )
             previous_course = course
@@ -779,6 +857,7 @@ class ProductProjection:
         item: dict[str, Any] = {
             "id": event_id,
             "tick": int(tick),
+            "type": HISTORY_BEAT_TYPES.get(kind, "WORLD_FACT"),
             "kind": kind,
             "text": self.public_copy(text).strip(),
             "actors": actors,
@@ -793,6 +872,12 @@ class ProductProjection:
     def _public_event_visibility(self, event: dict[str, Any], crisis_id: str) -> bool:
         payload = event.get("payload", {})
         visibility = payload.get("visibility")
+        if visibility is None:
+            for nested_key in ("pressure", "operation", "agreement"):
+                nested = payload.get(nested_key)
+                if isinstance(nested, dict) and "visibility" in nested:
+                    visibility = nested["visibility"]
+                    break
         if isinstance(visibility, str):
             return visibility in {"PUBLIC", "SHARED"}
         if not isinstance(visibility, list) or not crisis_id:
@@ -889,8 +974,7 @@ class ProductProjection:
                     continue
                 entity_id = str(payload.get("entity_id", ""))
                 entity = self.entity_definition(crisis_id, entity_id)
-                shared_entity = any(item.id == entity_id for item in pack.world.entities)
-                if not shared_entity and not self._public_event_visibility(event, crisis_id):
+                if not self._public_event_visibility(event, crisis_id):
                     continue
                 beats.append(
                     self._history_beat(
@@ -906,7 +990,7 @@ class ProductProjection:
 
             if event_type == "CRISIS_PRESSURE_APPLIED":
                 pressure = payload.get("pressure", {})
-                if str(pressure.get("visibility", "")) not in {"PUBLIC", "SHARED"}:
+                if not self._public_event_visibility(event, crisis_id):
                     continue
                 beats.append(
                     self._history_beat(
@@ -915,13 +999,16 @@ class ProductProjection:
                         "外部现实",
                         str(pressure.get("title") or pressure.get("description") or "现实发生了变化。"),
                         crisis_id=crisis_id,
+                        actor_ids=["external-reality"],
                     )
                 )
                 continue
 
             if event_type == "AGREEMENT_CREATED":
                 agreement = payload.get("agreement", {})
-                if str(agreement.get("visibility", "")) not in {"PUBLIC", "SHARED"}:
+                if not self._public_event_visibility(
+                    event, str(agreement.get("crisis_id", crisis_id))
+                ):
                     continue
                 parties = [str(item) for item in agreement.get("parties", [])]
                 beats.append(
@@ -966,6 +1053,7 @@ class ProductProjection:
                         "公共记录",
                         str(payload.get("content") or "一条公开军情抵达。"),
                         crisis_id=crisis_id,
+                        actor_ids=[str(payload.get("from") or "public-record")],
                         recipients=[item for item in recipients if item],
                     )
                 )
@@ -1130,7 +1218,8 @@ class ProductProjection:
         )
         current_course = context.get("current_course")
         voluntary = bool(
-            human_attention
+            current_course
+            and human_attention
             and attention_wake_id
             and (
                 wake := self.active.db.crisis_wake(attention_wake_id)

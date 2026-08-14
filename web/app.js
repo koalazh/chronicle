@@ -32,6 +32,13 @@ function listMarkup(items, className = "folio-list") {
   return `<ul class="${className}">${items.map((item) => `<li>${text(itemText(item))}</li>`).join("")}</ul>`;
 }
 
+function consequenceMarkup(items) {
+  if (!items?.length) return "";
+  return `<ul class="desk-list consequence-list">${items.map((item) => `
+    <li><span class="consequence-kind">${text(item.kind || item.type || "之后发生")}</span><span>${text(itemText(item))}</span>${item.actor?.display_name ? `<small>由${text(item.actor.display_name)}留下</small>` : ""}</li>
+  `).join("")}</ul>`;
+}
+
 function judgmentHistoryMarkup(items) {
   if (!items?.length) return `<p class="empty-copy">这段人生没有留下可回看的判断。</p>`;
   return `<ol class="judgment-history">${items.map((item) => `
@@ -44,7 +51,7 @@ function judgmentHistoryMarkup(items) {
           <div><dt>这次决定</dt><dd>${text(item.decision)}：${text(item.course)}</dd></div>
         </dl>
         ${item.new_facts?.length ? `<div class="judgment-note"><span>后来知道</span>${listMarkup(item.new_facts, "desk-list")}</div>` : ""}
-        ${item.consequences?.length ? `<div class="judgment-note"><span>之后发生</span>${listMarkup(item.consequences, "desk-list")}</div>` : ""}
+        ${item.consequences?.length ? `<div class="judgment-note"><span>之后发生</span>${consequenceMarkup(item.consequences)}</div>` : ""}
       </div>
     </li>`).join("")}</ol>`;
 }
@@ -152,6 +159,20 @@ function personMarkup(person) {
 function worldPage() {
   if (!state.world) return chrome(`<div class="loading-block">正在展开世界……</div>`);
   const world = state.world;
+  const questions = world.open_questions || [];
+  const reality = world.present_reality || [];
+  const worldSections = [
+    questions.length ? `
+      <section class="world-section">
+        <div class="section-heading"><span>未决的事</span><h2>谁正在这些事情里</h2></div>
+        <div class="question-list">${questions.map(questionMarkup).join("")}</div>
+      </section>` : "",
+    reality.length ? `
+      <section class="world-section">
+        <div class="section-heading"><span>已经成为现实</span><h2>世界留下了什么</h2></div>
+        ${realityMarkup(reality)}
+      </section>` : "",
+  ].join("");
   return chrome(`
     <section class="run-header">
       <div>
@@ -160,14 +181,7 @@ function worldPage() {
         <p>第 ${text(world.tick)} 个时刻 · ${text(world.volume?.subtitle || "崇祯十七年")}</p>
       </div>
     </section>
-    <section class="world-section">
-      <div class="section-heading"><span>未决的事</span><h2>谁正在这些事情里</h2></div>
-      <div class="question-list">${(world.open_questions || []).map(questionMarkup).join("") || `<p class="empty-copy">眼前没有新的事情需要你介入。</p>`}</div>
-    </section>
-    <section class="world-section">
-      <div class="section-heading"><span>已经成为现实</span><h2>世界留下了什么</h2></div>
-      ${realityMarkup(world.present_reality)}
-    </section>
+    ${worldSections || `<p class="empty-copy world-empty">眼前没有新的事情需要你介入。</p>`}
     <div class="continue-bar">
       <div><span>让世界继续</span><small>下一次推进只落在已经存在的真实触发上。</small></div>
       <button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>让世界继续</button>
@@ -186,13 +200,13 @@ function followPage() {
       <h1>${text(life.display_name)}</h1>
       <p>先看这段人生如何走到这里；真正需要判断时，再接过它的下一步。</p>
       <div class="hero-actions">
-        ${inhabited ? `<button class="primary" data-page="desk">回到书案</button>` : `<button class="primary" data-action="inhabit" data-lifetime-id="${text(life.id)}" ${life.available && !state.busy ? "" : "disabled"}>接过这段人生</button>`}
+        ${inhabited ? `<button class="primary" data-page="desk">回到书案</button>` : `<button class="primary" data-action="inhabit" data-lifetime-id="${text(life.id)}" ${life.available && !state.busy ? "" : "disabled"}>接过这一次判断</button>`}
         <button class="secondary" data-page="${inhabited ? "desk" : "world"}">${inhabited ? "回到书案" : "返回世界"}</button>
       </div>
     </section>
     <section class="follow-trace">
       <div class="section-heading"><span>公开轨迹</span><h2>这段人生如何走到这里</h2></div>
-      <ol class="trace-list">${(follow.trace || []).map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind)}</strong>${event.declaration ? `<p>${text(event.declaration)}</p>` : ""}</div></li>`).join("") || `<li class="empty-copy">还没有可见轨迹。</li>`}</ol>
+      <ol class="trace-list">${(follow.trace || []).map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind || event.type)}</strong><p>${text(event.text || event.declaration || "")}</p>${event.actor?.display_name ? `<small>由${text(event.actor.display_name)}留下</small>` : ""}</div></li>`).join("") || `<li class="empty-copy">还没有可见轨迹。</li>`}</ol>
     </section>
   `);
 }
@@ -204,12 +218,14 @@ function deskPage() {
   const whyNow = desk.why_now || {};
   const reconsideration = desk.reconsideration || {};
   const decisionState = desk.decision_state || "QUIET_NO_COURSE";
+  const hasCourse = Boolean(desk.current_course?.length);
+  const voluntaryReconsideration = Boolean(reconsideration.voluntary && hasCourse);
   const needsJudgment = decisionState === "NEEDS_FIRST_JUDGMENT" || decisionState === "NEEDS_RECONSIDERATION";
   const firstJudgment = decisionState === "NEEDS_FIRST_JUDGMENT";
   const decisionCopy = firstJudgment
     ? "这一次还没有形成要继续执行的方向。"
     : decisionState === "NEEDS_RECONSIDERATION"
-      ? (reconsideration.voluntary ? "你主动重新考虑了这份判断。" : "现实已经改变了此前判断的基础。")
+      ? (voluntaryReconsideration ? "你主动重新考虑了这份判断。" : "现实已经改变了此前判断的基础。")
       : decisionState === "COURSE_IN_FORCE"
         ? "这个判断仍在生效。"
         : "此刻还没有事情要求你落笔。";
@@ -583,8 +599,8 @@ async function boot() {
   try {
     state.config = await api("/api/config", { timeoutMs: 15000 });
     state.volume = await api("/api/volume", { timeoutMs: 15000 });
-    route();
     await refreshActive();
+    route();
     await loadPageData();
   } catch (error) {
     state.error = error?.name === "AbortError" ? "打开卷册等待过久。" : (error?.message || "卷册暂时打不开。");

@@ -257,6 +257,7 @@ def commit_deliberation(
     course: dict[str, Any] | None = None,
     open_dependencies: list[dict[str, Any]] | None = None,
     belief_updates: list[dict[str, Any]] | None = None,
+    experience_refs: list[str] | None = None,
     world_actions: list[dict[str, Any]] | None = None,
     rationale_source: str = "",
     belief_source: str = "",
@@ -277,6 +278,8 @@ def commit_deliberation(
     }
     if open_dependencies is not None:
         proposal_payload["open_dependencies"] = open_dependencies
+    if experience_refs is not None:
+        proposal_payload["experience_refs"] = experience_refs
     try:
         staged = ChronicleHost(config).volume_runtime.stage_deliberation(
             str(binding["worldline_id"]),

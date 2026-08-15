@@ -25,6 +25,7 @@ PRIVATE_CONSEQUENCE_TYPES = PUBLIC_CONSEQUENCE_TYPES | frozenset(
         "DECISION_DEPENDENCY_DUE",
         "INVESTIGATION_COMPLETED",
         "OBSERVATION_OBTAINED",
+        "EXPERIENCE_RECORDED",
     }
 )
 CONSEQUENCE_TYPE_COPY = {
@@ -35,6 +36,7 @@ CONSEQUENCE_TYPE_COPY = {
     "DECISION_DEPENDENCY_DUE": ("DEADLINE", "期限"),
     "INVESTIGATION_COMPLETED": ("INVESTIGATION", "调查"),
     "OBSERVATION_OBTAINED": ("OBSERVATION", "观察"),
+    "EXPERIENCE_RECORDED": ("EXPERIENCE", "经历"),
 }
 HISTORY_BEAT_TYPES = {
     "行动": "ACTION",
@@ -151,23 +153,32 @@ class ProductProjection:
         if isinstance(item, str):
             return readable(item) or "一项已知事实。"
         if isinstance(item, dict):
-            for key in (
-                "content",
-                "observation",
-                "text",
-                "summary",
-                "description",
-                "declaration",
-                "reason",
-                "title",
-            ):
-                value = readable(item.get(key))
-                if value:
-                    return value
-            nested = item.get("value")
-            if isinstance(nested, dict):
-                for key in ("objective", "content", "description", "reason", "summary"):
-                    value = readable(nested.get(key))
+            payload = item.get("payload")
+            event_type = str(
+                item.get("event_type")
+                or (payload.get("event_type", "") if isinstance(payload, dict) else "")
+            )
+            if event_type:
+                event_text = self.replay_event_text(
+                    {"event_type": event_type, "payload": payload or {}}
+                )
+                if event_text and event_text != "一项世界事实发生了变化":
+                    return self.public_copy(event_text)
+            for candidate in (item, payload, item.get("value")):
+                if not isinstance(candidate, dict):
+                    continue
+                for key in (
+                    "content",
+                    "observation",
+                    "text",
+                    "summary",
+                    "description",
+                    "declaration",
+                    "reason",
+                    "title",
+                    "objective",
+                ):
+                    value = readable(candidate.get(key))
                     if value:
                         return value
             labels = {
@@ -179,8 +190,11 @@ class ProductProjection:
                 "COMMITMENT": "一项约定",
                 "REVISIT": "一次重新判断",
             }
-            return labels.get(str(item.get("kind", "")).upper(), "这一项暂未留下文字说明")
-        return readable(item) or "这一项暂未留下文字说明"
+            return labels.get(
+                str(item.get("kind") or (payload or {}).get("kind", "")).upper(),
+                "一项已知事实。",
+            )
+        return readable(item) or "一项已知事实。"
 
     def product_items(self, items: Any) -> list[dict[str, str]]:
         if not isinstance(items, list):
@@ -343,9 +357,141 @@ class ProductProjection:
             ],
             "open_questions": open_questions,
             "present_reality": self.durable_reality(projection),
+            "corridor": self.public_corridor(worldline_id, row, projection, people),
             "current_life": people_by_id.get(current_life_id) if current_life_id else None,
             "continuation": self.continuation_state(worldline_id, state),
         }
+
+    def public_corridor(
+        self,
+        worldline_id: str,
+        row: dict[str, Any],
+        projection: dict[str, Any],
+        people: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return the small public topology used by the Live World page."""
+
+        crisis = self.active.volume_runtime.pack.pack("before-shanhaiguan").crisis
+        wanted = {"beijing", "shanhaiguan", "liaoxi"}
+        locations = [
+            {
+                "id": item.id,
+                "display_name": item.display_name,
+                "order": item.order,
+            }
+            for item in sorted(crisis.corridor, key=lambda item: item.order)
+            if item.id in wanted
+        ]
+        locations = [
+            {**location, "order": index} for index, location in enumerate(locations)
+        ]
+        current_tick = int(projection.get("tick", row.get("current_tick", 0)))
+        events = self.active.db.worldline_events(worldline_id)
+        latest_judgment = {
+            str(event.get("seat_id")): event
+            for event in events
+            if event.get("event_type")
+            in {
+                "DECISION_HORIZON_ESTABLISHED",
+                "DECISION_HORIZON_REVISED",
+                "DECISION_HORIZON_HELD",
+            }
+            and event.get("seat_id")
+        }
+        wakes = self.active.db.subject_wakes(worldline_id)
+        people_view = []
+        people = sorted(
+            people,
+            key=lambda person: {"li-zicheng": 0, "wu-sangui": 1, "dorgon": 2}.get(
+                str(person["id"]), 99
+            ),
+        )
+        for person in people:
+            seat = str(person["id"])
+            due = any(
+                str(wake.get("actor_id")) == seat
+                and int(wake.get("tick", current_tick)) <= current_tick
+                and wake.get("status") in {"QUEUED", "WAITING_HUMAN", "STAGED"}
+                for wake in wakes
+            )
+            judgment = latest_judgment.get(seat)
+            if due:
+                state = "cognition"
+                state_label = "正来到需要判断的地方"
+            elif judgment is not None and int(judgment.get("tick", -1)) == current_tick:
+                state = "recently_reconsidered"
+                state_label = "最近重新判断"
+            elif self._lifetime_has_course(worldline_id, seat):
+                state = "waiting"
+                state_label = "等待中"
+            else:
+                state = "quiet"
+                state_label = "判断尚未落笔"
+            people_view.append(
+                {
+                    "id": seat,
+                    "display_name": person["display_name"],
+                    "location": person["location"],
+                    "state": state,
+                    "state_label": state_label,
+                    "available": person["available"],
+                    "availability_reasons": person.get("availability_reasons", []),
+                    "inhabited": person.get("inhabited", False),
+                }
+            )
+
+        transit = []
+        positions = projection.get("positions", {})
+        for message in projection.get("messages", []):
+            if message.get("status") != "in_transit":
+                continue
+            delivery_tick = int(message.get("delivery_tick", message.get("arrival_tick", 0)))
+            if delivery_tick <= current_tick:
+                continue
+            sender = str(message.get("sender", ""))
+            recipient = str(message.get("recipient", ""))
+            source_location = str(positions.get(sender, ""))
+            target_location = str(positions.get(recipient, ""))
+            if not source_location or not target_location or source_location == target_location:
+                continue
+            transit.append(
+                {
+                    "id": str(message.get("id", "")),
+                    "from": {
+                        "id": source_location,
+                        "display_name": self.location_name(source_location),
+                    },
+                    "to": {
+                        "id": target_location,
+                        "display_name": self.location_name(target_location),
+                    },
+                    "arrival_tick": delivery_tick,
+                    "days_remaining": delivery_tick - current_tick,
+                    "text": "一封消息正在途中。",
+                }
+            )
+        transit.sort(key=lambda item: (item["arrival_tick"], item["id"]))
+
+        recent_events = []
+        for event in reversed(events):
+            item = self.public_replay_event(event)
+            if item is not None:
+                recent_events.append(item)
+            if len(recent_events) >= PUBLIC_REPLAY_LIMIT:
+                break
+        recent_events.reverse()
+        return {
+            "locations": locations,
+            "people": people_view,
+            "transit": transit[:4],
+            "recent_events": recent_events,
+        }
+
+    def _lifetime_has_course(self, worldline_id: str, lifetime_id: str) -> bool:
+        lifetime = self.active.db.worldline_lifetime(worldline_id, lifetime_id)
+        if lifetime is None:
+            return False
+        return bool(lifetime.get("plan"))
 
     def continuation_state(
         self, worldline_id: str, state: dict[str, Any] | None = None
@@ -357,7 +503,14 @@ class ProductProjection:
         if row.get("status") != "ACTIVE":
             return {"status": "past"}
         projection = state["projection"]
-        if projection.get("pending_moment"):
+        pending = projection.get("pending_moment")
+        if pending:
+            pending_wake_ids = {str(wake_id) for wake_id in pending.get("wake_ids", [])}
+            if any(
+                str(wake["id"]) in pending_wake_ids and wake["status"] == "FAILED"
+                for wake in self.active.db.subject_wakes(worldline_id)
+            ):
+                return {"status": "agent_failed"}
             return {"status": "attention"}
         current_tick = int(row["current_tick"])
         if any(
@@ -394,7 +547,7 @@ class ProductProjection:
 
     def actor_name(self, actor_id: Any) -> str:
         identifier = str(actor_id or "")
-        if not identifier:
+        if not identifier or identifier.strip().lower() in {"none", "null", "undefined"}:
             return ""
         if identifier == "public-record":
             return "公开记录"
@@ -505,6 +658,13 @@ class ProductProjection:
             return self.public_copy(plan.get("objective") or self.replay_labels[event_type])
         if event_type == "BELIEF_UPDATED":
             return self.public_copy(payload.get("assessment") or self.replay_labels[event_type])
+        if event_type == "EXPERIENCE_RECORDED":
+            experience = payload.get("experience", {})
+            return self.public_copy(
+                experience.get("implication")
+                or experience.get("experience")
+                or "一段过去仍在影响现在。"
+            )
         return self.replay_labels.get(event_type, "一项世界事实发生了变化")
 
     def replay_crisis_id(self, event: dict[str, Any]) -> str:
@@ -767,6 +927,26 @@ class ProductProjection:
                 public = self.lifetime_replay_event(candidate, lifetime_id)
                 if public is None:
                     continue
+                if candidate_type == "INVESTIGATION_COMPLETED":
+                    investigation = candidate.get("payload", {}).get("investigation", {})
+                    observation = (
+                        investigation.get("observation")
+                        if isinstance(investigation, dict)
+                        else None
+                    )
+                    observation_id = (
+                        observation.get("id") if isinstance(observation, dict) else None
+                    )
+                    if observation_id and any(
+                        str(item.get("event_type", "")) == "OBSERVATION_OBTAINED"
+                        and str(
+                            item.get("payload", {}).get("observation", {}).get("id", "")
+                        )
+                        == str(observation_id)
+                        and self.lifetime_replay_event(item, lifetime_id) is not None
+                        for item in events
+                    ):
+                        continue
                 value = str(public.get("text") or "").strip()
                 if value and not any(item.get("text") == value for item in consequences):
                     consequences.append(
@@ -876,11 +1056,11 @@ class ProductProjection:
         actor_ids: list[str] | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
-        actors = [
-            {"id": actor_id, "display_name": self.actor_name(actor_id)}
-            for actor_id in dict.fromkeys(actor_ids or [])
-            if actor_id
-        ]
+        actors = []
+        for actor_id in dict.fromkeys(actor_ids or []):
+            display_name = self.actor_name(actor_id)
+            if display_name:
+                actors.append({"id": actor_id, "display_name": display_name})
         item: dict[str, Any] = {
             "id": event_id,
             "tick": int(tick),
@@ -1010,7 +1190,7 @@ class ProductProjection:
                         "现实",
                         self.replay_event_text(event),
                         crisis_id=crisis_id,
-                        actor_ids=[str(event.get("seat_id", ""))],
+                        actor_ids=[str(event.get("seat_id") or "external-reality")],
                     )
                 )
                 continue
@@ -1216,6 +1396,61 @@ class ProductProjection:
             "facts": facts,
         }
 
+    def desk_known_items(self, context: dict[str, Any]) -> list[dict[str, str]]:
+        values = []
+        for item in [
+            *(context.get("relevant_evidence") or []),
+            *(context.get("recent_knowledge") or []),
+        ]:
+            text_value = self.product_item_text(item)
+            if text_value and text_value not in {entry["text"] for entry in values}:
+                values.append({"text": text_value})
+            if len(values) >= 6:
+                break
+        return values
+
+    def desk_waiting_items(self, context: dict[str, Any]) -> list[dict[str, str]]:
+        course = context.get("current_course")
+        if not isinstance(course, dict):
+            return []
+        items = []
+        for dependency in course.get("open_dependencies", []):
+            if not isinstance(dependency, dict):
+                continue
+            kind = str(dependency.get("type", "")).upper()
+            if kind == "MESSAGE_FROM":
+                actor = self.actor_name(dependency.get("actor_id")) or "对方"
+                value = f"等{actor}的回复。"
+            elif kind == "DEADLINE":
+                value = f"最晚在第 {dependency.get('due_tick')} 个时刻重新考虑。"
+            elif kind == "OPERATION_OUTCOME":
+                value = "等自己的行动留下结果。"
+            elif kind == "OBSERVATION_FOR":
+                value = "等一项调查回报。"
+            else:
+                value = "等现实给出下一条可核验的变化。"
+            items.append({"text": value})
+        return items
+
+    def desk_experience_items(self, context: dict[str, Any]) -> list[dict[str, str]]:
+        experiences = context.get("experiences") or []
+        items = []
+        for experience in experiences[-6:]:
+            if not isinstance(experience, dict):
+                continue
+            statement = str(experience.get("experience", "")).strip()
+            basis = str(experience.get("basis", "")).strip()
+            implication = str(experience.get("implication", "")).strip()
+            if statement:
+                items.append(
+                    {
+                        "text": self.public_copy(statement),
+                        "basis": self.public_copy(basis),
+                        "implication": self.public_copy(implication),
+                    }
+                )
+        return items
+
     def public_desk(
         self, worldline_id: str, human_attention: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -1228,18 +1463,32 @@ class ProductProjection:
         state = self.active.volume_runtime.worldline(worldline_id)
         lifetime = next(item for item in state["lifetimes"] if item["seat"] == lifetime_id)
         attention_wake_id = ""
+        attention_wake = None
         if human_attention:
-            attention_wake_id = next(
+            attention_wake = next(
                 (
-                    str(wake_id)
+                    wake
                     for wake_id in human_attention.get("wake_ids", [])
                     if (
                         wake := self.active.db.crisis_wake(str(wake_id))
                     ) is not None
                     and str(wake.get("actor_id", "")) == lifetime_id
                 ),
-                "",
+                None,
             )
+            attention_wake_id = str((attention_wake or {}).get("id", ""))
+        failed_agent_wake = next(
+            (
+                wake
+                for wake_id in (human_attention or {}).get("wake_ids", [])
+                if (
+                    wake := self.active.db.crisis_wake(str(wake_id))
+                ) is not None
+                and str(wake.get("actor_id", "")) != lifetime_id
+                and wake.get("status") == "FAILED"
+            ),
+            None,
+        )
         context = self.active.volume_runtime.lifetime_context(
             worldline_id, lifetime_id, wake_id=attention_wake_id or None
         )
@@ -1255,7 +1504,14 @@ class ProductProjection:
         )
         if human_attention is not None:
             decision_state = (
-                "NEEDS_RECONSIDERATION" if current_course else "NEEDS_FIRST_JUDGMENT"
+                "AGENT_FAILED"
+                if failed_agent_wake
+                else
+                "AWAITING_CONFIRMATION"
+                if attention_wake and attention_wake.get("status") == "STAGED"
+                else "NEEDS_RECONSIDERATION"
+                if current_course
+                else "NEEDS_FIRST_JUDGMENT"
             )
         else:
             decision_state = "COURSE_IN_FORCE" if current_course else "QUIET_NO_COURSE"
@@ -1264,6 +1520,8 @@ class ProductProjection:
             "NEEDS_RECONSIDERATION": (
                 "你主动重新考虑了这份判断。" if voluntary else "现在还这样办吗？"
             ),
+            "AGENT_FAILED": "另一处回应没有形成可执行判断",
+            "AWAITING_CONFIRMATION": "这次判断已经留下",
             "COURSE_IN_FORCE": "这个判断仍在生效。",
             "QUIET_NO_COURSE": "此刻还没有事情要求你落笔。",
         }[decision_state]
@@ -1273,7 +1531,10 @@ class ProductProjection:
             "desk": {
                 "decision_state": decision_state,
                 "uncertainty": self.product_items(context.get("known_uncertainty", [])),
+                "known": self.desk_known_items(context),
                 "current_course": self.desk_course_items(context),
+                "waiting_for": self.desk_waiting_items(context),
+                "experiences": self.desk_experience_items(context),
                 "since_last_deliberation": self.product_items(
                     (context.get("since_last_deliberation") or {}).get("facts", [])
                 ),

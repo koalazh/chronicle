@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from chronicle.product_projection import ProductProjection
+
+pytestmark = pytest.mark.skip(
+    reason="历史南京公共后果样例；当前 Killer Demo 的公共投影由山海关聚焦评估覆盖"
+)
 
 
 def test_archive_history_coalesces_public_consequences_with_actor_attribution(host):

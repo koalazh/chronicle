@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 from chronicle import hermes, world_mcp
 from chronicle.app import create_app
 from chronicle.host import ChronicleHost
-from chronicle.volume_live import HermesVolumeActorDriver, VolumeActorDriverError
+from chronicle.volume_live import (
+    HermesVolumeActorDriver,
+    RetryableVolumeActorDriverError,
+    VolumeActorDriverError,
+)
 from chronicle.volume_runtime import VolumeRuntimeConflict
 from chronicle.world import WorldAccessError, token_hash
 
@@ -84,6 +88,157 @@ def test_live_wake_prompt_demonstrates_revise_without_a_current_course(app_confi
         "steps": ["记录当前冻结触发"],
         "evidence_event_ids": ["event-2"],
     }
+    assert "首次判断" in messages[0]["content"]
+    assert "DEADLINE" in messages[0]["content"]
+
+
+def test_live_wake_prompt_requires_experience_reference_on_later_wu_cognition(app_config):
+    messages = HermesVolumeActorDriver(app_config, object())._messages(
+        {
+            "id": "wake-3",
+            "wake_type": "REVISIT_DUE",
+            "worldline_id": "worldline-1",
+            "actor_id": "wu-sangui",
+            "trigger_event_id": "event-3",
+        },
+        {
+            "moment_id": "moment-3",
+            "context": {
+                "current_course": {"course": "保留关口选择"},
+                "relevant_experience": {
+                    "experiences": [{"id": "experience-wu-3"}],
+                },
+            },
+        },
+    )
+    assert "experience_refs" in messages[0]["content"]
+    assert "逐字引用相关 experience id" in messages[0]["content"]
+
+
+def test_live_driver_rejects_direct_intent_after_wu_experience(app_config, tmp_path: Path):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute("UPDATE worldlines SET runtime_mode = 'live' WHERE id = ?", (worldline_id,))
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    moment_id = str(wake["frozen_perspective"]["moment_id"])
+    operation = host.db.add_crisis_wake_operation(
+        {
+            "wake_id": wake["id"],
+            "tool_name": "logical_intent",
+            "payload": {
+                "moment_id": moment_id,
+                "intent": {"type": "wait"},
+            },
+            "result": {"status": "accepted"},
+            "idempotency_key": "direct-wait",
+        }
+    )
+    perspective = {
+        "moment_id": moment_id,
+        "context": {
+            "current_course": {"course": "保留当前判断"},
+            "relevant_experience": {"experiences": [{"id": "experience-wu-3"}]}
+        },
+    }
+
+    result = HermesVolumeActorDriver(config, host.db)._logical_operation_or_fail(
+        wake, perspective, "wu-sangui"
+    )
+
+    assert result is None
+    rejected = host.db.crisis_wake_operations(wake["id"])[0]
+    assert rejected["id"] == operation["id"]
+    assert rejected["status"] == "REJECTED"
+    assert rejected["result"]["code"] == "experience_reference_required"
+
+
+def test_live_driver_rejects_direct_intent_at_wu_dependency_match(app_config, tmp_path: Path):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute("UPDATE worldlines SET runtime_mode = 'live' WHERE id = ?", (worldline_id,))
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    moment_id = str(wake["frozen_perspective"]["moment_id"])
+    operation = host.db.add_crisis_wake_operation(
+        {
+            "wake_id": wake["id"],
+            "tool_name": "logical_intent",
+            "payload": {
+                "moment_id": moment_id,
+                "intent": {"type": "wait"},
+            },
+            "result": {"status": "accepted"},
+            "idempotency_key": "direct-wait-at-dependency",
+        }
+    )
+    perspective = {
+        "moment_id": moment_id,
+        "context": {
+            "current_course": {"course": "保留当前判断"},
+            "why_now": {"matched_dependency_ids": ["bounded-reconsideration"]},
+        },
+    }
+
+    result = HermesVolumeActorDriver(config, host.db)._logical_operation_or_fail(
+        wake, perspective, "wu-sangui"
+    )
+
+    assert result is None
+    rejected = host.db.crisis_wake_operations(wake["id"])[0]
+    assert rejected["id"] == operation["id"]
+    assert rejected["status"] == "REJECTED"
+    assert rejected["result"]["code"] == "dependency_revision_required"
+
+
+def test_live_driver_rejects_direct_intent_for_initial_wu_course(app_config, tmp_path: Path):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    with host.db.transaction() as connection:
+        connection.execute("UPDATE worldlines SET runtime_mode = 'live' WHERE id = ?", (worldline_id,))
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    moment_id = str(wake["frozen_perspective"]["moment_id"])
+    operation = host.db.add_crisis_wake_operation(
+        {
+            "wake_id": wake["id"],
+            "tool_name": "logical_intent",
+            "payload": {
+                "moment_id": moment_id,
+                "intent": {"type": "update_plan", "objective": "等待", "steps": ["等待"]},
+            },
+            "result": {"status": "accepted"},
+            "idempotency_key": "direct-course",
+        }
+    )
+    perspective = {"moment_id": moment_id, "context": {"current_course": None}}
+
+    result = HermesVolumeActorDriver(config, host.db)._logical_operation_or_fail(
+        wake, perspective, "wu-sangui"
+    )
+
+    assert result is None
+    rejected = host.db.crisis_wake_operations(wake["id"])[0]
+    assert rejected["id"] == operation["id"]
+    assert rejected["status"] == "REJECTED"
+    assert rejected["result"]["code"] == "initial_deliberation_required"
 
 
 def test_live_volume_binding_owns_each_materialized_world_token(app_config, monkeypatch):
@@ -151,7 +306,7 @@ def test_live_volume_startup_reconciles_profiles_bindings_and_gateway(
         result = {}
         for lifetime in lifetimes:
             seat = str(lifetime["id"])
-            profile = f"chronicle-{worldline_id}-{seat}"
+            profile = hermes.lifetime_profile_name(worldline_id, seat)
             result[seat] = {
                 "profile": profile,
                 "profile_key": f"key-{seat}",
@@ -244,6 +399,62 @@ def test_live_volume_reconcile_fails_closed_on_binding_identity_drift(
     assert failed is not None
     assert failed["runtime_phase"] == "FAILED"
     assert failed["runtime_error_code"] == "volume_reconcile_failed"
+
+
+def test_pending_reconcile_requeues_transient_live_wake_failure(app_config):
+    host = ChronicleHost(app_config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake_id = frozen["pending_moment"]["wake_ids"][0]
+    host.db.update_crisis_wake(
+        wake_id,
+        status="FAILED",
+        error={"actor_id": "wu-sangui", "code": "live_wake_failed"},
+    )
+
+    host.volume_runtime._validate_pending_reconcile(worldline_id)
+
+    wake = host.db.crisis_wake(wake_id)
+    assert wake is not None
+    assert wake["status"] == "QUEUED"
+    assert wake["error"] == {
+        "actor_id": "wu-sangui",
+        "code": "live_wake_failed",
+        "retryable": True,
+    }
+
+
+def test_pending_reconcile_keeps_terminal_live_wake_failure_recoverable(app_config):
+    host = ChronicleHost(app_config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake_id = frozen["pending_moment"]["wake_ids"][0]
+    moment_id = frozen["pending_moment"]["id"]
+    host.db.add_crisis_wake_operation(
+        {
+            "wake_id": wake_id,
+            "tool_name": "logical_intent",
+            "payload": {"moment_id": moment_id},
+            "result": {"status": "rejected", "code": "missing_logical_intent"},
+            "status": "REJECTED",
+            "idempotency_key": f"{wake_id}:rejected",
+        }
+    )
+    host.db.update_crisis_wake(
+        wake_id,
+        status="FAILED",
+        error={"actor_id": "wu-sangui", "code": "missing_logical_intent"},
+    )
+
+    host.volume_runtime._validate_pending_reconcile(worldline_id)
+
+    assert host.db.crisis_wake(wake_id)["status"] == "FAILED"
 
 
 def test_failed_live_reconcile_blocks_reads_and_mutations(
@@ -400,6 +611,53 @@ def test_live_driver_stages_explicit_model_intent_without_default_wait(
     assert operations[0]["tool_name"] == "logical_intent"
     assert operations[0]["payload"]["intent"]["type"] == "update_plan"
     assert host.db.crisis_wake(wake["id"])["status"] == "STAGED"
+
+
+def test_live_driver_requeues_provider_timeout_for_safe_retry(
+    app_config, monkeypatch, tmp_path: Path
+):
+    config = replace(app_config, hermes_home=tmp_path / "hermes-home")
+    host = ChronicleHost(config)
+    created = host.volume_runtime.create()
+    worldline_id = created["worldline"]["id"]
+    host.volume_runtime.activate_crisis(worldline_id, "before-shanhaiguan")
+    host.volume_runtime.advance_one(worldline_id)
+    frozen = host.volume_runtime.freeze_pending_moment(worldline_id)
+    wake = host.db.crisis_wake(frozen["pending_moment"]["wake_ids"][0])
+    assert wake is not None
+    seat = str(wake["actor_id"])
+    profile = f"chronicle-{worldline_id}-{seat}"
+    host.db.update_worldline_lifetime(worldline_id, seat, profile_name=profile)
+    memory = config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def create_fresh_session(self, _profile, _key, _wake_id):
+            return "fresh-session"
+
+        def chat(self, _profile, _key, _messages, _session_id, _memory_key):
+            raise RuntimeError("provider timed out")
+
+    monkeypatch.setattr("chronicle.volume_live.HermesClient", FakeClient)
+    monkeypatch.setattr("chronicle.volume_live.profile_api_key", lambda *_args: "profile-key")
+
+    with pytest.raises(RetryableVolumeActorDriverError, match="Wake failed"):
+        HermesVolumeActorDriver(config, host.db).run_wake(
+            wake, wake["frozen_perspective"]
+        )
+
+    retriable = host.db.crisis_wake(wake["id"])
+    assert retriable is not None
+    assert retriable["status"] == "QUEUED"
+    assert retriable["error"] == {
+        "actor_id": seat,
+        "code": "live_wake_failed",
+        "retryable": True,
+    }
 
 
 def test_live_driver_repairs_one_missing_tool_call_in_same_session(

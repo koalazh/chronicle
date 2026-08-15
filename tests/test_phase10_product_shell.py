@@ -27,22 +27,20 @@ def test_v6_product_shell_creates_one_braided_volume_and_public_world(app_config
     payload = created.json()
     worldline = payload["worldline"]
     assert worldline["kind"] == "VOLUME"
-    assert len(payload["world"]["open_questions"]) == 2
+    assert len(payload["world"]["open_questions"]) == 1
     assert {
         question["id"] for question in payload["world"]["open_questions"]
-    } == {"before-shanhaiguan", "nanjing-succession"}
+    } == {"before-shanhaiguan"}
     assert {
         participant["display_name"]
         for question in payload["world"]["open_questions"]
         for participant in question["participants"]
-    } == {
-        "吴三桂",
-        "史可法",
-        "多尔衮",
-        "马士英",
-        "韩赞周",
-        "李自成",
-    }
+    } == {"吴三桂", "多尔衮", "李自成"}
+    assert [node["id"] for node in payload["world"]["corridor"]["locations"]] == [
+        "beijing",
+        "shanhaiguan",
+        "liaoxi",
+    ]
     assert payload["world"]["present_reality"] == []
     assert payload["world"]["current_life"] is None
     assert payload["world"]["continuation"] == {"status": "available"}
@@ -89,15 +87,17 @@ def test_v6_product_shell_derives_private_desk_and_keeps_follow_public(app_confi
     desk_fields = set(desk.json()["desk"])
     assert {
         "uncertainty",
+        "known",
         "current_course",
         "since_last_deliberation",
         "why_now",
         "binding_reality",
         "reconsideration",
+        "waiting_for",
+        "experiences",
     } <= desk_fields
     assert not {
         "arrivals",
-        "known",
         "current_plan",
         "active_obligations",
         "position",
@@ -134,13 +134,13 @@ def test_product_world_reports_when_no_automatic_trigger_remains(app_config):
         result = None
         for _ in range(4):
             result = client.post(f"/api/worldlines/{worldline_id}/continue").json()
-            if result["continue_status"] == "no_future_trigger":
+            if result["continue_status"] == "past":
                 break
 
         assert result is not None
-        assert result["continue_status"] == "no_future_trigger"
+        assert result["continue_status"] == "past"
         world = client.get(f"/api/worldlines/{worldline_id}/world").json()
-        assert world["continuation"] == {"status": "no_future_trigger"}
+        assert world["continuation"] == {"status": "past"}
 
 
 def test_v6_product_shell_continues_after_agent_handoff(app_config):
@@ -196,10 +196,7 @@ def test_live_volume_start_materializes_lifetimes_before_returning(app_config, m
 
     assert set(calls["lifetime_ids"]) == {
         "dorgon",
-        "han-zanzhou",
         "li-zicheng",
-        "ma-shiying",
-        "shi-kefa",
         "wu-sangui",
     }
     assert created["profile_records"]

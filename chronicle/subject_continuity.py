@@ -21,6 +21,7 @@ class LifetimeContextBuilder:
     MAX_DIRECT_EVIDENCE = 6
     MAX_RECENT_KNOWLEDGE = 6
     MAX_MEMORY_LINES = 6
+    MAX_EXPERIENCES = 6
     MAX_OBLIGATIONS = 8
 
     _PUBLIC_EVENT_TYPES = {
@@ -34,14 +35,19 @@ class LifetimeContextBuilder:
     _TRIGGER_PAYLOAD_KEYS = {
         "content",
         "crisis_id",
+        "description",
         "delivery_tick",
         "belief",
         "belief_key",
         "evidence_event_ids",
+        "field_event",
         "from",
         "global_tick",
         "intent",
+        "investigation",
         "message_id",
+        "observation",
+        "pressure",
         "recipient",
         "reason",
         "revisit_id",
@@ -79,6 +85,7 @@ class LifetimeContextBuilder:
         relevant_beliefs = self._relevant_beliefs(lifetime["beliefs"], tokens)
         knowledge = self._bounded_knowledge(lifetime["knowledge"], tokens)
         memory = self._selective_memory(str(lifetime["memory_text"]), tokens)
+        experiences = copy.deepcopy(lifetime.get("experiences", []))[-self.MAX_EXPERIENCES :]
         position_id = str(projection.get("positions", {}).get(lifetime["seat"], ""))
         position = {
             "id": position_id,
@@ -111,6 +118,8 @@ class LifetimeContextBuilder:
             "evidence": copy.deepcopy(knowledge["relevant"]),
             "memory": copy.deepcopy(memory),
         }
+        if experiences:
+            relevant_experience["experiences"] = copy.deepcopy(experiences)
         return {
             "worldline_id": worldline_id,
             "lifetime_id": lifetime["id"],
@@ -154,6 +163,7 @@ class LifetimeContextBuilder:
             "relevant_evidence": knowledge["relevant"],
             "recent_knowledge": knowledge["recent"],
             "subjective_memory": memory,
+            "experiences": experiences,
             "known_uncertainty": self._uncertainty(projection, trigger, lifetime["seat"]),
         }
 

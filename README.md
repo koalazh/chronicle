@@ -1,8 +1,25 @@
-# Chronicle · 甲申
+# Chronicle — a durable multi-agent world built on Hermes
 
-Chronicle 是一段可以亲自走进去的历史体验：先看共享世界，再接过其中一段人生的下一步。你写下的判断不会直接改写世界；Host 会验证行动，世界按自己的时间继续推进。
+> **The session ends. The subject does not.**
 
-当前内容是《甲申》：一卷共享历史、六段相互影响的人生，以及几处正在展开的局势。
+三个长期 Hermes 主体共享一个部分可观测的因果世界：他们形成判断，在 fresh cognition sessions 之间离席，只有现实真正影响此前等待的事时才回来；过去留下的少量经历，会继续影响下一次判断。你可以暂时接过其中一段人生，也可以把判断交还给世界继续向前。
+
+当前产品只展开一个山海关世界和三个独立主体：李自成、吴三桂、多尔衮。这里不是聊天窗口，也不是历史仪表盘；每一次输入都必须留下一个有现实边界的下一步。
+
+## Killer Demo
+
+```text
+吴三桂形成一个等待中的判断
+  → session 结束，世界继续
+  → 李自成或多尔衮独立改变共享现实
+  → 无关变化只成为背景
+  → 匹配的消息抵达，吴三桂重新判断
+  → 一段 consequential Experience 留下
+  → 同一主体在下一次 fresh session 显式引用它
+  → 人类 takeover / handback，之后仍从同一人生继续
+```
+
+产品界面只有三个入口：看 Live World、进入一段人生、回看已经发生的因果链。
 
 ## 先选择运行方式
 
@@ -50,7 +67,7 @@ curl -fsS http://127.0.0.1:8711/health
 体验路径大致是：
 
 ```text
-卷册首页 → 世界 → 观察一段人生 → Inhabit → 写下 Course → 离席 → Continue → 回看
+卷册首页 → Live World → 进入一段人生 → 留下判断 → 交还给世界 → 继续 → 回看
 ```
 
 结束时回到服务终端按 `Ctrl-C`。确认 `CHRONICLE_TMP` 是本次命令创建的临时目录后，再清理它：
@@ -209,9 +226,10 @@ git diff --check
 ## 文档入口
 
 - [产品说明](PRODUCT.md)：Chronicle 想提供什么体验
-- [多主体运行说明](docs/MULTI_AGENT.md)：六段人生如何通过已发生的事实互相影响
+- [多主体运行说明](docs/MULTI_AGENT.md)：三段人生如何通过已发生的事实互相影响
 - [运维与验收操作手册](docs/OPERATIONS.md)：配置、启动、恢复、真实 Hermes 和安全边界
 - [当前验收记录](docs/ACCEPTANCE.md)：测试、浏览器、真实业务和已知限制
+- [Thesis Evals](docs/THESIS_EVALS.md)：Session reset、主体记忆、Profile isolation 和语义恢复的极小评估
 - [文档索引](docs/README.md)：按读者角色查找其他文档
 
 ## 当前边界

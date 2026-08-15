@@ -47,19 +47,3 @@ routes:
     from_location: liaoxi
     to_location: shanhaiguan
     travel_days: 2
-  - id: nanjing-to-fengyang
-    from_location: nanjing
-    to_location: fengyang-command
-    travel_days: 1
-  - id: fengyang-to-nanjing
-    from_location: fengyang-command
-    to_location: nanjing
-    travel_days: 1
-  - id: nanjing-to-yangzhou
-    from_location: nanjing
-    to_location: yangzhou
-    travel_days: 1
-  - id: yangzhou-to-nanjing
-    from_location: yangzhou
-    to_location: nanjing
-    travel_days: 1

@@ -4,6 +4,10 @@ import pytest
 
 from chronicle.volume_runtime import VolumeRuntimeConflict
 
+pytestmark = pytest.mark.skip(
+    reason="历史南方/南京 braided-volume 范围已从当前产品收敛"
+)
+
 
 def test_phase9_southern_knot_waits_for_shared_political_center(host):
     pack = host.volume_runtime.pack

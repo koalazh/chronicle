@@ -2,32 +2,6 @@ locations_path: locations.yaml
 routes_path: routes.yaml
 location_aliases:
   beijing: capital
-entities:
-  - id: nanjing-political-center
-    type: INSTITUTION
-    display_name: 南京政治中心
-    initial_state: UNFORMED
-    state_labels:
-      UNFORMED: 尚未形成可执行的南京政治中心
-      FU_RECOGNIZED: 南京已经形成福王承认的政治中心
-      LU_RECOGNIZED: 南京已经形成潞王承认的政治中心
-      CONTESTED: 南京政治中心处于公开争议
-      FRAGMENTED: 南京政治中心没有汇合为单一承认
-      DEFERRED: 南京政治中心的形成被延期
+entities: []
 institutional_state: {}
-historical_field:
-  - id: north-south-recognition-bridge
-    tick: 9
-    status: PENDING
-    assertion_ids: [n013, n014]
-    messages:
-      - id: north-affairs-public-record
-        source_crisis_id: before-shanhaiguan
-        sender: public-record
-        recipients: [shi-kefa, ma-shiying, han-zanzhou]
-        position_report:
-          lifetime_ids: [li-zicheng, wu-sangui, dorgon]
-        delivery_offset: 1
-        source: historical_field
-        assertion_ids: []
-        disputed: false
+historical_field: []

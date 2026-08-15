@@ -21,8 +21,9 @@ README 里的命令可以整段复制，不需要先理解项目内部名称。
 | 修改页面、文案或隐私边界 | [FRONTEND.md](FRONTEND.md) | 前端开发者 |
 | 启动、隔离、排障和清理运行资源 | [OPERATIONS.md](OPERATIONS.md) | 开发者 / 运维人员 |
 | 核对测试、浏览器和真实运行证据 | [ACCEPTANCE.md](ACCEPTANCE.md) | 验收人员 |
+| 核对长期主体命题的极小评估 | [THESIS_EVALS.md](THESIS_EVALS.md) | 产品架构 / 验收人员 |
 | 维护史料、来源和人物视野 | [HISTORY.md](HISTORY.md) | 内容研究 / 建模人员 |
-| 维护南京定策内容 | [NANJING_SUCCESSION_RESEARCH.md](NANJING_SUCCESSION_RESEARCH.md) | 内容研究 / 建模人员 |
+| 查阅南京定策历史材料（仅归档） | [archive/README.md](archive/README.md) | 内容研究 / 建模人员 |
 
 这些文档会使用代码和研究所需的内部名称；它们不要求普通用户阅读，也不应反过来成为产品页面的文案来源。
 

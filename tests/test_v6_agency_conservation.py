@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from chronicle.host import ChronicleHost
+
+pytestmark = pytest.mark.skip(
+    reason="历史南京主体/制度/claimant 合同；当前产品只保留山海关三主体"
+)
 
 
 def _nanjing_runtime(app_config, suffix: str):

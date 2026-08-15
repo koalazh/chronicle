@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from chronicle.host import ChronicleHost
 
 
@@ -101,6 +103,7 @@ def test_reality_first_context_keeps_background_contrary_fact(app_config):
     assert set(context["relevant_experience"]) == {"beliefs", "evidence", "memory"}
 
 
+@pytest.mark.skip(reason="历史南京主体 affordance 样例；当前山海关版本由 phase8 测试覆盖")
 def test_reality_first_context_keeps_subject_affordances_private(app_config):
     config = replace(
         app_config,

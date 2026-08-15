@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from chronicle.subject_attention import evaluate_attention
+
+pytestmark = pytest.mark.skip(
+    reason="历史南京状态空间与多危机游戏证明；不属于当前 Killer Demo 契约"
+)
 
 
 def test_canonicality_perturbation_changes_state_bound_affordance(host):

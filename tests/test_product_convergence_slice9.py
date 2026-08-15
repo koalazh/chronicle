@@ -5,8 +5,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+import chronicle.product_api as product_api
 from chronicle.app import create_app
 from chronicle.host import ChronicleHost
+from chronicle.volume_live import (
+    RetryableVolumeActorDriverError,
+    VolumeActorDriverError,
+)
 
 
 def _settle_all(runtime: Any, worldline_id: str) -> None:
@@ -87,6 +92,74 @@ def test_product_continue_auto_seals_at_structural_boundary(app_config):
         assert continued.json()["worldline"]["status"] == "SEALED"
         assert client.get("/api/worldlines/active").json()["active"] is None
         assert client.get(f"/api/worldlines/{worldline_id}/archive").status_code == 200
+
+
+def test_product_continue_keeps_a_live_wake_retryable_after_provider_failure(
+    app_config, monkeypatch
+):
+    config = replace(app_config, dev=True)
+
+    def fail_wake(*_args, **_kwargs):
+        raise RetryableVolumeActorDriverError("provider timed out")
+
+    monkeypatch.setattr(product_api.HermesVolumeActorDriver, "run_wake", fail_wake)
+    monkeypatch.setattr(
+        "chronicle.volume_runtime.VolumeRuntime.ensure_live_runtime",
+        lambda runtime, worldline_id: runtime.db.worldline(worldline_id),
+    )
+
+    with TestClient(create_app(config)) as client:
+        created = client.post("/api/worldlines", json={"live": False})
+        worldline_id = created.json()["worldline"]["id"]
+        host = ChronicleHost(config)
+        with host.db.transaction() as connection:
+            connection.execute(
+                "UPDATE worldlines SET runtime_mode = 'live' WHERE id = ?",
+                (worldline_id,),
+            )
+
+        continued = client.post(f"/api/worldlines/{worldline_id}/continue")
+
+    assert continued.status_code == 200
+    assert continued.json()["continue_status"] == "agent_retry"
+    assert continued.json()["pending_moment"] is not None
+
+
+def test_product_continue_does_not_label_terminal_live_intent_failure_retryable(
+    app_config, monkeypatch
+):
+    config = replace(app_config, dev=True)
+
+    def fail_wake(_driver, wake, *_args, **_kwargs):
+        ChronicleHost(config).db.update_crisis_wake(
+            wake["id"],
+            status="FAILED",
+            error={"actor_id": wake["actor_id"], "code": "missing_logical_intent"},
+        )
+        raise VolumeActorDriverError("missing logical intent")
+
+    monkeypatch.setattr(product_api.HermesVolumeActorDriver, "run_wake", fail_wake)
+    monkeypatch.setattr(
+        "chronicle.volume_runtime.VolumeRuntime.ensure_live_runtime",
+        lambda runtime, worldline_id: runtime.db.worldline(worldline_id),
+    )
+
+    with TestClient(create_app(config)) as client:
+        created = client.post("/api/worldlines", json={"live": False})
+        worldline_id = created.json()["worldline"]["id"]
+        host = ChronicleHost(config)
+        with host.db.transaction() as connection:
+            connection.execute(
+                "UPDATE worldlines SET runtime_mode = 'live' WHERE id = ?",
+                (worldline_id,),
+            )
+
+        continued = client.post(f"/api/worldlines/{worldline_id}/continue")
+
+    assert continued.status_code == 200
+    assert continued.json()["continue_status"] == "agent_failed"
+    assert continued.json()["pending_moment"] is not None
+    assert continued.json()["world"]["continuation"]["status"] == "agent_failed"
 
 
 def test_active_life_requires_handoff_before_realtime_world_read(app_config):

@@ -12,6 +12,7 @@ function text(value, fallback = "") {
 function itemText(item) {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return String(item ?? "");
+  const payload = item.payload;
   return (
     item.content
     || item.observation
@@ -23,7 +24,8 @@ function itemText(item) {
     || item.reason
     || item.value?.objective
     || item.value?.content
-    || "这一项暂未留下文字说明"
+    || (payload && typeof payload === "object" ? itemText(payload) : "")
+    || "一项已知事实。"
   );
 }
 
@@ -32,10 +34,39 @@ function listMarkup(items, className = "folio-list") {
   return `<ul class="${className}">${items.map((item) => `<li>${text(itemText(item))}</li>`).join("")}</ul>`;
 }
 
+const CONSEQUENCE_KIND_TEXT = {
+  INVESTIGATION: "调查",
+  OBSERVATION: "观察",
+  REALITY: "现实",
+};
+
+function consequenceSource(item) {
+  const source = item?.actor?.display_name || item?.actors?.[0]?.display_name || "";
+  const invalid = ["none", "null", "undefined"].includes(String(source).trim().toLowerCase());
+  const kindValue = item?.kind || item?.type || "之后发生";
+  const kind = CONSEQUENCE_KIND_TEXT[kindValue] || kindValue;
+  return invalid || source === kind ? "" : source;
+}
+
+function consequenceKind(item) {
+  const value = item?.kind || item?.type || "之后发生";
+  return CONSEQUENCE_KIND_TEXT[value] || value;
+}
+
+function consequenceBody(item) {
+  const value = itemText(item).trim();
+  const source = consequenceSource(item);
+  const body = source && value.startsWith(source) ? value.slice(source.length).trim() : value;
+  if (item?.type === "INVESTIGATION" && body === "完成了一项调查。") {
+    return "调查已经完成；具体所见见下一条观察。";
+  }
+  return body;
+}
+
 function consequenceMarkup(items) {
   if (!items?.length) return "";
-  return `<ul class="desk-list consequence-list">${items.map((item) => `
-    <li><span class="consequence-kind">${text(item.kind || item.type || "之后发生")}</span><span>${text(itemText(item))}</span>${item.actor?.display_name ? `<small>由${text(item.actor.display_name)}留下</small>` : ""}</li>
+  return `<ul class="consequence-list">${items.map((item) => `
+    <li><div class="consequence-heading">${consequenceSource(item) ? `<span class="consequence-source">${text(consequenceSource(item))}</span>` : ""}<span class="consequence-kind">${text(consequenceKind(item))}</span></div><p class="consequence-body">${text(consequenceBody(item))}</p></li>
   `).join("")}</ul>`;
 }
 
@@ -58,13 +89,12 @@ function judgmentHistoryMarkup(items) {
 
 const ACTIVITY_COPY = {
   start: ["正在展开这一卷", "先把第一幅世界铺到你面前。"],
-  continue: ["历史正在向前展开", "正在寻找下一个有意义的时刻。"],
-  decision: ["这一笔正在落入当前时刻", "正在核对判断与现实之间能发生的下一步。"],
+  continue: ["正在推进世界", "正在处理已经发生的下一处触发；不要重复点击。"],
+  decision: ["正在保存这次判断", "正在把它交给当前卷册确认；不要重复提交。"],
   reconsider: ["正在重新打开这份判断", "正在把新的现实带回书案。"],
   leave: ["正在把这段人生交还给世界", "已经发生的事会保留，世界随后继续向前。"],
   inhabit: ["正在把这一段人生交到你面前", "正在把当前需要判断的下一步交到你面前。"],
   follow: ["正在寻找这段人生", "正在打开它可以被看见的公开轨迹。"],
-  draft: ["正在准备一份参考草稿", "这只是可修改的参考，不会替你落笔。"],
   archive: ["正在打开过去", "正在整理可以公开回看的历史。"],
 };
 
@@ -74,13 +104,18 @@ function activityMarkup() {
   const copy = ACTIVITY_COPY[activity.kind] || ["正在展开这一页", "请稍候，当前操作还没有得到确定回音。"];
   const reconciling = activity.phase === "reconciling";
   const action = reconciling
-    ? `<button class="quiet activity-action" data-action="reconcile-activity">核对当前卷册</button>`
+    ? `<button class="quiet activity-action" data-action="reconcile-activity" ${activity.reconciling ? "disabled" : ""}>${activity.reconciling ? "正在核对" : "重新核对当前卷册"}</button>`
     : `<button class="quiet activity-action" data-action="cancel-activity">停止等待并核对</button>`;
   return `<section class="activity-banner ${reconciling ? "reconciling" : ""}" role="status" aria-live="polite" aria-busy="true">
     <span class="activity-stamp" aria-hidden="true">卷</span>
-    <div class="activity-copy"><span class="column-label">正在进行</span><strong>${text(reconciling ? "请求结果尚未确认" : copy[0])}</strong><p>${text(activity.pendingText || (reconciling ? "这一笔可能已经改变卷册，先核对当前状态，不要重复提交。" : copy[1]))}</p></div>
+    <div class="activity-copy"><span class="column-label">正在进行</span><strong>${text(reconciling ? "正在确认这次操作" : copy[0])}</strong><p>${text(activity.pendingText || (reconciling ? "正在自动核对当前卷册；不要重复提交。" : copy[1]))}</p></div>
     ${action}
   </section>`;
+}
+
+function noticeMarkup() {
+  if (!state.notice && !state.error) return "";
+  return `<div class="notice-stack" aria-live="polite">${state.notice ? `<p class="notice">${text(state.notice)}</p>` : ""}${state.error ? `<p class="notice error">${text(state.error)}</p>` : ""}</div>`;
 }
 
 function chrome(content, { compact = false } = {}) {
@@ -99,8 +134,7 @@ function chrome(content, { compact = false } = {}) {
         ${nav.map(([page, label]) => `<button data-page="${page}" aria-current="${state.page === page ? "page" : "false"}">${label}</button>`).join("")}
       </nav>
     </header>
-    <main class="main${compact ? " compact" : ""}">${activityMarkup()}${content}</main>
-    ${(state.notice || state.error) ? `<div class="notice-stack" aria-live="polite">${state.notice ? `<p class="notice">${text(state.notice)}</p>` : ""}${state.error ? `<p class="notice error">${text(state.error)}</p>` : ""}</div>` : ""}
+    <main class="main${compact ? " compact" : ""}">${activityMarkup()}${noticeMarkup()}${content}</main>
   `;
 }
 
@@ -183,20 +217,85 @@ function personMarkup(person) {
   `;
 }
 
+function traceBody(event) {
+  const value = String(event.text || event.declaration || "").trim();
+  const sourceValue = event.actor?.display_name;
+  const source = ["none", "null", "undefined"].includes(String(sourceValue).trim().toLowerCase())
+    ? ""
+    : sourceValue;
+  return source && value.startsWith(source) ? value.slice(source.length).trim() : value;
+}
+
+function traceItemMarkup(event) {
+  const sourceValue = event.actor?.display_name;
+  const kind = event.kind || event.type || "之后发生";
+  const source = ["none", "null", "undefined"].includes(String(sourceValue).trim().toLowerCase()) || sourceValue === kind
+    ? ""
+    : sourceValue;
+  return `<li><span>第 ${text(event.tick)} 个时刻</span><div><div class="trace-heading"><strong>${text(kind)}</strong>${source ? `<span class="trace-source">${text(source)}</span>` : ""}</div><p>${text(traceBody(event))}</p></div></li>`;
+}
+
+function corridorPersonMarkup(person, publicPerson) {
+  const source = publicPerson || person;
+  const canEnter = source.available || source.inhabited;
+  return `
+    <article class="person-entry corridor-person">
+      <div>
+        <span class="column-label">${text(person.state_label || "判断尚未落笔")}</span>
+        <strong>${text(person.display_name)}</strong>
+        <p>${text(person.location?.display_name || "位置未明")}</p>
+      </div>
+      <button class="${canEnter ? "secondary" : "quiet"}" data-action="follow" data-lifetime-id="${text(person.id)}" ${canEnter ? "" : "disabled"}>${source.inhabited ? "回到这一生" : "走近"}</button>
+    </article>
+  `;
+}
+
+function experienceMarkup(items) {
+  if (!items?.length) return `<p class="empty-copy">目前还没有一段过去要求你重新考虑。</p>`;
+  return `<ul class="experience-list">${items.map((item) => `
+    <li><strong>${text(item.text)}</strong>${item.basis ? `<p><span>因为</span>${text(item.basis)}</p>` : ""}${item.implication ? `<p><span>以后</span>${text(item.implication)}</p>` : ""}</li>
+  `).join("")}</ul>`;
+}
+
+function corridorMarkup(corridor, publicPeople) {
+  const locations = corridor.locations || [];
+  const people = corridor.people || [];
+  const publicById = Object.fromEntries(publicPeople.map((person) => [person.id, person]));
+  return `
+    <div class="corridor-track" aria-label="北京到山海关再到辽西的走廊">
+      ${locations.map((location, index) => `<span class="corridor-stop"><strong>${text(location.display_name)}</strong>${index < locations.length - 1 ? `<i aria-hidden="true">→</i>` : ""}</span>`).join("")}
+    </div>
+    <div class="people-inline corridor-people">${people.map((person) => corridorPersonMarkup(person, publicById[person.id])).join("")}</div>
+    ${corridor.transit?.length ? `<div class="transit-list">${corridor.transit.map((message) => `<p><strong>${text(message.text || "一封消息正在途中")}</strong><span>${text(message.from?.display_name)} → ${text(message.to?.display_name)}</span><small>还有 ${text(message.days_remaining)} 日抵达</small></p>`).join("")}</div>` : `<p class="empty-copy transit-empty">此刻没有消息停在路上。</p>`}
+  `;
+}
+
+function recentEventsMarkup(items) {
+  if (!items?.length) return `<p class="empty-copy">这一卷刚刚展开，变化还没有留下公共记录。</p>`;
+  return `<ol class="trace-list recent-events">${items.map(traceItemMarkup).join("")}</ol>`;
+}
+
 function worldPage() {
   if (!state.world) return chrome(`<div class="loading-block">正在展开世界……</div>`);
   const world = state.world;
-  const questions = world.open_questions || [];
+  const corridor = world.corridor || {};
+  const publicPeople = (world.open_questions || []).flatMap((question) => question.participants || []);
   const reality = world.present_reality || [];
   const continuationStatus = world.continuation?.status || state.lastContinueStatus || "";
-  const stalled = continuationStatus === "no_future_trigger"
-    && questions.length > 0;
+  const agentFailed = continuationStatus === "agent_failed";
+  const stalled = continuationStatus === "no_future_trigger" || agentFailed;
   const worldSections = [
-    questions.length ? `
+    `
       <section class="world-section">
-        <div class="section-heading"><span>未决的事</span><h2>谁正在这些事情里</h2></div>
-        <div class="question-list">${questions.map(questionMarkup).join("")}</div>
-      </section>` : "",
+        <div class="section-heading"><span>现实 · 第 ${text(world.tick)} 个时刻</span><h2>北京 → 山海关 → 辽西</h2></div>
+        <p class="world-lede">三段人生共享同一条现实走廊；消息会在路上，判断不会替彼此发生。</p>
+        ${corridorMarkup(corridor, publicPeople)}
+      </section>`,
+    `
+      <section class="world-section">
+        <div class="section-heading"><span>最近发生</span><h2>世界如何走到这里</h2></div>
+        ${recentEventsMarkup(corridor.recent_events)}
+      </section>`,
     reality.length ? `
       <section class="world-section">
         <div class="section-heading"><span>已经成为现实</span><h2>世界留下了什么</h2></div>
@@ -207,13 +306,13 @@ function worldPage() {
     <section class="run-header">
       <div>
         <p class="kicker">甲申 · ${text(world.volume?.native_period || "崇祯十七年")}</p>
-        <h1>现在什么还没有定下来？</h1>
+        <h1>山海关一线正在向前</h1>
         <p>第 ${text(world.tick)} 个时刻 · ${text(world.volume?.subtitle || "崇祯十七年")}</p>
       </div>
     </section>
     ${worldSections || `<p class="empty-copy world-empty">眼前没有新的事情需要你介入。</p>`}
     <div class="continue-bar${stalled ? " paused" : ""}">
-      <div><span>${stalled ? "世界暂时停在这里" : "让世界继续"}</span><small>${stalled ? "当前没有下一处已经发生的触发。走近一段人生，在书案主动定一个方向。" : "下一次推进只落在已经存在的真实触发上。"}</small></div>
+      <div><span>${agentFailed ? "这一处回应没有形成判断" : stalled ? "世界暂时停在这里" : "让世界继续"}</span><small>${agentFailed ? "现实没有被改写。走近这段人生，接过下一步；也可以重新检查。" : stalled ? "当前没有下一处已经发生的触发。走近一段人生，在书案主动定一个方向。" : "下一次推进只落在已经存在的真实触发上。"}</small></div>
       ${stalled ? `<div class="continue-actions"><button class="secondary" data-action="focus-people">走近一段人生</button><button class="quiet" data-action="continue-world" ${state.busy ? "disabled" : ""}>重新检查</button></div>` : `<button class="primary" data-action="continue-world" ${state.busy ? "disabled" : ""}>让世界继续</button>`}
     </div>
   `);
@@ -236,7 +335,7 @@ function followPage() {
     </section>
     <section class="follow-trace">
       <div class="section-heading"><span>公开轨迹</span><h2>这段人生如何走到这里</h2></div>
-      <ol class="trace-list">${(follow.trace || []).map((event) => `<li><span>第 ${text(event.tick)} 个时刻</span><div><strong>${text(event.kind || event.type)}</strong><p>${text(event.text || event.declaration || "")}</p>${event.actor?.display_name ? `<small>由${text(event.actor.display_name)}留下</small>` : ""}</div></li>`).join("") || `<li class="empty-copy">还没有可见轨迹。</li>`}</ol>
+      <ol class="trace-list">${(follow.trace || []).map(traceItemMarkup).join("") || `<li class="empty-copy">还没有可见轨迹。</li>`}</ol>
     </section>
   `);
 }
@@ -248,22 +347,43 @@ function deskPage() {
   const whyNow = desk.why_now || {};
   const reconsideration = desk.reconsideration || {};
   const decisionState = desk.decision_state || "QUIET_NO_COURSE";
+  const agentFailed = decisionState === "AGENT_FAILED";
+  const awaitingConfirmation = decisionState === "AWAITING_CONFIRMATION";
   const hasCourse = Boolean(desk.current_course?.length);
   const voluntaryReconsideration = Boolean(reconsideration.voluntary && hasCourse);
   const needsJudgment = decisionState === "NEEDS_FIRST_JUDGMENT" || decisionState === "NEEDS_RECONSIDERATION";
   const firstJudgment = decisionState === "NEEDS_FIRST_JUDGMENT";
+  const deskSurfaces = [
+    desk.known?.length ? `<div class="desk-surface"><div class="section-heading"><span>我现在知道</span><h2>已经抵达这段人生的现实</h2></div>${listMarkup(desk.known, "desk-list")}</div>` : "",
+    desk.current_course?.length ? `<div class="desk-surface"><div class="section-heading"><span>我此前打算</span><h2>仍在生效的方向</h2></div>${listMarkup(desk.current_course, "desk-list")}</div>` : "",
+    desk.waiting_for?.length ? `<div class="desk-surface"><div class="section-heading"><span>我正在等</span><h2>还没有抵达的事</h2></div>${listMarkup(desk.waiting_for, "desk-list")}</div>` : "",
+    desk.experiences?.length ? `<div class="desk-surface"><div class="section-heading"><span>哪些过去仍影响我</span><h2>留下来的几段经历</h2></div>${experienceMarkup(desk.experiences)}</div>` : "",
+  ].join("");
   const decisionCopy = firstJudgment
     ? "这一次还没有形成要继续执行的方向。"
+    : agentFailed
+      ? "你的判断已经保留，但另一处回应没有形成可执行判断；世界没有继续推进。"
+    : awaitingConfirmation
+      ? "上一笔判断已经留在当前时刻，正在等世界把它确认。"
     : decisionState === "NEEDS_RECONSIDERATION"
       ? (voluntaryReconsideration ? "你主动重新考虑了这份判断。" : "现实已经改变了此前判断的基础。")
       : decisionState === "COURSE_IN_FORCE"
         ? "这个判断仍在生效。"
         : "此刻还没有事情要求你落笔。";
-  const judgmentForm = needsJudgment ? `
+  const judgmentForm = agentFailed ? `
+        <div class="decision-pending decision-failed" role="status">
+          <p>你的判断已经保留，不需要重新填写。重新检查只会重试没有形成结果的那一处；成功后世界才会继续。</p>
+          <button class="primary wide" data-action="retry-decision" ${state.busy ? "disabled" : ""}>重新检查当前卷册</button>
+        </div>
+  ` : awaitingConfirmation ? `
+        <div class="decision-pending" role="status">
+          <p>这次判断已经收到。世界还没有完成核对，请继续确认；不需要重新填写。</p>
+          <button class="primary wide" data-action="retry-decision" ${state.busy ? "disabled" : ""}>继续确认这次判断</button>
+        </div>
+  ` : needsJudgment ? `
         <form id="decision-form">
-          <label class="draft-label" for="decision">参考草稿</label>
-          <textarea id="decision" name="decision" rows="6" placeholder="把你愿意承担的下一步写在这里；如果现在改主意，也可以直接写下新的判断">${text(state.draftValue ?? state.draft?.draft ?? "")}</textarea>
-          <div class="draft-tools"><span id="draft-status">${text(state.draftStatus || "参考草稿 · 可直接修改")}</span><button class="quiet" type="button" data-action="draft-again">换个想法</button><button class="quiet" type="button" data-action="clear-draft">清空</button></div>
+          <label class="draft-label" for="decision">这次判断</label>
+          <textarea id="decision" name="decision" rows="6" placeholder="写下你愿意承担的下一步；如果现在改主意，也可以直接写下新的判断">${text(state.decisionValue ?? "")}</textarea>
           <div class="decision-actions">
             <button class="primary wide" type="submit" data-judgment-action="CHANGE" ${state.busy ? "disabled" : ""}>${firstJudgment ? "留下这个判断" : "改主意"}</button>
             ${firstJudgment ? `<button class="secondary wide" type="submit" data-judgment-action="WAIT" ${state.busy ? "disabled" : ""}>暂时不定</button>` : `<button class="secondary wide" type="submit" data-judgment-action="KEEP" ${state.busy ? "disabled" : ""}>仍照这样办</button>`}
@@ -285,11 +405,8 @@ function deskPage() {
     </section>
     <section class="desk-layout">
       <div class="desk-main">
-        <div class="desk-surface"><div class="section-heading"><span>此前</span><h2>你准备这样办</h2></div>${listMarkup(desk.current_course, "desk-list")}</div>
-        <div class="desk-surface"><div class="section-heading"><span>自那以后</span><h2>后来进入你所知的变化</h2></div>${listMarkup(desk.since_last_deliberation, "desk-list")}</div>
-        ${whyNow.open ? `<div class="known-strip"><span>为什么现在重新问你</span><p>${text(whyNow.text || "现实改变了此前判断的基础。")}</p>${listMarkup(whyNow.facts, "desk-list")}</div>` : ""}
-        <div class="desk-surface"><div class="section-heading"><span>不能忽略</span><h2>已经不能当作没发生的事</h2></div>${listMarkup(desk.binding_reality, "desk-list")}</div>
-        <div class="known-strip"><span>仍然没有答案</span>${listMarkup(desk.uncertainty, "desk-list")}</div>
+        ${deskSurfaces}
+        ${whyNow.open ? `<div class="known-strip"><span>现实已经改变</span><p>${text(whyNow.text || "新的现实已经改变此前判断的基础。")}</p>${listMarkup(whyNow.facts, "desk-list")}</div>` : ""}
       </div>
       <aside class="decision-desk">
         <p class="kicker">下一步</p>
@@ -308,6 +425,20 @@ function archivePage() {
     const history = detail.history || [];
     const ending = detail.ending || {};
     const selectedLife = detail.selected_life;
+    const selectedPerson = (detail.lives || []).find((person) => person.id === state.selectedReplayLifetime) || {};
+    const replayPeople = (detail.lives || []).map((person) => {
+      const selected = state.selectedReplayLifetime === person.id;
+      return `<article class="person-entry archive-person${selected ? " selected" : ""}"><div><strong>${text(person.display_name)}</strong><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}" aria-pressed="${selected}">${selected ? "正在回看" : "回看这段人生"}</button></article>`;
+    }).join("");
+    const replaySelection = state.selectedReplayLifetime && selectedLife ? `
+      <div class="replay-selection">
+        <div class="replay-context"><span>当前选择</span><strong>${text(selectedLife.display_name)} · ${text(selectedPerson.location?.display_name || "位置未明")}</strong></div>
+        <div class="replay-heading"><span>判断回看</span><h3>${text(selectedLife.display_name)}的判断如何变化</h3></div>
+        <p class="history-intro">下面只看已经落笔的判断、后来进入所知的事实，以及它们留下的后果。</p>
+        ${judgmentHistoryMarkup(selectedLife.judgment_history)}
+        ${selectedLife.later_known?.length ? `<div class="known-strip replay-later-known"><span>后来进入所知</span>${listMarkup(selectedLife.later_known, "desk-list")}</div>` : ""}
+      </div>
+    ` : "";
     return chrome(`
       <section class="actor-title">
         <p class="kicker">过去 · ${text(detail.volume?.native_period || "甲申")}</p>
@@ -315,25 +446,19 @@ function archivePage() {
         <p>${text(ending.message || "卷册已经到达结构边界，公共历史与各段人生都被保留下来。")}</p>
         <div class="hero-actions"><button class="secondary" data-action="clear-archive">返回过去</button></div>
       </section>
-      <section class="world-section archive-reality">
+      ${detail.final_reality?.length ? `<section class="world-section archive-reality">
         <div class="section-heading"><span>最后成为现实</span><h2>这一卷最后留下了什么</h2></div>
         ${realityMarkup(detail.final_reality)}
-      </section>
+      </section>` : ""}
       <section class="world-section archive-replay">
         <div class="section-heading"><span>历史如何走到这里</span><h2>留下的几次变化</h2></div>
-        ${history.map((chapter) => `<section class="archive-chapter"><h3>${text(chapter.title)}</h3><ol class="trace-list">${(chapter.beats || []).map((beat) => `<li><span>第 ${text(beat.tick)} 个时刻</span><div><strong>${text(beat.kind)}</strong><p>${text(beat.text)}</p></div></li>`).join("")}</ol></section>`).join("") || `<p class="empty-copy">没有可公开回看的历史。</p>`}
+        ${history.map((chapter) => `<section class="archive-chapter"><h3>${text(chapter.title)}</h3><ol class="trace-list">${(chapter.beats || []).map(traceItemMarkup).join("")}</ol></section>`).join("") || `<p class="empty-copy">没有可公开回看的历史。</p>`}
       </section>
-      <section class="world-section">
-        <div class="section-heading"><span>人生回看</span><h2>从一段人生回看</h2></div>
-        <div class="people-inline archive-people">${(detail.lives || []).map((person) => `<article class="person-entry archive-person"><div><strong>${text(person.display_name)}</strong><p>${text(person.location?.display_name || "位置未明")}</p></div><button class="secondary" data-action="archive-life" data-lifetime-id="${text(person.id)}">回看这段人生</button></article>`).join("")}</div>
-        ${state.selectedReplayLifetime && selectedLife ? `
-          <section class="judgment-history-section">
-            <div class="section-heading"><span>判断回看</span><h3>${text(selectedLife.display_name)} 的判断如何变化</h3></div>
-            <p class="history-intro">这里只回看已经落下的判断、后来进入所知的事实，以及它们留下的后果；不展示未落笔的思考。</p>
-            ${judgmentHistoryMarkup(selectedLife.judgment_history)}
-          </section>
-          <div class="known-strip"><span>${text(selectedLife.display_name)} · 后知事实</span>${listMarkup(selectedLife.later_known, "desk-list")}</div>
-        ` : ""}
+      <section class="world-section replay-workspace">
+        <div class="section-heading"><span>人生回看</span><h2>先选一段人生</h2></div>
+        <p class="section-intro">选定之后，下面会展开这段人生已经落下的判断，以及后来发生的变化。</p>
+        <div class="people-inline archive-people">${replayPeople}</div>
+        ${replaySelection}
       </section>
     `, { compact: true });
   }
@@ -377,64 +502,7 @@ async function loadFollow() {
 
 async function loadDesk() {
   if (!state.active?.id || state.active.kind !== "VOLUME") return;
-  state.draftRequestToken += 1;
-  state.draft = null;
-  state.draftValue = null;
-  state.draftPristine = true;
-  state.draftStatus = "";
   state.desk = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/desk`);
-  if (["NEEDS_FIRST_JUDGMENT", "NEEDS_RECONSIDERATION"].includes(state.desk?.desk?.decision_state)) {
-    void requestDraft();
-  }
-}
-
-function updateDraftStatus(value) {
-  const status = document.querySelector("#draft-status");
-  if (status) status.textContent = value;
-}
-
-async function requestDraft(force = false) {
-  const token = ++state.draftRequestToken;
-  if (force && state.draftPristine) {
-    state.draftValue = "";
-    const textarea = document.querySelector("#decision");
-    if (textarea) textarea.value = "";
-  }
-  state.draftStatus = "正在准备参考草稿……";
-  updateDraftStatus(state.draftStatus);
-  try {
-    const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/assist/draft`, { timeoutMs: 15000, method: "POST", body: "{}" });
-    if (token !== state.draftRequestToken || state.page !== "desk") return;
-    if (!result.available || !result.suggestion?.draft) {
-      state.draftStatus = "参考草稿暂时不可用。";
-      updateDraftStatus(state.draftStatus);
-      return;
-    }
-    state.draft = result.suggestion;
-    const textarea = document.querySelector("#decision");
-    if (state.draftPristine && textarea && !textarea.value.trim()) {
-      textarea.value = result.suggestion.draft;
-      state.draftValue = result.suggestion.draft;
-      state.draftStatus = "参考草稿 · 可直接修改";
-    } else {
-      state.draftStatus = "参考草稿已准备好 · 查看";
-    }
-    updateDraftStatus(state.draftStatus);
-  } catch (_error) {
-    if (token !== state.draftRequestToken) return;
-    state.draftStatus = "参考草稿暂时不可用。";
-    updateDraftStatus(state.draftStatus);
-  }
-}
-
-function clearDraft() {
-  state.draftRequestToken += 1;
-  state.draftValue = "";
-  state.draftPristine = false;
-  state.draftStatus = "参考草稿已清空。";
-  const textarea = document.querySelector("#decision");
-  if (textarea) textarea.value = "";
-  updateDraftStatus(state.draftStatus);
 }
 
 async function loadArchive() {
@@ -469,6 +537,12 @@ function applyWorldline(result) {
 
 function continueNotice(result) {
   const ticks = Number(result.advanced_ticks || 0);
+  if (result.continue_status === "agent_retry") {
+    return "这一刻还没有完成回应；现实没有被改写。可以再试一次，也可以接过其中一段人生。";
+  }
+  if (result.continue_status === "agent_failed") {
+    return "这一处回应没有形成有效判断；现实没有被改写。可以重新检查这一处，也可以接过其中一段人生。";
+  }
   if (result.continue_status === "no_future_trigger") {
     return ticks > 0
       ? `世界已经向前走了 ${ticks} 个时刻；眼下没有下一处已经发生的触发。走近一段人生，在书案主动定一个方向。`
@@ -508,12 +582,14 @@ async function continueWorld() {
     state.selectedArchive = result.worldline.id;
     state.notice = "这一卷已经走到边界。历史从这里进入过去。";
     go("archive");
-    await loadPageData();
+    state.page = "archive";
+    await loadArchive();
     return;
   }
   if (result.pending_moment && result.continue_status === "human_judgment" && state.active.inhabited_lifetime_id) {
     state.notice = "这一刻已经停在你的书案前。";
     go("desk");
+    state.page = "desk";
     await loadDesk();
   } else {
     state.notice = continueNotice(result);
@@ -557,7 +633,25 @@ async function submitDecision(action, value) {
   state.lastContinueStatus = "";
   state.lastContinueAdvancedTicks = 0;
   state.desk = result.desk || state.desk;
+  state.decisionValue = null;
   state.notice = action === "WAIT" ? "你选择暂时不定；这一笔已经落入当前时刻。" : "这一笔已经落入当前时刻。";
+  await loadDesk();
+}
+
+async function retryDecision() {
+  const result = await api(`/api/worldlines/${encodeURIComponent(state.active.id)}/decision/retry`, {
+    method: "POST",
+    body: "{}",
+  });
+  applyWorldline(result);
+  state.lastContinueStatus = "";
+  state.lastContinueAdvancedTicks = 0;
+  const decisionState = result.desk?.desk?.decision_state;
+  state.notice = decisionState === "AGENT_FAILED"
+    ? "你的判断已经保留，但另一处回应仍未形成有效判断；可以再次重新检查。"
+    : decisionState === "AWAITING_CONFIRMATION"
+      ? "上一笔判断已经留在当前时刻，世界尚未确认；可以继续确认这次判断。"
+      : "上一笔判断已经完成核对。";
   await loadDesk();
 }
 
@@ -600,16 +694,23 @@ function unknownRequest(error) {
   return error?.name === "AbortError" || !error?.status || error.status >= 500;
 }
 
+function scrollToActivity() {
+  if (typeof window !== "undefined" && typeof window.scrollTo === "function") {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+}
+
 function cancelActivity() {
   const activity = state.activity;
   if (!activity) return;
   activity.phase = "reconciling";
-  activity.pendingText = "已停止等待，正在核对当前卷册；这次请求可能已经留下了变化。";
+  activity.pendingText = "已停止等待，正在自动核对当前卷册；这次请求可能已经留下了变化。";
   if (activity.controller) {
     activity.controller.abort();
-    render();
-    return;
+    activity.controller = null;
   }
+  render();
+  scrollToActivity();
   void reconcileActivity();
 }
 
@@ -617,10 +718,11 @@ async function reconcileActivity() {
   if (!state.activity || state.activity.reconciling) return;
   state.activity.phase = "reconciling";
   state.activity.reconciling = true;
-  state.activity.pendingText = "正在重新读取当前卷册，请以最新页面为准。";
+  state.activity.pendingText = "正在自动核对当前卷册，请以确认后的页面为准。";
   state.error = "";
   state.busy = true;
   render();
+  scrollToActivity();
   try {
     await refreshActive();
     if (state.active?.status === "SEALED") {
@@ -632,7 +734,12 @@ async function reconcileActivity() {
       route();
     }
     await loadPageData();
-    state.notice = "已经重新读取当前卷册；请按当前页面确认下一步，不要重复提交。";
+    const decisionState = state.desk?.desk?.decision_state;
+    state.notice = decisionState === "AGENT_FAILED"
+      ? "你的判断已经保留，但另一处回应没有形成有效判断；可以重新检查当前卷册。"
+      : decisionState === "AWAITING_CONFIRMATION"
+        ? "上一笔判断已经留在当前时刻，世界尚未确认；可以继续确认这次判断。"
+        : "这次操作已经完成核对；当前页面已按最新状态恢复。";
     state.activity = null;
   } catch (error) {
     state.activity.reconciling = false;
@@ -649,14 +756,17 @@ async function run(action, activity = null) {
   state.error = "";
   state.activity = activity ? { ...activity, phase: "running", pendingText: "" } : null;
   render();
+  if (state.activity) scrollToActivity();
   let keepActivity = false;
+  let reconcileAfterRun = false;
   try {
     await action();
   } catch (error) {
     if (state.activity && unknownRequest(error)) {
       state.activity.phase = "reconciling";
-      state.activity.pendingText = "请求结果尚未确认。请核对当前卷册后再决定是否继续。";
+      state.activity.pendingText = "请求没有直接返回结果，正在自动核对当前卷册；不要重复提交。";
       keepActivity = true;
+      reconcileAfterRun = true;
       state.error = "";
     } else {
       state.error = error?.name === "AbortError" ? "请求等待过久，请稍后重试。" : (error?.message || "这一页暂时没有回应。 ");
@@ -666,6 +776,8 @@ async function run(action, activity = null) {
     state.busy = false;
     if (state.activity) state.busy = true;
     render();
+    if (state.activity) scrollToActivity();
+    if (reconcileAfterRun) void reconcileActivity();
   }
 }
 
@@ -687,8 +799,7 @@ root.addEventListener("click", (event) => {
   if (action === "continue-world") return run(continueWorld, { kind: "continue" });
   if (action === "leave-life") return run(leaveLife, { kind: "leave" });
   if (action === "reconsider") return run(reconsider, { kind: "reconsider" });
-  if (action === "draft-again") return run(() => requestDraft(true), { kind: "draft" });
-  if (action === "clear-draft") return clearDraft();
+  if (action === "retry-decision") return run(retryDecision, { kind: "decision" });
   if (action === "open-archive") return run(() => openArchive(event.target.closest("[data-worldline-id]").dataset.worldlineId), { kind: "archive" });
   if (action === "archive-life") return run(() => openLifetimeReplay(event.target.closest("[data-lifetime-id]").dataset.lifetimeId), { kind: "archive" });
   if (action === "clear-archive") return clearArchive();
@@ -709,8 +820,7 @@ root.addEventListener("submit", (event) => {
 
 root.addEventListener("input", (event) => {
   if (event.target.id !== "decision") return;
-  state.draftValue = event.target.value;
-  state.draftPristine = false;
+  state.decisionValue = event.target.value;
 });
 
 window.addEventListener("hashchange", () => {

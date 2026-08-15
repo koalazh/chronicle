@@ -73,6 +73,7 @@ def test_before_shanhaiguan_crisis_pack_is_complete():
     assert "Battle Resolver" not in pack.crisis.simulation_boundary.reason
 
 
+@pytest.mark.skip(reason="历史南京 crisis pack；当前产品只保留山海关危机")
 def test_nanjing_succession_pack_is_a_political_three_actor_crisis():
     pack = CrisisPack.load(NANJING_ROOT)
 
@@ -289,8 +290,6 @@ def test_volume_pack_declares_current_crises_without_a_global_actor_set():
     ]
     assert [crisis["id"] for crisis in volume.summary()["crises"]] == [
         "before-shanhaiguan",
-        "nanjing-succession",
-        "southern-consolidation",
     ]
 
 

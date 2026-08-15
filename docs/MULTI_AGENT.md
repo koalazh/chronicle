@@ -1,4 +1,4 @@
-# 多主体不是六个聊天窗口
+# 多主体不是三个聊天窗口
 
 > Hermes Profile 如何让 Chronicle 里的主体沿着已经作出的判断继续生活
 
@@ -6,7 +6,7 @@
 
 ## 先记住一句话
 
-Chronicle 的多主体能力，不是让一个模型同时扮演六个人，也不是让六个聊天窗口轮流生成下一段剧情。
+Chronicle 的多主体能力，不是让一个模型同时扮演三个人，也不是让三个聊天窗口轮流生成下一段剧情。
 
 它要证明的是：
 
@@ -26,7 +26,7 @@ Chronicle 的多主体能力，不是让一个模型同时扮演六个人，也�
   → 新判断继续有效
 ```
 
-这就是六个 Hermes Profile 的共同价值：它们不是六个名字，而是六段不会因为新 Session、离席或重启而被重置的人生连续性。
+这就是三个 Hermes Profile 的共同价值：它们不是三个名字，而是三段不会因为新 Session、离席或重启而被重置的人生连续性。
 
 ## 核心因果拓扑
 
@@ -62,7 +62,7 @@ flowchart TB
 
 ## 一卷世界里到底有哪些“人”
 
-当前《甲申》卷册承载六个独立主体：李自成、吴三桂、多尔衮、史可法、马士英和韩赞周。每个主体都有一条持久的 `Lifetime`，并由一个 Hermes Profile 作为其认知执行家。它们共享一个世界，但不共享私有判断。
+当前《甲申》卷册只承载三个独立主体：李自成、吴三桂、多尔衮。每个主体都有一条持久的 `Lifetime`，并由一个 Hermes Profile 作为其认知执行家。它们共享一个山海关世界，但不共享私有判断。
 
 ```mermaid
 flowchart LR
@@ -73,7 +73,7 @@ flowchart LR
         boundary["Chronicle Host\nVisibility · Attention · 权限 · Atomic Commit"]
     end
 
-    subgraph subjects["六个持久主体 · 6 × Lifetime"]
+    subgraph subjects["三个持久主体 · 3 × Lifetime"]
         lifetime["各自的 Course、Knowledge、Belief、Authority\n位置、资源、承诺与已落笔判断"]
         profile["各自的 Hermes Profile\n持久认知 Home、SOUL、工具与 binding"]
     end
@@ -98,11 +98,11 @@ flowchart LR
 这张图表达四个边界：
 
 1. **世界只有一个权威。** 全局时间、事实、路线、消息抵达、资源变化、因果记录和封存边界属于 Volume Host，不属于任何模型。
-2. **主体有六个连续身份。** `Lifetime` 持有跨离席、重启、控制者切换和多次唤醒仍然有效的状态；不同主体的过去、知识、权限、位置和 Course 不同。
+2. **主体有三个连续身份。** `Lifetime` 持有跨离席、重启、控制者切换和多次唤醒仍然有效的状态；不同主体的过去、知识、权限、位置和 Course 不同。
 3. **Profile 是 Hermes 的执行家，不是业务数据库。** Profile Home、SOUL、配置、凭据和 MCP binding 让 Hermes 知道“谁在执行”；Chronicle 的 Course、Knowledge、Belief 和判断历史仍由 Volume 持久化。
 4. **Session 是临时的。** 一个真实 Wake 使用一个 fresh Session；没有新的 `REOPEN`，就没有为了“保持热度”而强行生成的新认知。
 
-逻辑上的六个 Profile 不等于六个进程、六个端口或六个操作系统故障域。当前实现使用任务独占的 multiplexed Hermes Gateway，用 Profile 路径寻址多个逻辑 Profile；需要进程级隔离时必须另外设计和验证，不能从 Profile 名称推断出来。
+逻辑上的三个 Profile 不等于三个进程、三个端口或三个操作系统故障域。当前实现使用任务独占的 multiplexed Hermes Gateway，用 Profile 路径寻址多个逻辑 Profile；需要进程级隔离时必须另外设计和验证，不能从 Profile 名称推断出来。
 
 ## Hermes 与 Chronicle 各自负责什么
 
@@ -147,7 +147,13 @@ Human 再次进入吴三桂时，产品应能解释的是：
 
 > 此前一直这样办；直到这里，现实变了；这段人生因此坚持或改了方向。
 
-而不是“AI 自动替你执行了七个回合”。这也是南都定策等后续局势复用的认知时间模型：不是为山海关写一套特殊脚本，而是同一条 `Knowledge → Attention → Deliberation → Course` 语义。
+而不是“AI 自动替你执行了七个回合”。当前 V1 只在山海关一线验证这条认知时间模型：`Knowledge → Attention → Deliberation → Course`。
+
+## Experience 的所有权
+
+Chronicle 只在少数有后果的边界写入一段很小的 Reflection：重要判断被现实迫使修改，或主体自己的行动留下了可见结果。它由 Host 根据 Ledger 生成，写入对应 Lifetime 的结构化 `experiences`，并在 live 运行中以同一段短文镜像到该主体自己的 Hermes Memory。
+
+Experience 不是共享事实，也不是另一套 Memory 图。它不能改变别人的所知；下一次同一主体的 fresh Session 只有在显式引用合法的 Experience 时，才会把它作为判断的因果依据。`EXPERIENCE_RECORDED` 留在该主体的私有回看里，不进入公共世界的全知轨迹。
 
 ## 协作为什么是真实的
 
@@ -201,9 +207,9 @@ Human 再次进入吴三桂时，产品应能解释的是：
 - [`hermes/chronicle-actor/config.yaml`](../hermes/chronicle-actor/config.yaml)：当前 Profile toolset 与 multiplexed Gateway 配置。
 - [`hermes/chronicle-actor/SOUL.md`](../hermes/chronicle-actor/SOUL.md)：主体只能依据自己的 Perspective 行动，不能使用后世知识、终端、文件系统或其他主体私有上下文。
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)：世界、权限、因果和生命周期的完整开发者说明。
-- [`docs/ACCEPTANCE.md`](ACCEPTANCE.md)：当前自动化、浏览器、隔离 real Hermes 运行和清理证据，以及没有伪造的真人反馈边界。
+- [`docs/ACCEPTANCE.md`](ACCEPTANCE.md)：当前自动化证据、尚未运行的浏览器/真实 Hermes 边界，以及没有伪造的真人反馈。
 
-当前真实记录把六个主体、Human Course/Leave/re-entry、真实消息传输、吴三桂的 `BACKGROUND → REOPEN → HOLD`、其他主体的独立 HOLD/REVISE 判断、Archive、Seal、`REVOKED` bindings 和精确 cleanup 关联在同一个 Volume 中。它是受控的一条 Provider 轨迹，不是稳定性 benchmark；真人主观验收仍应保持明确的未收集状态。
+当前文档不把旧的六主体或南方局势运行记录当作 V1 证明。V1 的自动化重点是三个主体、单一山海关世界、跨 fresh session 的 Course/Experience 连续性、Human handback、Archive 和精确 cleanup；真实 Provider 轨迹仍须单独标注，真人主观验收仍应保持明确的未收集状态。
 
 当需要新增 Profile、工具或协作路径时，先回答三个问题：
 

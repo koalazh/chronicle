@@ -2,7 +2,7 @@ id: jiashen
 title: 甲申
 subtitle: 崇祯十七年
 native_period: 崇祯十七年
-description: 同一甲申 Volume 中并行展开、彼此相邻而不自动替代的北方、南京与江北因果 Knot。
+description: 北京、山海关与辽西之间，三个长期主体在同一个部分可观测的因果世界中继续生活。
 lifetimes_path: lifetimes.yaml
 world_path: world.yaml
 crises:
@@ -11,26 +11,3 @@ crises:
     earliest_activation_tick: 0
     participants: [li-zicheng, wu-sangui, dorgon]
     local_horizon: 30
-  - id: nanjing-succession
-    path: crises/nanjing-succession
-    earliest_activation_tick: 0
-    participants: [shi-kefa, ma-shiying, han-zanzhou]
-    local_horizon: 18
-  - id: southern-consolidation
-    path: crises/southern-consolidation
-    earliest_activation_tick: 0
-    activation_preconditions:
-      - id: nanjing-settlement
-        kind: CRISIS_STATUS
-        description: 南都危局必须先结算，江北整饬才有资格观察南京中心留下的现实窗口。
-        crisis_id: nanjing-succession
-        required_statuses: [SETTLED]
-        suppressed_statuses: [SUPPRESSED]
-      - id: nanjing-political-center
-        kind: SHARED_ENTITY_STATE
-        description: 只有当前世界真实形成福王承认的南京政治中心，江北整饬才进入可执行窗口。
-        entity_id: nanjing-political-center
-        required_states: [FU_RECOGNIZED]
-        suppressed_states: [LU_RECOGNIZED, CONTESTED, FRAGMENTED, DEFERRED]
-    participants: [shi-kefa, ma-shiying, han-zanzhou]
-    local_horizon: 12

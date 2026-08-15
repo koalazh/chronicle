@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 DELIBERATION_OUTCOMES = frozenset({"HOLD", "REVISE"})
@@ -22,9 +22,10 @@ class DeliberationProposal:
     world_actions: list[dict[str, Any]]
     rationale_source: str = ""
     belief_source: str = ""
+    experience_refs: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "outcome": self.outcome,
             "course": self.course,
             "open_dependencies": self.open_dependencies,
@@ -33,6 +34,9 @@ class DeliberationProposal:
             "rationale_source": self.rationale_source,
             "belief_source": self.belief_source,
         }
+        if self.experience_refs:
+            result["experience_refs"] = list(self.experience_refs)
+        return result
 
 
 def normalize_deliberation(raw: dict[str, Any]) -> DeliberationProposal:
@@ -51,6 +55,7 @@ def normalize_deliberation(raw: dict[str, Any]) -> DeliberationProposal:
             "world_action",
             "rationale_source",
             "belief_source",
+            "experience_refs",
         }
     )
     if unsupported:
@@ -111,4 +116,9 @@ def normalize_deliberation(raw: dict[str, Any]) -> DeliberationProposal:
         world_actions=normalized_actions,
         rationale_source=str(raw.get("rationale_source", "")).strip(),
         belief_source=str(raw.get("belief_source", "")).strip(),
+        experience_refs=[
+            str(item).strip()
+            for item in raw.get("experience_refs", [])
+            if str(item).strip()
+        ],
     )

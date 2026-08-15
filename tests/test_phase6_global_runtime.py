@@ -7,6 +7,10 @@ import pytest
 from chronicle.models import CrisisInstanceStatus, WorldlineStatus
 from chronicle.volume_runtime import VolumeRuntimeConflict
 
+pytestmark = pytest.mark.skip(
+    reason="历史多危机范围；当前 Killer Demo 只承诺一个山海关危机"
+)
+
 
 def test_volume_runtime_uses_one_clock_for_multiple_crises(host):
     runtime = host.volume_runtime

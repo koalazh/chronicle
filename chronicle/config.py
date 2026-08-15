@@ -112,6 +112,9 @@ def load_config(root: Path | None = None, environ: Mapping[str, str] | None = No
         env = dict(os.environ)
 
     db_url = env.get("CHRONICLE_DATABASE_URL", "sqlite:///./data/chronicle.db")
+    runtime_dir = Path(env.get("CHRONICLE_RUNTIME_DIR", str(root / ".chronicle")))
+    if not runtime_dir.is_absolute():
+        runtime_dir = root / runtime_dir
     hermes_home = Path(env.get("CHRONICLE_HERMES_HOME", str(root / ".chronicle" / "hermes-home")))
     if not hermes_home.is_absolute():
         hermes_home = root / hermes_home
@@ -129,7 +132,7 @@ def load_config(root: Path | None = None, environ: Mapping[str, str] | None = No
         root=root,
         database_path=_path_from_database_url(db_url, root),
         scenario_path=root / "scenarios" / "jiashen",
-        runtime_dir=root / ".chronicle",
+        runtime_dir=runtime_dir,
         hermes_home=hermes_home,
         hermes_base_url=env.get("CHRONICLE_HERMES_BASE_URL", "http://127.0.0.1:8642").rstrip("/"),
         hermes_bin=env.get("CHRONICLE_HERMES_BIN") or shutil.which("hermes") or "hermes",

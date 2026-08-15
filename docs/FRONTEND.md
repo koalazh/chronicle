@@ -11,11 +11,10 @@ Volume Home
   ├─ World
   │    ├─ Follow a Lifetime
   │    └─ Inhabit → Life Desk → Leave
-  ├─ Volume Ending
-  └─ Archive → 公共回看 → 人生回看 → 判断回看
+  └─ Archive → 封存详情 → 公共回看 → 人生回看 → 判断回看
 ```
 
-当前页面是 `volume`、`world`、`follow/{lifetime_id}`、`desk`、`archive` 和 `ending`。旧导航和旧页面不再注册，不是新增页面的设计来源。
+当前页面是 `volume`、`world`、`follow/{lifetime_id}`、`desk` 和 `archive`；封存详情作为 Archive 的一部分呈现，不单独注册 `ending` 页面。旧导航和旧页面不再注册，不是新增页面的设计来源。
 
 ## 页面合同
 
@@ -25,7 +24,7 @@ Volume Home
 
 ### World
 
-World 展示当前卷册时刻、仍在收紧的公共 knot、公开位置、可接近的人生和公开理由，以及是否已有一段正在 inhabited 的人生。它还要明确当前是否仍有可自动推进的触发；没有时，应引导用户走近一段人生，在书案主动定一个方向。
+World 展示当前卷册时刻、北京 → 山海关 → 辽西的公共走廊、三段人生的位置/状态、正在路上的消息和近期公共记录，以及是否已有一段正在 inhabited 的人生。它还要明确当前是否仍有可自动推进的触发；没有时，应引导用户走近一段人生，在书案主动定一个方向。
 
 它不展示全局 Ledger、其他 Lifetime 的私有 Plan/Belief、未送达消息、模型输出或内部工具调用。局部 settlement 可以显示为已经留下 Meaning，但不能画成 Volume 已经结束。
 
@@ -35,15 +34,9 @@ Follow 是接近一段人生前的公共观察页。它回答“这段人生现�
 
 ### Inhabit / Life Desk
 
-进入按钮明确表达“接过这段人生”。进入后 Life Desk 只显示当前 inhabited Lifetime 的：
+进入按钮明确表达“接过这段人生”。进入后 Life Desk 只显示当前 inhabited Lifetime 的四块自然语言内容：我现在知道、我此前打算、我正在等、哪些过去仍影响我。它可以补充现实改变判断的提示，但不显示其他主体的私有上下文或内部执行状态。
 
-- `arrivals`：已经收到的抵达；
-- `known`：当前可用的相关证据；
-- `uncertainty`：仍未确认的判断；
-- `current_plan` 和 `active_obligations`；
-- `position` 与 `role`。
-
-决定区只有一个有限 intent 入口：写下准备承担的下一步，或者点击等待。提交前先读取 textarea 内容，再进入 `busy` 状态；重绘不能把非空输入变成沉默。提交中所有 mutation button disabled，不能在同一请求尚未结束时 double-submit；页面必须持续显示当前进行中的卷册状态，并为结果未确认的请求提供核对入口。
+决定区只有一个有限 intent 入口：在“这次判断”里写下准备承担的下一步，或者点击等待。主界面不自动拉取参考草稿，用户不需要先判断是否采纳辅助文字。提交前先读取 textarea 内容，再进入 `busy` 状态；重绘不能把非空输入变成沉默。提交中所有 mutation button disabled，不能在同一请求尚未结束时 double-submit；页面必须持续显示当前进行中的卷册状态，并为结果未确认的请求提供核对入口。
 
 Leave 是显式动作，文案说明“把这段人生交还给世界”。它不会伪装成结束卷册，也不会制造一个“主体离线”的技术面板。
 
@@ -103,7 +96,7 @@ Chronicle 是可交互的历史文书，不是策略游戏 HUD、地图编辑器
 
 ## 响应式验收
 
-每次页面大改都检查 1440、1280、768 和 390 宽度：
+每次页面大改都检查 390、639 和 1280 宽度；条件允许时再补充 1440/768：
 
 - 没有 horizontal overflow；
 - World 桌面横向信息、手机单列；
@@ -115,4 +108,4 @@ Chronicle 是可交互的历史文书，不是策略游戏 HUD、地图编辑器
 - Archive/Ending 在手机仍可读，公共回看、人生回看、判断回看层次不混淆；
 - 不出现 Agent/Profile/Session/Memory 技术术语、crisis dashboard、meter 或 AI thinking animation。
 
-最近一次浏览器检查覆盖首页、World、Follow、Inhabit、Desk、Continue、Decision、Leave、Archive 和判断回看；四种 viewport 均无横向溢出，内部术语扫描和 error/warn logs 为空。真实 Hermes 业务链另用隔离 Volume 验证，不把 live 运行偷换成浏览器 fixture。结果见 [当前验收](ACCEPTANCE.md)。
+本轮已用当前 v12 served artifact 和新鲜隔离本地服务通过 in-app Browser 从首页操作吴三桂，走通 Volume → World → Follow → Desk → 直接判断 → 真实交还 → continue → Archive → 吴三桂判断回看的 served-artifact 路径；v13 receipt 的页面自身 error/warn 日志为空，服务日志和 SQLite 均证明 `/leave`/`LIFETIME_LEFT`，同一 artifact 的 390、639、1280 检查均未出现横向溢出。另以 v15 fault-path 真实走通“判断已保留 → 另一处回应未形成可执行判断 → 重新检查当前卷册”，用户输入不丢失、世界不假推进、下一步单一明确。归档回看把选人和该段人生留下的判断明确分层，事件来源与正文按阅读顺序排列，空的“后来进入所知”区块不再占据页面，进行中状态在页面顶部呈现，封存后的继续动作直接进入 Archive；v15 的 Provider fault-path 不是正常稳定性结论，Attempt 17 已独立 `PASS` 且无 material findings，详见 [当前验收](ACCEPTANCE.md)。

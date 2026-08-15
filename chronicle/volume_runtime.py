@@ -53,6 +53,14 @@ logger = logging.getLogger(__name__)
 
 
 VOLUME_CONTENT_VERSION = 2
+RETRYABLE_LIVE_WAKE_ERRORS = frozenset({"live_wake_failed"})
+TERMINAL_LIVE_WAKE_ERRORS = frozenset(
+    {
+        "invalid_structured_intent",
+        "missing_logical_intent",
+        "multiple_logical_intents",
+    }
+)
 
 
 VOLUME_WORLD_TOOLS = frozenset(
@@ -416,18 +424,42 @@ class VolumeRuntime:
                 raise VolumeRuntimeError("Pending Logical Moment is not recoverable")
             for wake_id in pending.get("wake_ids", []):
                 wake = self.db.crisis_wake(str(wake_id))
+                if (
+                    wake is not None
+                    and wake["status"] == "FAILED"
+                    and str(wake.get("error", {}).get("code", ""))
+                    in RETRYABLE_LIVE_WAKE_ERRORS
+                ):
+                    error = dict(wake.get("error") or {})
+                    error["retryable"] = True
+                    self.db.update_crisis_wake(
+                        str(wake_id),
+                        status="QUEUED",
+                        error=error,
+                    )
+                    wake = self.db.crisis_wake(str(wake_id))
                 if wake is None or wake["status"] not in {
                     "QUEUED",
                     "WAITING_HUMAN",
                     "STAGED",
+                    "FAILED",
                 }:
+                    raise VolumeRuntimeError("Pending Logical Moment contains an invalid Wake")
+                if (
+                    wake["status"] == "FAILED"
+                    and str(wake.get("error", {}).get("code", ""))
+                    not in TERMINAL_LIVE_WAKE_ERRORS
+                ):
                     raise VolumeRuntimeError("Pending Logical Moment contains an invalid Wake")
                 operations = self.db.crisis_wake_operations(str(wake_id))
                 if any(item["payload"].get("moment_id") != pending["id"] for item in operations):
                     raise VolumeRuntimeError("Wake operation belongs to another Logical Moment")
-                if wake["status"] == "STAGED" and len(operations) != 1:
+                proposed_operations = [
+                    item for item in operations if item["status"] == "PROPOSED"
+                ]
+                if wake["status"] == "STAGED" and len(proposed_operations) != 1:
                     raise VolumeRuntimeError("staged Wake operation is not recoverable")
-                if wake["status"] != "STAGED" and operations:
+                if wake["status"] != "STAGED" and proposed_operations:
                     raise VolumeRuntimeError("unstaged Wake has a persisted operation")
         for wake in self.db.subject_wakes(worldline_id):
             if wake["status"] == "RUNNING":
@@ -1848,6 +1880,14 @@ class VolumeRuntime:
             snapshot=projection,
             expected_current_tick=current,
         )
+        events.extend(
+            self._record_reflections(
+                worldline_id,
+                events,
+                projection,
+                current_tick=target,
+            )
+        )
         envelope_result = self.reconcile_crisis_envelopes(worldline_id)
         events.extend(envelope_result.get("events", []))
         return {
@@ -2121,6 +2161,164 @@ class VolumeRuntime:
             "pending_moment": pending,
             "idempotent": False,
         }
+
+    def _record_reflections(
+        self,
+        worldline_id: str,
+        source_events: list[dict[str, Any]],
+        projection: dict[str, Any],
+        *,
+        current_tick: int,
+    ) -> list[dict[str, Any]]:
+        """Persist a few consequential experiences without creating another runtime layer."""
+
+        candidates: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+        for event in source_events:
+            event_type = str(event.get("event_type", ""))
+            payload = event.get("payload", {})
+            if not isinstance(payload, dict):
+                continue
+            seat = str(event.get("seat_id") or payload.get("seat") or "")
+            if event_type == "OPERATION_COMPLETED":
+                operation = payload.get("operation", {})
+                if isinstance(operation, dict):
+                    seat = str(operation.get("actor_id") or seat)
+            if not seat:
+                continue
+            lifetime = self.db.worldline_lifetime(worldline_id, seat)
+            if lifetime is None:
+                continue
+            if event_type == "DECISION_HORIZON_REVISED":
+                if not str(payload.get("previous_course_event_id", "")):
+                    continue
+                candidates.append(
+                    (
+                        event,
+                        lifetime,
+                        "COMMITMENT_REVISED",
+                    )
+                )
+            elif event_type == "OPERATION_COMPLETED":
+                candidates.append((event, lifetime, "OWN_CONSEQUENCE"))
+
+        if not candidates:
+            return []
+
+        experiences_by_seat: dict[str, list[dict[str, Any]]] = {}
+        lifetime_updates: dict[str, dict[str, Any]] = {}
+        memory_blocks_by_seat: dict[str, list[str]] = {}
+        reflection_events: list[dict[str, Any]] = []
+        for source_event, lifetime, kind in candidates:
+            seat = str(lifetime["seat"])
+            experiences = experiences_by_seat.setdefault(
+                seat, copy.deepcopy(lifetime.get("experiences", []))
+            )
+            source_id = str(source_event["id"])
+            if any(source_id in item.get("basis_event_ids", []) for item in experiences):
+                continue
+            payload = source_event.get("payload", {})
+            operation = payload.get("operation", {}) if isinstance(payload, dict) else {}
+            if kind == "COMMITMENT_REVISED":
+                experience_text = "此前的判断在新的现实面前被迫重新考虑。"
+                basis = "新的现实已经改变此前判断的基础。"
+            else:
+                operation_name = str(operation.get("definition_id", "一项行动"))
+                experience_text = f"此前的行动已经留下了可见结果：{operation_name}。"
+                basis = "自己的行动已经改变了共享世界，并回到自己的经历中。"
+            implication = "以后面对重要承诺时，先写清可核验的条件和重新考虑的期限。"
+            experience_id = (
+                f"experience-{seat}-{current_tick}-{stable_hash({'kind': kind, 'source': source_id})[:12]}"
+            )
+            experience = {
+                "id": experience_id,
+                "kind": kind,
+                "experience": experience_text,
+                "basis": basis,
+                "implication": implication,
+                "basis_event_ids": [
+                    source_id,
+                    *[
+                        str(parent)
+                        for parent in source_event.get("causal_parent_ids", [])
+                        if str(parent)
+                    ],
+                ][:6],
+                "created_tick": current_tick,
+            }
+            experiences.append(experience)
+            experiences[:] = experiences[-6:]
+            memory_blocks = []
+            for item in experiences:
+                memory_blocks.append(
+                    "Experience: {experience}\nBasis: {basis}\nImplication: {implication}".format(
+                        experience=item["experience"],
+                        basis=item["basis"],
+                        implication=item["implication"],
+                    )
+                )
+            existing_memory = str(lifetime.get("memory_text", "")).strip()
+            memory_text = existing_memory
+            for memory_block in memory_blocks:
+                if memory_block in memory_text:
+                    continue
+                memory_text = f"{memory_text}\n\n{memory_block}".strip()
+            memory_blocks_by_seat.setdefault(seat, []).append(memory_blocks[-1])
+            lifetime_updates[lifetime["id"]] = {
+                "id": lifetime["id"],
+                "experiences_json": json.dumps(
+                    experiences, ensure_ascii=False, sort_keys=True
+                ),
+                "memory_text": memory_text,
+                "memory_hash": content_hash(memory_text),
+            }
+            reflection = self._event(
+                worldline_id,
+                current_tick,
+                "EXPERIENCE_RECORDED",
+                {
+                    "seat": seat,
+                    "experience": experience,
+                    "basis_event_ids": experience["basis_event_ids"],
+                    "memory_block": memory_blocks[-1],
+                },
+                seat_id=seat,
+                provenance=Provenance.VOLUME_DERIVED.value,
+                causal_parent_ids=experience["basis_event_ids"],
+                event_id=f"{worldline_id}:{experience_id}",
+                runtime_epoch=str(self.db.worldline(worldline_id)["runtime_epoch"]),
+            )
+            reflection_events.append(reflection)
+
+        if not reflection_events:
+            return []
+        reflection_projection = copy.deepcopy(projection)
+        reflection_projection["last_event_id"] = reflection_events[-1]["id"]
+        self.db.commit_volume_moment(
+            worldline_id,
+            reflection_events,
+            current_tick=current_tick,
+            lifetime_updates=list(lifetime_updates.values()),
+            snapshot=reflection_projection,
+            expected_current_tick=current_tick,
+        )
+        worldline = self.db.worldline(worldline_id)
+        if worldline is not None and worldline.get("runtime_mode") == "live":
+            for lifetime_id in lifetime_updates:
+                lifetime = self.db.worldline_lifetime_by_id(worldline_id, lifetime_id)
+                if lifetime is None or not lifetime.get("profile_name"):
+                    continue
+                try:
+                    for memory_block in memory_blocks_by_seat.get(
+                        str(lifetime["seat"]), []
+                    ):
+                        hermes.append_profile_memory(
+                            self.host.config,
+                            str(lifetime["profile_name"]),
+                            memory_block,
+                        )
+                except Exception as exc:  # pragma: no cover - provider filesystem boundary
+                    logger.warning("failed to mirror Reflection to Hermes Memory: %s", exc)
+        return reflection_events
 
     def open_voluntary_reconsideration(
         self, worldline_id: str, lifetime_id: str
@@ -2442,7 +2640,7 @@ class VolumeRuntime:
                 "idempotent": True,
                 "rejected": existing["result"].get("status") == "rejected",
             }
-        if existing_operations:
+        if any(operation["status"] == "PROPOSED" for operation in existing_operations):
             raise VolumeRuntimeConflict("this Wake already has one Deliberation proposal")
 
         try:
@@ -2459,6 +2657,47 @@ class VolumeRuntime:
                     error,
                 )
             raise error from exc
+
+        if actual_source == "agent" and str(row.get("runtime_mode", "fixture")) == "live":
+            context = wake.get("frozen_perspective", {}).get("context", {})
+            why_now = context.get("why_now", {}) if isinstance(context, dict) else {}
+            prior_course = current_course_from_plan(
+                list(lifetime.get("plan", [])), fallback_tick=tick
+            )
+            matched_dependencies = (
+                why_now.get("matched_dependency_ids", [])
+                if isinstance(why_now, dict)
+                else []
+            )
+            if seat == "wu-sangui" and prior_course is None and not normalized.open_dependencies:
+                error = VolumeRuntimeConflict(
+                    "the first live Wu Course must establish a typed future dependency"
+                )
+                self._record_rejected_deliberation_attempt(
+                    pending, wake, lifetime, proposal, key, error
+                )
+                raise error
+            if (
+                seat == "wu-sangui"
+                and matched_dependencies
+                and not lifetime.get("experiences")
+                and normalized.outcome != "REVISE"
+            ):
+                error = VolumeRuntimeConflict(
+                    "the first live Wu dependency match must revise the Current Course"
+                )
+                self._record_rejected_deliberation_attempt(
+                    pending, wake, lifetime, proposal, key, error
+                )
+                raise error
+            if seat == "wu-sangui" and lifetime.get("experiences") and not normalized.experience_refs:
+                error = VolumeRuntimeConflict(
+                    "a live Wu follow-up judgment must reference an existing Experience"
+                )
+                self._record_rejected_deliberation_attempt(
+                    pending, wake, lifetime, proposal, key, error
+                )
+                raise error
 
         current_course = current_course_from_plan(list(lifetime.get("plan", [])), fallback_tick=tick)
         if normalized.outcome == "HOLD" and current_course is None:
@@ -2522,6 +2761,7 @@ class VolumeRuntime:
                     "rationale_source": rationale_source,
                     "belief_source": normalized.belief_source,
                     "belief_updates": normalized.belief_updates,
+                    "experience_refs": normalized.experience_refs,
                     "evidence_event_ids": evidence_event_ids,
                     "open_dependencies": dependencies,
                 },
@@ -2649,6 +2889,7 @@ class VolumeRuntime:
             proposal_hash = stable_hash(proposal)
         except (TypeError, ValueError):
             proposal_hash = stable_hash({"repr": repr(proposal)})
+        worldline = self.db.worldline(str(wake["worldline_id"])) or {}
         operation = self.db.add_crisis_wake_operation(
             {
                 "wake_id": wake["id"],
@@ -2666,7 +2907,11 @@ class VolumeRuntime:
                     "code": type(error).__name__,
                     "message": str(error)[:240],
                 },
-                "status": "PROPOSED",
+                "status": (
+                    "REJECTED"
+                    if str(worldline.get("runtime_mode", "fixture")) == "live"
+                    else "PROPOSED"
+                ),
                 "idempotency_key": idempotency_key,
             }
         )
@@ -3707,6 +3952,14 @@ class VolumeRuntime:
             snapshot=projection,
             expected_current_tick=tick,
         )
+        events.extend(
+            self._record_reflections(
+                worldline_id,
+                events,
+                projection,
+                current_tick=tick,
+            )
+        )
         return {
             "worldline": self.db.worldline(worldline_id),
             "moment_id": pending["id"],
@@ -3739,6 +3992,18 @@ class VolumeRuntime:
             for event_id in course_intent.get("evidence_event_ids", [])
             if str(event_id)
         ]
+        experience_refs = [
+            str(ref)
+            for ref in course_intent.get("experience_refs", [])
+            if str(ref)
+        ]
+        experience_event_ids = [
+            str(event["id"])
+            for event in self.db.worldline_events(worldline_id)
+            if event.get("event_type") == "EXPERIENCE_RECORDED"
+            and str(event.get("payload", {}).get("experience", {}).get("id", ""))
+            in experience_refs
+        ]
         deliberation_event = self._event(
             worldline_id,
             tick,
@@ -3749,11 +4014,13 @@ class VolumeRuntime:
                 "seat": lifetime["seat"],
                 "outcome": outcome_name,
                 "evidence_event_ids": evidence_event_ids,
+                "experience_refs": experience_refs,
+                "experience_event_ids": experience_event_ids,
                 "world_action_count": 1 if operation["payload"].get("world_action") else 0,
             },
             seat_id=lifetime["seat"],
             provenance=Provenance.VOLUME_DERIVED.value,
-            causal_parent_ids=[intent_event["id"], *evidence_event_ids],
+            causal_parent_ids=[intent_event["id"], *evidence_event_ids, *experience_event_ids],
             event_id=f"{intent_event['id']}:deliberation",
             runtime_epoch=runtime_epoch,
         )
@@ -3903,6 +4170,7 @@ class VolumeRuntime:
             "deliberation_event_id": deliberation_event["id"],
             "course_event_id": horizon_event["id"],
             "belief_keys": belief_keys,
+            "experience_refs": experience_refs,
             **action_result,
         }
 
@@ -5323,6 +5591,9 @@ class VolumeRuntime:
             "rationale": rationale,
             "rationale_source": rationale_source,
             "belief_source": str(intent.get("belief_source", "")).strip(),
+            "experience_refs": self._validate_experience_refs(
+                lifetime, intent.get("experience_refs", [])
+            ),
             "belief_updates": normalized_beliefs,
             "evidence_event_ids": builder.validate_evidence(
                 worldline_id,
@@ -5335,6 +5606,24 @@ class VolumeRuntime:
                 str(item).strip() for item in intent.get("reconsider_when", []) if str(item).strip()
             ],
         }
+
+    @staticmethod
+    def _validate_experience_refs(
+        lifetime: dict[str, Any], refs: Any
+    ) -> list[str]:
+        values = [str(item).strip() for item in refs if str(item).strip()] if isinstance(refs, list) else []
+        known = {
+            str(item.get("id", ""))
+            for item in lifetime.get("experiences", [])
+            if isinstance(item, dict) and str(item.get("id", ""))
+        }
+        unknown = set(values) - known
+        if unknown:
+            raise VolumeRuntimeError(
+                "experience_refs must name experiences already known to the subject: "
+                + ", ".join(sorted(unknown))
+            )
+        return list(dict.fromkeys(values))
 
     @staticmethod
     def _normalize_open_dependencies(intent: dict[str, Any], *, current_tick: int) -> list[dict[str, Any]]:

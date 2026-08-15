@@ -10,7 +10,7 @@ Chronicle 不把一段“历史简介”直接塞给模型。史料先整理成 
 
 当前 Volume Pack 位于 `scenarios/jiashen/`，由 `volume.yaml`、`lifetimes.yaml`、`world.yaml`、共享地点/路线和 `crises/` 下的 Crisis Pack 组成。每个 Crisis Pack 由 `crisis.yaml` 和 `sources.yaml` 定义检查点、主体、走廊、路线、在途消息、停止边界、历史锚点和断言 ID；当前运行时只读取这套 Volume 结构，并把主体已提交的行动作为后续 World 的事实来源。
 
-North 汇入 Southern 的公开记录不是固定的历史旁白。`position_report` 在自己的 observation tick 读取当前位置；只有已经完成且有 Ledger origin 的 Movement 才能形成公开军情，位置未改变或仍在路上时保持静默。消息抵达后只是普通 Knowledge，由主体自己的 Attention 与 Course 决定是否重新判断。Nanjing 的 Resolution 也先写入 shared `nanjing-political-center`，Southern 再根据该当前状态激活、抑制或保持休眠；不能由 `outcome` 文案或 `REFERENCE_ONLY` 历史锚点倒灌未来行动。
+当前内容边界聚焦北京、山海关与辽西之间的三方关系。位置报告在自己的 observation tick 读取当前位置；只有已经完成且有 Ledger origin 的 Movement 才能形成公开军情，位置未改变或仍在路上时保持静默。消息抵达后只是普通 Knowledge，由主体自己的 Attention 与 Course 决定是否重新判断。旧 Nanjing/Southern 内容仍可用于历史研究，但不进入活动 Volume，也不能由 `outcome` 文案或历史锚点倒灌当前产品未来行动。
 
 ## 断言的两个标签
 
@@ -28,7 +28,7 @@ History 通过 `/api/history` 提供来源、断言、证据状态、争议和�
 
 ## 检查点之后
 
-后来主体行动统一标为 `REFERENCE_ONLY`：可以在 History 页面帮助用户比较“后来发生过什么”，但当前封存后的 Run Replay 只回放已经持久化的分支，不注入这些锚点。它们也不进入 scheduler、主体 prompt 或 Human perspective 作为行动命令。与主体当前选择无关的外生事实才可能标为 `EXOGENOUS`；需要检查前提的未来锚点可使用 `CONDITIONAL_ANCHOR`，但第一场危局不把主体未来行动写成强制脚本。
+后来主体行动统一标为 `REFERENCE_ONLY`：可以在研究材料中帮助比较“后来发生过什么”，但当前产品回放只回放已经持久化的世界事实，不注入这些锚点。它们也不进入 scheduler、主体 prompt 或 Human perspective 作为行动命令。需要检查前提的未来锚点可使用 `CONDITIONAL_ANCHOR`，但当前山海关危局不把主体未来行动写成强制脚本。
 
 ## Perspective 边界
 

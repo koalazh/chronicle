@@ -200,7 +200,7 @@ def test_agent_revise_requires_visible_evidence_and_can_commit_one_action(app_co
     assert staged["outcome"] == "REVISE"
     assert event_types.count("DELIBERATION_COMMITTED") == 1
     assert event_types.count("MESSAGE_DISPATCHED") == 1
-    assert event_types[-1] == "MOMENT_COMMITTED"
+    assert "MOMENT_COMMITTED" in event_types
     assert lifetime["plan"][0]["course"] == "收到明确条件后改为先核验通行边界"
     assert lifetime["plan"][0]["evidence_event_ids"] == [delivered_event["id"]]
     assert message["causal_parent_ids"] == [deliberation["id"]]

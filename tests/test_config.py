@@ -43,3 +43,12 @@ def test_load_config_supports_api_key_and_oauth_modes():
 def test_load_config_rejects_unknown_auth_mode():
     with pytest.raises(ValueError, match="CHRONICLE_LLM_AUTH_MODE"):
         load_config(PROJECT_ROOT, environ={"CHRONICLE_LLM_AUTH_MODE": "magic"})
+
+
+def test_load_config_allows_runtime_isolation():
+    config = load_config(
+        PROJECT_ROOT,
+        environ={"CHRONICLE_RUNTIME_DIR": "/tmp/chronicle-runtime-isolated"},
+    )
+
+    assert config.runtime_dir == Path("/tmp/chronicle-runtime-isolated")

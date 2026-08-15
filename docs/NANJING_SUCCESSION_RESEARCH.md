@@ -2,7 +2,7 @@
 
 > 读者：内容研究人员和建模人员。本文是史料与实现契约，不是用户指南，也不要求用户理解其中的内部名称。
 
-> 当前状态：Pack、Volume registry 与 `nanjing-succession-v1` deterministic resolver 已接入当前 Volume；确定性 API/fixture、浏览器回看和隔离真实业务链分别有证据。本文是内容与史料契约，不把单层证据扩大解释为全部产品体验。
+> 当前状态：历史内容归档。Pack、Volume registry 与 `nanjing-succession-v1` resolver 不属于当前 Killer Demo 的活动 Volume；本文保留内容与史料契约，不把历史测试或旧运行记录扩大解释为当前产品能力。
 
 ## 危局边界
 
@@ -153,4 +153,4 @@ Pack 只设置两个 `REFERENCE_ONLY` 后续节点：五月初三的福王监国
 
 当前实现提供小型 `POLITICAL` surface：按福王、潞王、制度承认、可见军政支持和公开文书展示 known / unknown / unconfirmed，不画图、不做关系网。Pack 只需声明有序的 `subject_ids` 与 `context_entity_ids`；世界视图可显示实体状态，私有视图只会为当前合法知道的实体带回状态，未获确认的主体显示 `UNCONFIRMED`，其余事实显示 `UNKNOWN`。合法操作或调查的 target 名称本身不构成状态知识：只有自有资产、所在地点、可见行动／Pressure 的效果或已送达的 Resolution 才能让私有 Surface 显示状态。当前确定性回归覆盖福王认可、替代候选认可、争议、碎片化、延期、历史样本型汇合、不同 seed 的字节稳定结果、Agreement 解锁程序 Operation，以及完整的福王承认→Aftermath→Settlement fixture loop。
 
-对应来源数据与已校验 Pack 位于 [`scenarios/jiashen/crises/nanjing-succession/`](../scenarios/jiashen/crises/nanjing-succession/)。它只在 POLITICAL surface、resolver 与 fixture/API 回归同时存在后才加入 `volume.yaml`；仍不把这一层 fixture/API 证据称为完成的 Desk、浏览器或 live Hermes 体验。
+对应来源数据与历史 Pack 位于 [`scenarios/jiashen/crises/nanjing-succession/`](../scenarios/jiashen/crises/nanjing-succession/)。它已从当前 `volume.yaml` 注销，当前产品不再加载其 POLITICAL surface、resolver 或 fixture/API 路径；历史材料仍不等于当前 Desk、浏览器或 live Hermes 体验。

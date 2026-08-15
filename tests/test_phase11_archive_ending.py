@@ -117,7 +117,7 @@ def test_volume_boundary_rejects_unsettled_worldline_and_seals_after_full_drain(
     ready = runtime.boundary(worldline_id)["boundary"]
     assert ready["ready"] is True
     assert ready["code"] == "structural_boundary"
-    assert ready["evidence_assertion_ids"] == ["n013", "n014"]
+    assert ready["evidence_assertion_ids"] == []
 
     sealed = runtime.seal(worldline_id, "test_boundary")
     assert sealed["worldline"]["status"] == "SEALED"
@@ -167,7 +167,7 @@ def test_live_volume_profiles_are_cleaned_only_after_volume_seal(app_config, mon
 
     assert materialized["worldline_id"] == worldline_id
     assert cleaned["status"] == "SEALED"
-    assert len(cleaned["profiles"]) == 6
+    assert len(cleaned["profiles"]) == 3
 
 
 def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
@@ -191,7 +191,7 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
 
     archive = client.get(
         f"/api/worldlines/{worldline_id}/archive",
-        params={"lifetime_id": "shi-kefa"},
+        params={"lifetime_id": "wu-sangui"},
     )
 
     assert archive.status_code == 200
@@ -221,8 +221,6 @@ def test_sealed_volume_archive_has_public_and_lifetime_replay(app_config):
     )
     for internal_id in (
         "before-shanhaiguan",
-        "nanjing-succession",
-        "southern-consolidation",
     ):
         assert internal_id not in visible_replay_text
 

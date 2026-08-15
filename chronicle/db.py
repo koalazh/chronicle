@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS worldline_lifetimes (
     genesis_hash TEXT NOT NULL DEFAULT '',
     memory_text TEXT NOT NULL DEFAULT '',
     memory_hash TEXT NOT NULL DEFAULT '',
+    experiences_json TEXT NOT NULL DEFAULT '[]',
     knowledge_json TEXT NOT NULL DEFAULT '[]',
     belief_json TEXT NOT NULL DEFAULT '{}',
     authority_json TEXT NOT NULL DEFAULT '[]',
@@ -333,6 +334,11 @@ class ChronicleDB:
                     "UPDATE worldline_lifetimes SET genesis_parent_id = parent_canon_lifetime "
                     "WHERE genesis_parent_id = ''"
                 )
+        if "experiences_json" not in lifetime_columns:
+            connection.execute(
+                "ALTER TABLE worldline_lifetimes "
+                "ADD COLUMN experiences_json TEXT NOT NULL DEFAULT '[]'"
+            )
 
         binding_columns = {
             row["name"]
@@ -464,11 +470,11 @@ class ChronicleDB:
                 connection.execute(
                     "INSERT INTO worldline_lifetimes(id, worldline_id, seat, controller, status, "
                     "genesis_parent_id, profile_name, profile_metadata_json, genesis_hash, memory_text, memory_hash, "
-                    "knowledge_json, belief_json, authority_json, role_charter_json, plan_json, commitments_json, "
+                    "experiences_json, knowledge_json, belief_json, authority_json, role_charter_json, plan_json, commitments_json, "
                     "resources_json, last_perspective_json, revisits_json, wake_count, lifetime_kind, "
                     "genesis_context_json, profile_state, created_at, updated_at) "
                     "VALUES (:id, :worldline_id, :seat, :controller, :status, :genesis_parent_id, :profile_name, "
-                    ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, :knowledge_json, :belief_json, "
+                    ":profile_metadata_json, :genesis_hash, :memory_text, :memory_hash, :experiences_json, :knowledge_json, :belief_json, "
                     ":authority_json, :role_charter_json, :plan_json, :commitments_json, :resources_json, "
                     ":last_perspective_json, :revisits_json, :wake_count, :lifetime_kind, :genesis_context_json, "
                     ":profile_state, :created_at, :updated_at)",
@@ -486,6 +492,11 @@ class ChronicleDB:
                         "genesis_hash": values_for_lifetime.get("genesis_hash", ""),
                         "memory_text": values_for_lifetime.get("memory_text", ""),
                         "memory_hash": values_for_lifetime.get("memory_hash", ""),
+                        "experiences_json": json.dumps(
+                            values_for_lifetime.get("experiences", []),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
                         "knowledge_json": json.dumps(
                             values_for_lifetime.get("knowledge", []), ensure_ascii=False, sort_keys=True
                         ),
@@ -777,8 +788,13 @@ class ChronicleDB:
 
             for values in lifetime_updates or []:
                 update_values = dict(values)
-                for key in ("knowledge", "beliefs", "authority"):
-                    json_key = f"{key.removesuffix('s')}_json"
+                json_keys = {
+                    "knowledge": "knowledge_json",
+                    "beliefs": "belief_json",
+                    "authority": "authority_json",
+                    "experiences": "experiences_json",
+                }
+                for key, json_key in json_keys.items():
                     if key in update_values and json_key not in update_values:
                         update_values[json_key] = json.dumps(
                             update_values.pop(key), ensure_ascii=False, sort_keys=True
@@ -791,6 +807,7 @@ class ChronicleDB:
                     "profile_metadata_json",
                     "memory_text",
                     "memory_hash",
+                    "experiences_json",
                     "knowledge_json",
                     "belief_json",
                     "authority_json",
@@ -1139,6 +1156,7 @@ class ChronicleDB:
             "knowledge_json",
             "belief_json",
             "authority_json",
+            "experiences_json",
             "genesis_context_json",
             "role_charter_json",
             "plan_json",
@@ -1162,6 +1180,7 @@ class ChronicleDB:
             "genesis_hash",
             "memory_text",
             "memory_hash",
+            "experiences_json",
             "knowledge_json",
             "belief_json",
             "authority_json",

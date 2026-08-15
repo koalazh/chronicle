@@ -8,9 +8,9 @@
 
 ```text
 VolumePack
-  ├─ shared World / Global World Tick
-  ├─ persistent Lifetimes
-  └─ Crisis envelopes
+  ├─ shared Shanhaiguan World / Global World Tick
+  ├─ three persistent Lifetimes
+  └─ one active Crisis envelope
           ↓
 Volume Worldline
           ↓
@@ -43,7 +43,7 @@ Host 拥有现实：时间、来源、位置、路线、消息抵达、权限、
 
 `chronicle/product_projection.py` 是只读 view compiler：它可以读取 Pack、Snapshot、Ledger 和窄的 Runtime read-only invariant，但不能写 DB、推进 World、创建 Wake、调用 Agent、预测结果或持久化 Product truth。无法可靠表达的事实必须少展示，不由 LLM 补写。
 
-`chronicle/product_api.py` 保留路由、编排、Runtime 调用、Assist 调用和错误分类；`chronicle/product_assist.py`（若启用）只提供两个 stateless、bounded、non-authoritative 能力：参考草稿和 0..1 个行动候选。Assist 不拥有 Profile、Session、Memory、MCP、World token、Ledger event 或确认权。
+`chronicle/product_api.py` 保留路由、编排、Runtime 调用、Assist 调用和错误分类；`chronicle/product_assist.py`（若启用）只提供两个 stateless、bounded、non-authoritative 能力：参考草稿和 0..1 个行动候选。主产品前端不自动请求参考草稿；人工判断的可选行动候选有 2 秒上限，超时直接保存用户判断。Assist 不拥有 Profile、Session、Memory、MCP、World token、Ledger event 或确认权。
 
 产品不新增 V8、平行 Runtime、History model、Product Projection persistence、Agent dashboard、Human tool picker、Dynamic Knot、new Wake、new Attention、compatibility/replay runtime 或大型前端框架。前端不能复制 Runtime authority、presence、attention、message、boundary 或隐私规则。
 
@@ -90,7 +90,7 @@ Memory
 
 `VolumeRuntime.create()` 在一个新 Volume Worldline 中建立 Volume genesis、所有 Lifetime genesis、初始 Projection、共享 World、历史 Field Event、危局来源引用、Profile binding metadata 和从 tick `0` 开始的 Ledger/Snapshot。
 
-危局引用先注册为带 Envelope 元数据的 `DORMANT` Instance，再按最早激活 tick、结构性前置条件、参与者和 local horizon 进行确定性 reconcile。当前 `before-shanhaiguan` 与 `nanjing-succession` 在初始 tick eligible；`southern-consolidation` 只有在当前 World 真正形成 shared `nanjing-political-center = FU_RECOGNIZED` 后才激活；潞王承认、争议、碎片化或延期会使其 `SUPPRESSED`，中心仍为 `UNFORMED` 时保持 `DORMANT`。前置条件消失时写入 `SUPPRESSED`，不伪造可玩的危局。
+当前活动 pack 只注册 `before-shanhaiguan`，包含李自成、吴三桂、多尔衮三个主体。旧南方/Nanjing Crisis 目录仍作为历史内容资产保留，但不再进入活动 Volume、Envelope reconcile 或产品投影；前置条件消失时仍由现有机制写入 `SUPPRESSED`，不伪造可玩的危局。
 
 ### Restart reconcile
 
@@ -173,4 +173,4 @@ Human/Hermes 执行顺序、网络 wall time 和模型响应快慢都不能改�
 
 ## 可复核的当前边界
 
-最近一次隔离真实业务记录把六个 Lifetime Profile、fresh Session、frozen Perspective、Attention、Deliberation、消息、Agreement、Operation、Resolution、Archive 和 Seal 关联在同一 Volume 根下；没有新增平行运行时。Seal 后 bindings 为 `REVOKED`，清理只针对该卷册。详细结果和限制见 [当前验收](ACCEPTANCE.md)。
+本轮确定性检查覆盖三主体 Volume、fresh-context restart、Attention/Deliberation、Experience/Reflection、Human handback、Archive 和边界清理；真实 Hermes、浏览器和真人接受度没有在本轮升级为 PASS。详细结果和限制见 [当前验收](ACCEPTANCE.md)。

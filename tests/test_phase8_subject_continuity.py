@@ -95,24 +95,24 @@ def test_lifetime_context_exposes_subject_scoped_affordances(app_config):
     host = ChronicleHost(config)
     runtime = host.volume_runtime
     worldline_id = runtime.create()["worldline"]["id"]
-    runtime.activate_crisis(worldline_id, "nanjing-succession")
+    runtime.activate_crisis(worldline_id, "before-shanhaiguan")
 
-    context = runtime.lifetime_context(worldline_id, "ma-shiying")
-    nanjing = next(
-        item for item in context["active_crisis_context"] if item["crisis_id"] == "nanjing-succession"
+    context = runtime.lifetime_context(worldline_id, "wu-sangui")
+    shanhaiguan = next(
+        item
+        for item in context["active_crisis_context"]
+        if item["crisis_id"] == "before-shanhaiguan"
     )
-    scoped = nanjing["subject_affordances"]
+    scoped = shanhaiguan["subject_affordances"]
 
-    assert "military-backing-report" not in {
+    assert "shanhai-pass-report" in {
         item["id"] for item in scoped["investigations"]
     }
-    assert "claimant-position-report" in {
-        item["id"] for item in scoped["investigations"]
-    }
-    backing = next(
-        item for item in scoped["operations"] if item["id"] == "make_fu_backing_visible"
+    prepare = next(
+        item for item in scoped["operations"] if item["id"] == "prepare_force"
     )
-    assert backing["targets"][0]["options"][0]["id"] == "jiangbei-military-backing"
+    assert prepare["targets"][0]["options"][0]["id"] == "wu-field-force"
+    assert "secure-shanhai-pass" not in {item["id"] for item in scoped["operations"]}
 
 
 def test_evidence_backed_expectation_requires_human_provenance(app_config):

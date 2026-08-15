@@ -149,6 +149,7 @@ def build_current_course(
         "steps": list(intent["steps"]),
         "rationale": str(intent.get("rationale", "")),
         "rationale_source": str(intent.get("rationale_source", "")),
+        "experience_refs": list(intent.get("experience_refs", [])),
         "reconsider_when": list(intent.get("reconsider_when", [])),
         "updated_tick": tick,
     }

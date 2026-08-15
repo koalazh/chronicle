@@ -107,7 +107,7 @@ def _commit_in_order(app_config, suffix: str, stage_order: list[str]):
     intents = {
         "wu-sangui": {
             "type": "message",
-            "recipient": "shi-kefa",
+            "recipient": "dorgon",
             "content": "human staged",
             "delivery_tick": 3,
         },
@@ -149,7 +149,7 @@ def test_pending_moment_does_not_partially_commit_before_all_intents(app_config)
         wu["id"],
         {
             "type": "message",
-            "recipient": "shi-kefa",
+            "recipient": "dorgon",
             "content": "human staged",
             "delivery_tick": 3,
         },

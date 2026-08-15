@@ -466,8 +466,10 @@ def _sync_profile_config(
     path.write_text(yaml.safe_dump(values, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
-def lifetime_profile_name(worldline_id: str, lifetime_id: str) -> str:
-    return f"chronicle-{worldline_id}-{lifetime_id}"
+def lifetime_profile_name(_worldline_id: str, lifetime_id: str) -> str:
+    """Return the canonical V1 Hermes Profile identity for a Lifetime."""
+
+    return lifetime_id
 
 
 def lifetime_world_server_name(worldline_id: str, lifetime_id: str) -> str:
@@ -1071,6 +1073,21 @@ def restore_profile_memory(config: AppConfig, profile: str, existed: bool, text:
         path.write_text(text, encoding="utf-8")
     elif path.exists():
         path.unlink()
+
+
+def append_profile_memory(config: AppConfig, profile: str, block: str) -> None:
+    """Append a small Reflection block to one Lifetime Profile's private memory."""
+
+    text = block.strip()
+    if not text:
+        return
+    path = profile_memory_path(config, profile)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if text in existing:
+        return
+    separator = "\n\n" if existing.strip() else ""
+    path.write_text(f"{existing.rstrip()}{separator}{text}", encoding="utf-8")
 
 
 def _write_gateway_env(config: AppConfig, api_server_key: str) -> Path:

@@ -116,3 +116,4 @@ async def test_world_mcp_exposes_identity_free_v6_tools():
     assert "anyOf" in tools["update_plan"]["properties"]["belief_updates"]["anyOf"][0]["items"]
     assert set(tools["logical_intent"]["required"]) == {"intent", "idempotency_key"}
     assert set(tools["commit_deliberation"]["required"]) == {"outcome", "idempotency_key"}
+    assert "experience_refs" in tools["commit_deliberation"]["properties"]

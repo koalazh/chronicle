@@ -63,21 +63,3 @@ locations:
     x: 91
     y: 30
     kind: pass
-  - id: nanjing
-    display_name: 南京
-    runtime_alias: Southern Capital
-    x: 48
-    y: 82
-    kind: capital
-  - id: fengyang-command
-    display_name: 凤阳军政驻地
-    runtime_alias: Jiangbei Command
-    x: 55
-    y: 72
-    kind: command
-  - id: yangzhou
-    display_name: 扬州
-    runtime_alias: Jiangbei Supervision
-    x: 57
-    y: 77
-    kind: command

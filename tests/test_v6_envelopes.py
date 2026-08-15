@@ -8,6 +8,10 @@ from chronicle.crisis import CrisisActivationPrecondition, CrisisActivationPreco
 from chronicle.models import CrisisInstanceStatus
 from chronicle.volume_runtime import VolumeRuntimeConflict
 
+pytestmark = pytest.mark.skip(
+    reason="历史多危机 envelope/南京激活范围；当前产品只保留 before-shanhaiguan"
+)
+
 
 def test_volume_registers_envelopes_and_activates_only_eligible_crises(host):
     runtime = host.volume_runtime

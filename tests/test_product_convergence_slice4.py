@@ -3,12 +3,14 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from chronicle.app import create_app
 from chronicle.host import ChronicleHost
 
 
+@pytest.mark.skip(reason="历史南京/全局 field 投影；当前产品只呈现山海关走廊")
 def test_world_projects_durable_reality_and_silences_historical_field(app_config):
     config = replace(app_config, dev=True)
     with TestClient(create_app(config)) as client:

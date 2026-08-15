@@ -4,6 +4,7 @@ const INTERNAL_ERROR_MESSAGES = new Map([
   ["there are no due Subject Wakes to freeze", "当前这一刻没有需要你处理的下一步。"],
   ["freeze the current logical moment before staging intent", "当前这一刻还没有可以落笔的下一步。"],
   ["freeze the current logical moment before staging tool", "当前这一刻还没有可以落笔的下一步。"],
+  ["cannot change controller while a Lifetime wake is running", "这一段人生还在处理上一笔事情，请等当前结果回来后再交还。"],
 ]);
 
 const INTERNAL_ERROR_WORDS = /\b(?:Subject|Wake|Profile|MCP|Worldline|Lifetime|logical moment|worldline_id)\b/i;

@@ -178,7 +178,7 @@ V1–V5 的迁移边界、旧数据和验收记录只作为历史归档阅读；
 
 ## 7. 浏览器检查
 
-浏览器验收至少覆盖 1440、1280、768 和 390 宽度：
+浏览器验收至少覆盖 390、639（当前 in-app Browser 默认窄视口）和 1280 宽度；若使用桌面截图，再补充 1440/768：
 
 - Volume、World、Follow、Inhabit、Desk、Leave、Archive、Ending 都能到达；
 - 无横向溢出，World/Follow/Desk/Archive 在手机可读；
@@ -186,12 +186,12 @@ V1–V5 的迁移边界、旧数据和验收记录只作为历史归档阅读；
 - textarea 在 rerender 前被捕获，busy mutation 不能 double-submit；
 - 页面不出现 Agent/Profile/Session/Memory、crisis dashboard、meter 或 AI thinking animation。
 
-最近一次隔离浏览器流程已覆盖页面旅程、Archive、选定 Wu 的判断回看、四种 viewport、no-overflow、内部术语扫描和空 error/warn logs。浏览器工件与真实业务链分层保存，当前结论见 [当前验收](ACCEPTANCE.md)。
+当前已运行新鲜 v13 隔离 in-app Browser 正常流程，receipt 为 [`browser-live-current-v13-handback.md`](/Users/koala/.task-loop/20260814-143711-chronicle-killer-demo/receipts/browser-live-current-v13-handback.md)；另以 v15 receipt [`browser-live-terminal-fault-v15.md`](/Users/koala/.task-loop/20260814-143711-chronicle-killer-demo/receipts/browser-live-terminal-fault-v15.md) 在真实 served Browser 中覆盖 terminal `missing_logical_intent` 的用户向停止/重试路径。两条 receipt 分别记录角色接管、判断、真实交还、世界推进、Archive/回看，以及终端分支的保留判断、阻止推进和明确重试；v12 receipt 另记录同一 served artifact 的 390/639/1280 no-overflow。v15 使用受控本地 fault provider，只证明错误分支的产品投影，不证明正常 Provider 稳定性。不得用 TestClient 或静态检查替代该层证据；当前结论见 [当前验收](ACCEPTANCE.md)。
 
 ## 8. 证据记录
 
 每次验收只保留可复核且不含 Secret 的信息：commit、命令、退出码、validator 摘要、临时资源范围、Profile/Session 数量、事件类型、tick、状态和失败边界。不要保存 API key、Profile token、完整模型 response、private prompt 或原始 `runtime.env`。
 
-最近一次真实 Volume 在独立产品端 `18786`、Gateway `18886` 上完成封存后检查：状态为 `SEALED/ARCHIVED`，六条 binding 为 `REVOKED`，Profile 目录为空，owner 文件不存在，任务端口释放；可恢复的临时目录移入用户 Trash，未写入仓库。未知 Gateway `18851` 未被触碰。
+当前 v13 live receipt 使用新鲜独立 SQLite、Hermes Home 和 loopback 服务，记录了六个完成 wakes、`SEALED/READY`、tick 5、`LIFETIME_LEFT`、协议违规为 0，以及所有 v13 产品请求均为 200；当前 v15 terminal receipt 使用另一套隔离 SQLite/Hermes Home/loopback 服务，记录了真实 Browser 的 `/decision 503`、`/decision/retry 200`、`FAILED/missing_logical_intent` 和协议违规为 0。历史 causal-chain、restart、ablation 仍各自使用独立 receipt，不能合并成单层证明。
 
 更完整的矩阵、计数和已知限制见 [当前验收](ACCEPTANCE.md)；阶段性原始记录见 [历史归档](archive/README.md)。

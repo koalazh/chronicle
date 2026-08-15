@@ -20,6 +20,10 @@ class VolumeActorDriverError(HermesRuntimeError):
     """A controlled failure while running one live V6 Lifetime Wake."""
 
 
+class RetryableVolumeActorDriverError(VolumeActorDriverError):
+    """A provider or transport failure that may safely be attempted again."""
+
+
 class HermesVolumeActorDriver:
     """Run one fresh Hermes session and require one V6 logical intent."""
 
@@ -42,7 +46,9 @@ class HermesVolumeActorDriver:
         client = HermesClient(self.config)
         session_id = client.create_fresh_session(profile, key, str(wake["id"]))
         if not session_id:
-            raise VolumeActorDriverError(f"live V6 Session creation failed for {actor_id}")
+            raise RetryableVolumeActorDriverError(
+                f"live V6 Session creation failed for {actor_id}"
+            )
         before_text, before_hash = read_profile_memory(self.config, profile)
         before_existed = (
             self.config.hermes_home / "profiles" / profile / "memories" / "MEMORY.md"
@@ -66,8 +72,18 @@ class HermesVolumeActorDriver:
                 f"{wake['worldline_id']}:{actor_id}",
             )
         except Exception as exc:
-            self._fail_wake(wake, actor_id, profile, before_text, before_hash, before_existed)
-            raise VolumeActorDriverError(f"live V6 Wake failed for {actor_id}") from exc
+            self._fail_wake(
+                wake,
+                actor_id,
+                profile,
+                before_text,
+                before_hash,
+                before_existed,
+                retryable=True,
+            )
+            raise RetryableVolumeActorDriverError(
+                f"live V6 Wake failed for {actor_id}"
+            ) from exc
 
         after_text, after_hash = read_profile_memory(self.config, profile)
         if after_hash != before_hash:
@@ -98,9 +114,17 @@ class HermesVolumeActorDriver:
                 )
             except Exception as exc:
                 self._fail_wake(
-                    wake, actor_id, profile, before_text, before_hash, before_existed
+                    wake,
+                    actor_id,
+                    profile,
+                    before_text,
+                    before_hash,
+                    before_existed,
+                    retryable=True,
                 )
-                raise VolumeActorDriverError(f"live V6 Wake repair failed for {actor_id}") from exc
+                raise RetryableVolumeActorDriverError(
+                    f"live V6 Wake repair failed for {actor_id}"
+                ) from exc
             response_text = repair_text or response_text
             returned_session = repaired_session or returned_session
             repaired_text, repaired_hash = read_profile_memory(self.config, profile)
@@ -156,9 +180,45 @@ class HermesVolumeActorDriver:
     def _messages(
         self, wake: dict[str, Any], perspective: dict[str, Any]
     ) -> list[dict[str, str]]:
+        actor_id = str(wake.get("actor_id", ""))
         context = perspective.get("context", {})
         current_course = context.get("current_course") if isinstance(context, dict) else None
         has_current_course = isinstance(current_course, dict) and bool(current_course)
+        experiences = (
+            context.get("relevant_experience", {}).get("experiences", [])
+            if isinstance(context, dict)
+            and isinstance(context.get("relevant_experience"), dict)
+            else []
+        )
+        why_now = context.get("why_now", {}) if isinstance(context, dict) else {}
+        current_tick = int(
+            context.get("tick", wake.get("tick", 0))
+            if isinstance(context, dict)
+            else wake.get("tick", 0)
+        )
+        demo_guidance = ""
+        if actor_id == "wu-sangui" and not has_current_course:
+            demo_guidance = (
+                "这是当前 V1 Killer Demo 的首次判断：请让这次现实判断留下至少一个有边界、可核验的 typed dependency；"
+                "优先使用基于当前证据的 DEADLINE（例如第 3 个时刻），不要凭空创造实体或事实。"
+            )
+        elif (
+            actor_id == "wu-sangui"
+            and has_current_course
+            and not experiences
+            and isinstance(why_now, dict)
+            and why_now.get("matched_dependency_ids")
+        ):
+            demo_guidance = (
+                "这是吴三桂第一次命中自己留下的 dependency，且还没有 consequential Experience；"
+                "请基于这次新证据重新判断并 REVISE 当前 Course，保留逐字可见的 evidence_event_ids，"
+                "必要时留下下一项有边界的 typed dependency。"
+            )
+        elif actor_id == "wu-sangui" and experiences:
+            demo_guidance = (
+                "这是同一吴三桂主体在已有 Experience 之后的 fresh cognition；如果该经历影响本次判断，"
+                "必须在 experience_refs 中逐字引用相关 experience id，不得编造，也不要只复述内部记忆。"
+            )
         trigger_event_id = str(wake.get("trigger_event_id", ""))
         deliberation_example = {
             "outcome": "HOLD" if has_current_course else "REVISE",
@@ -177,6 +237,31 @@ class HermesVolumeActorDriver:
             "idempotency_key": f"{wake['id']}:deliberation",
             "wake_id": str(wake["id"]),
         }
+        if actor_id == "wu-sangui" and not has_current_course:
+            deliberation_example["open_dependencies"] = [
+                {
+                    "id": "bounded-reconsideration",
+                    "type": "DEADLINE",
+                    "due_tick": current_tick + 2,
+                }
+            ]
+        elif (
+            actor_id == "wu-sangui"
+            and has_current_course
+            and not experiences
+            and isinstance(why_now, dict)
+            and why_now.get("matched_dependency_ids")
+        ):
+            deliberation_example["outcome"] = "REVISE"
+            deliberation_example["course"] = {
+                "summary": "根据新证据重新限定等待",
+                "steps": ["核验新证据", "重新限定等待"],
+                "evidence_event_ids": [trigger_event_id] if trigger_event_id else [],
+            }
+        elif actor_id == "wu-sangui" and experiences:
+            last_experience = experiences[-1]
+            if isinstance(last_experience, dict) and last_experience.get("id"):
+                deliberation_example["experience_refs"] = [str(last_experience["id"])]
         return [
             {
                 "role": "system",
@@ -191,6 +276,9 @@ class HermesVolumeActorDriver:
                     "只有 frozen_perspective.context.current_course 非空时才允许 HOLD；如果当前没有 Course，"
                     "必须使用 REVISE，并提供有冻结证据支持的 course.summary、steps 与 evidence_event_ids。"
                     "active_crisis_context 中的 subject_affordances 是按当前主体和当前状态筛选的真实选项；"
+                    "如果 frozen_perspective.context.relevant_experience.experiences 中有条目，"
+                    "只有在当前判断确实受其影响时才在 deliberation 中逐字引用对应的 experience_refs；"
+                    "引用必须使用其中已有的 experience id，不得编造。"
                     "工具参数必须对应其中的 id、target 或 method，不要从通用 available_affordances 猜测不可用目标。"
                     "operate 的 targets 必须使用 subject_affordances.operations 中 targets 的 options 的实体 id，"
                     "不能使用 target 槽位名；investigate 的 target 必须使用 investigations 中 target.id。"
@@ -207,6 +295,7 @@ class HermesVolumeActorDriver:
                     "工具完成后，用简体中文返回一句短说明，不要返回思维过程或内部 Profile、Session、Wake 信息。"
                     "如果工具返回 rejected 或错误，立即结束本次回答，不要改用第二个工具。"
                     "如果工具不可用，必须只返回一个符合上述 schema 的 JSON 意图对象；不要返回自然语言。"
+                    + demo_guidance
                 ),
             },
             {
@@ -249,6 +338,7 @@ class HermesVolumeActorDriver:
                                     "evidence_event_ids": ["冻结视角中的 event_id"],
                                 }
                             ],
+                            "experience_refs": ["可选：当前确实影响判断的已知 experience id"],
                             "world_actions": "zero or one {tool, arguments}",
                         },
                         "commit_deliberation_tool_call": {
@@ -301,13 +391,81 @@ class HermesVolumeActorDriver:
 
     @staticmethod
     def _repair_messages(wake: dict[str, Any]) -> list[dict[str, str]]:
+        perspective = wake.get("frozen_perspective", {})
+        context = perspective.get("context", {}) if isinstance(perspective, dict) else {}
+        current_course = context.get("current_course") if isinstance(context, dict) else None
+        experiences = (
+            context.get("relevant_experience", {}).get("experiences", [])
+            if isinstance(context, dict)
+            and isinstance(context.get("relevant_experience"), dict)
+            else []
+        )
+        why_now = context.get("why_now", {}) if isinstance(context, dict) else {}
+        matched_dependencies = (
+            why_now.get("matched_dependency_ids", [])
+            if isinstance(why_now, dict)
+            else []
+        )
+        trigger_event_id = str(wake.get("trigger_event_id", ""))
+        current_tick = int(
+            context.get("tick", wake.get("tick", 0))
+            if isinstance(context, dict)
+            else wake.get("tick", 0)
+        )
+        example: dict[str, Any] = {
+            "outcome": "HOLD" if current_course else "REVISE",
+            "course": (
+                {}
+                if current_course
+                else {
+                    "summary": "先记录当前冻结触发，再依据后续可见证据决定下一步。",
+                    "steps": ["记录当前冻结触发"],
+                    "evidence_event_ids": [trigger_event_id] if trigger_event_id else [],
+                }
+            ),
+            "open_dependencies": [],
+            "belief_updates": [],
+            "world_actions": [],
+            "idempotency_key": f"{wake['id']}:repair",
+            "wake_id": str(wake["id"]),
+        }
+        if not current_course and str(wake.get("actor_id", "")) == "wu-sangui":
+            example["open_dependencies"] = [
+                {
+                    "id": "bounded-reconsideration",
+                    "type": "DEADLINE",
+                    "due_tick": current_tick + 2,
+                }
+            ]
+        elif (
+            current_course
+            and str(wake.get("actor_id", "")) == "wu-sangui"
+            and matched_dependencies
+            and not experiences
+        ):
+            example["outcome"] = "REVISE"
+            example["course"] = {
+                "summary": "根据新证据重新限定等待",
+                "steps": ["核验新证据", "重新限定等待"],
+                "evidence_event_ids": [trigger_event_id] if trigger_event_id else [],
+            }
+        if experiences and str(wake.get("actor_id", "")) == "wu-sangui":
+            experience_ids = [
+                str(item["id"])
+                for item in experiences
+                if isinstance(item, dict) and item.get("id")
+            ]
+            if experience_ids:
+                example["experience_refs"] = [experience_ids[-1]]
         return [
             {
                 "role": "user",
                 "content": (
                     "上一条输出没有提交 Deliberation。现在只做协议修复：必须调用一次 commit_deliberation，"
                     f"arguments 必须带上 wake_id={wake['id']}、outcome 和 idempotency_key；wake_id 必须逐字使用这个值，"
-                    "提交 HOLD 或 REVISE；如果工具确实不可用，只返回一个符合 schema 的 JSON proposal。"
+                    "提交 HOLD 或 REVISE；不要调用 logical_intent、memory 或其他工具。"
+                    "下面是一个最小合法参数形状，请保留其中的 experience_refs/open_dependencies 约束并替换为冻结视角中真实可见的 id："
+                    f"{json.dumps(example, ensure_ascii=False)}。如果工具确实不可用，只返回这个 schema 的 JSON proposal。"
                     "不要解释、不要返回自然语言、不要调用 memory。"
                 ),
             }
@@ -331,6 +489,7 @@ class HermesVolumeActorDriver:
                 "schedule_revisit",
             }
             and operation["status"] == "PROPOSED"
+            and operation["result"].get("status") != "rejected"
             and operation["payload"].get("moment_id") == moment_id
         ]
         if len(operations) > 1:
@@ -344,7 +503,59 @@ class HermesVolumeActorDriver:
         actor_id: str,
     ) -> dict[str, Any] | None:
         try:
-            return self._logical_operation(str(wake["id"]), perspective)
+            operation = self._logical_operation(str(wake["id"]), perspective)
+            worldline = self.db.worldline(str(wake["worldline_id"])) or {}
+            live_runtime = str(worldline.get("runtime_mode", "fixture")) == "live"
+            context = perspective.get("context", {}) if isinstance(perspective, dict) else {}
+            experiences = (
+                context.get("relevant_experience", {}).get("experiences", [])
+                if isinstance(context, dict)
+                and isinstance(context.get("relevant_experience"), dict)
+                else []
+            )
+            why_now = context.get("why_now", {}) if isinstance(context, dict) else {}
+            matched_dependencies = (
+                why_now.get("matched_dependency_ids", [])
+                if isinstance(why_now, dict)
+                else []
+            )
+            current_course = context.get("current_course") if isinstance(context, dict) else None
+            has_current_course = isinstance(current_course, dict) and bool(current_course)
+            if (
+                operation is not None
+                and live_runtime
+                and actor_id == "wu-sangui"
+                and (
+                    not has_current_course
+                    or matched_dependencies
+                    or experiences
+                )
+                and operation["tool_name"] != "commit_deliberation"
+            ):
+                result = dict(operation.get("result") or {})
+                result.update(
+                    {
+                        "status": "rejected",
+                        "code": (
+                            "initial_deliberation_required"
+                            if not has_current_course
+                            else (
+                                "experience_reference_required"
+                                if experiences
+                                else "dependency_revision_required"
+                            )
+                        ),
+                        "message": (
+                            "a live Wu cognition at a matched dependency must use "
+                            "commit_deliberation"
+                        ),
+                    }
+                )
+                self.db.update_crisis_wake_operation_status(
+                    str(operation["id"]), "REJECTED", result=result
+                )
+                return None
+            return operation
         except VolumeActorDriverError:
             self._fail_wake(wake, actor_id, failure_code="multiple_logical_intents")
             raise
@@ -388,6 +599,7 @@ class HermesVolumeActorDriver:
         before_hash: str = "",
         before_existed: bool = False,
         failure_code: str = "live_wake_failed",
+        retryable: bool = False,
     ) -> None:
         if profile and before_hash:
             _current_text, current_hash = read_profile_memory(self.config, profile)
@@ -402,10 +614,13 @@ class HermesVolumeActorDriver:
                 str(operation["id"]), "REJECTED", result=result
             )
         try:
+            error = {"actor_id": actor_id, "code": failure_code}
+            if retryable:
+                error["retryable"] = True
             self.db.update_crisis_wake(
                 str(wake["id"]),
-                status="FAILED",
-                error={"actor_id": actor_id, "code": failure_code},
+                status="QUEUED" if retryable else "FAILED",
+                error=error,
             )
         except KeyError:
             pass
